@@ -2,6 +2,7 @@
 
 use super::Formatter;
 use crate::model::{Config, Entry, EntryType, ShellType};
+use crate::utils::dependency;
 
 /// Bash configuration file formatter
 pub struct BashFormatter;
@@ -112,9 +113,20 @@ impl Formatter for BashFormatter {
             }
 
             // Sort grouped entries
-            for type_entries in grouped.values_mut() {
+            for (entry_type, type_entries) in grouped.iter_mut() {
                 if config.format.sort_alphabetically {
-                    type_entries.sort_by(|a, b| a.name.cmp(&b.name));
+                    if *entry_type == EntryType::EnvVar {
+                        // Use topological sort for environment variables to respect dependencies
+                        let sorted = dependency::topological_sort(type_entries, true);
+                        *type_entries = sorted;
+                    } else {
+                        // Simple alphabetical sort for other types
+                        type_entries.sort_by(|a, b| a.name.cmp(&b.name));
+                    }
+                } else if *entry_type == EntryType::EnvVar {
+                    // Even without alphabetical sorting, preserve dependency order
+                    let sorted = dependency::topological_sort(type_entries, false);
+                    *type_entries = sorted;
                 }
             }
 
