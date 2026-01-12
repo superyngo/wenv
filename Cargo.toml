@@ -1,0 +1,49 @@
+[package]
+name = "wenv"
+version = "0.1.0"
+edition = "2021"
+authors = ["wenv developers"]
+description = "Shell configuration file manager - Cross-platform Shell RC file management tool"
+license = "MIT"
+repository = "https://github.com/yourname/wenv"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Regular expressions
+regex = "1"
+lazy_static = "1"
+
+# Path handling
+dirs = "5"
+
+# Interactive prompts
+dialoguer = "0.11"
+
+# Terminal output
+colored = "2"
+
+# TUI framework
+ratatui = "0.26"
+crossterm = "0.27"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Date/Time
+chrono = "0.4"
+
+# HTTP requests (URL import) - using rustls to avoid OpenSSL dependency
+reqwest = { version = "0.11", features = ["blocking", "rustls-tls"], default-features = false }
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"

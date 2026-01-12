@@ -1,0 +1,43 @@
+# Sample bashrc for testing
+# This is a test configuration file
+
+# Git aliases
+alias gs='git status'
+alias gd='git diff'
+alias gc='git commit'
+alias gp='git push'
+
+# Navigation aliases
+alias ll='ls -la'
+alias la='ls -A'
+alias l='ls -CF'
+
+# Editor settings
+export EDITOR=nvim
+export VISUAL=nvim
+
+# Path configuration
+export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+
+# Custom environment
+export MY_PROJECT_DIR="$HOME/projects"
+
+# Load additional configuration
+source ~/.bash_aliases
+. ~/.bash_functions
+
+# Greeting function
+greet() {
+    echo "Hello, $1!"
+}
+
+# Multi-line function
+mkcd() {
+    mkdir -p "$1"
+    cd "$1"
+}
+
+# Function with complex body
+git_branch() {
+    git branch 2>/dev/null | grep '^*' | colrm 1 2
+}
