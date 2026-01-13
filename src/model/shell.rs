@@ -33,7 +33,9 @@ impl ShellType {
         {
             if env::var("COMSPEC").is_ok() {
                 // On Windows, check if PowerShell is available
-                return Some(ShellType::PowerShell);
+                Some(ShellType::PowerShell)
+            } else {
+                None
             }
         }
 
