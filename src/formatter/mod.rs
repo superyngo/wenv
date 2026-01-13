@@ -1,6 +1,7 @@
 //! Formatter module for shell configuration files
 
 mod bash;
+pub mod indent;
 mod pwsh;
 
 pub use bash::BashFormatter;

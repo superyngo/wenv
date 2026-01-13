@@ -5,11 +5,21 @@ use crate::model::{Config, Entry, EntryType, ShellType};
 use crate::utils::dependency;
 
 /// Bash configuration file formatter
-pub struct BashFormatter;
+pub struct BashFormatter {
+    /// Indentation style (e.g., "    " for 4 spaces, "\t" for tab)
+    indent_style: String,
+}
 
 impl BashFormatter {
     pub fn new() -> Self {
-        Self
+        Self {
+            indent_style: "    ".to_string(), // Default to 4 spaces
+        }
+    }
+
+    /// Create a formatter with a specific indent style
+    pub fn with_indent_style(indent_style: String) -> Self {
+        Self { indent_style }
     }
 
     fn format_alias(&self, entry: &Entry) -> String {
@@ -40,14 +50,38 @@ impl BashFormatter {
         format!("source {}", entry.value)
     }
 
-    fn format_function(&self, entry: &Entry) -> String {
-        // If we have raw_line, preserve original format
+    fn format_function(&self, entry: &Entry, indent_style: &str) -> String {
+        // If we have raw_line, use it but apply formatting to the body
         if let Some(ref raw) = entry.raw_line {
-            return raw.clone();
+            return self.format_raw_function(raw, indent_style);
         }
 
-        // Otherwise, format as standard function
-        format!("function {}() {{\n{}\n}}", entry.name, entry.value)
+        // Build from value (function body only)
+        // Apply indentation to body and wrap in function declaration
+        let body = super::indent::format_body_preserve_relative(&entry.value, indent_style);
+        format!("{}() {{\n{}\n}}", entry.name, body)
+    }
+
+    /// Format a raw function definition, applying indentation to the body
+    fn format_raw_function(&self, raw: &str, indent_style: &str) -> String {
+        let lines: Vec<&str> = raw.lines().collect();
+
+        if lines.len() <= 2 {
+            // Single line or minimal function, return as-is
+            return raw.to_string();
+        }
+
+        // Extract body (lines between first and last)
+        let body = lines[1..lines.len() - 1].join("\n");
+        let formatted_body = super::indent::format_body_preserve_relative(&body, indent_style);
+
+        // Reconstruct with formatted body
+        format!(
+            "{}\n{}\n{}",
+            lines[0],
+            formatted_body,
+            lines.last().unwrap()
+        )
     }
 }
 
@@ -184,7 +218,7 @@ impl Formatter for BashFormatter {
             EntryType::Alias => self.format_alias(entry),
             EntryType::EnvVar => self.format_export(entry),
             EntryType::Source => self.format_source(entry),
-            EntryType::Function => self.format_function(entry),
+            EntryType::Function => self.format_function(entry, &self.indent_style),
             EntryType::Code | EntryType::Comment => entry
                 .raw_line
                 .clone()
