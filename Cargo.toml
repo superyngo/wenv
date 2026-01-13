@@ -2,10 +2,10 @@
 name = "wenv"
 version = "0.1.0"
 edition = "2021"
-authors = ["wenv developers"]
+authors = ["wen"]
 description = "Shell configuration file manager - Cross-platform Shell RC file management tool"
 license = "MIT"
-repository = "https://github.com/yourname/wenv"
+repository = "https://github.com/superyngo/wenv"
 
 [dependencies]
 # CLI

@@ -4,16 +4,16 @@ use anyhow::Result;
 use colored::Colorize;
 use dialoguer::{Confirm, Select};
 
-use super::CommandContext;
 use crate::backup::BackupManager;
 use crate::cli::args::ConflictStrategy;
+use crate::cli::context::Context;
 use crate::formatter::get_formatter;
 use crate::parser::get_parser;
 use crate::utils::http::{fetch_url, is_url};
 use crate::utils::path::expand_tilde;
 
-/// Execute the import command
-pub fn execute(ctx: &CommandContext, source: &str, yes: bool) -> Result<()> {
+/// Execute the import action
+pub fn execute(ctx: &Context, source: &str, yes: bool) -> Result<()> {
     // Fetch content from source
     let content = if is_url(source) {
         println!("Fetching from URL: {}", source.cyan());
@@ -151,7 +151,6 @@ pub fn execute(ctx: &CommandContext, source: &str, yes: bool) -> Result<()> {
                     continue;
                 }
                 "overwrite" => {
-                    // Replace in content (simplified - append and handle duplicates later)
                     overwritten += 1;
                 }
                 _ => {

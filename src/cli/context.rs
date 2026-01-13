@@ -1,16 +1,4 @@
-//! CLI command implementations
-
-pub mod add;
-pub mod backup;
-pub mod check;
-pub mod edit;
-pub mod export;
-pub mod format;
-pub mod import;
-pub mod info;
-pub mod list;
-pub mod remove;
-pub mod tui_cmd;
+//! Command execution context
 
 use anyhow::Result;
 use colored::Colorize;
@@ -22,7 +10,7 @@ use crate::model::{Config, ShellType};
 use crate::utils::shell_detect::get_shell_type;
 
 /// Common context for command execution
-pub struct CommandContext {
+pub struct Context {
     pub config: Config,
     pub shell_type: ShellType,
     pub config_file: PathBuf,
@@ -30,16 +18,12 @@ pub struct CommandContext {
     pub messages: &'static Messages,
 }
 
-impl CommandContext {
+impl Context {
     pub fn from_cli(cli: &Cli) -> Result<Self> {
         let config = crate::config::load_or_create_config()?;
-
-        // Initialize i18n based on config
         let lang: Language = config.ui.language.parse().unwrap_or_default();
         let messages = init_messages(lang);
-
         let shell_type = get_shell_type(cli.shell.map(|s| s.into()), cli.file.as_deref());
-
         let config_file = cli
             .file
             .clone()
@@ -90,36 +74,5 @@ impl CommandContext {
                 .replace("{}", &reload_cmd)
                 .dimmed()
         );
-    }
-
-    /// Get a BackupManager instance
-    pub fn get_backup_manager(&self) -> crate::backup::BackupManager {
-        crate::backup::BackupManager::new(self.shell_type, &self.config)
-    }
-
-    /// Find an entry by type and name
-    pub fn find_entry<'a>(
-        &self,
-        entries: &'a [crate::model::Entry],
-        entry_type: crate::model::EntryType,
-        name: &str,
-    ) -> Option<&'a crate::model::Entry> {
-        entries
-            .iter()
-            .find(|e| e.entry_type == entry_type && e.name == name)
-    }
-
-    /// Color an entry type for display
-    pub fn color_entry_type(&self, entry_type: crate::model::EntryType) -> colored::ColoredString {
-        use crate::model::EntryType;
-        let type_str = format!("{}", entry_type);
-        match entry_type {
-            EntryType::Alias => type_str.green(),
-            EntryType::Function => type_str.blue(),
-            EntryType::EnvVar => type_str.yellow(),
-            EntryType::Source => type_str.magenta(),
-            EntryType::Code => type_str.cyan(),
-            EntryType::Comment => type_str.white(),
-        }
     }
 }

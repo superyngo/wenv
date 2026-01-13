@@ -1,155 +1,44 @@
-//! CLI argument definitions using Clap
+//! CLI argument definitions
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "wenv")]
 #[command(about = "Shell configuration file manager")]
-#[command(version)]
-#[command(author)]
+#[command(version, author)]
 pub struct Cli {
-    #[command(subcommand)]
-    pub command: Commands,
-
     /// Specify configuration file path
-    #[arg(short, long, global = true)]
+    #[arg(short, long)]
     pub file: Option<PathBuf>,
 
     /// Specify shell type
-    #[arg(short, long, global = true)]
+    #[arg(short = 'S', long)]
     pub shell: Option<ShellArg>,
 
-    /// Conflict handling strategy
-    #[arg(long, global = true, default_value = "ask")]
+    /// Conflict handling strategy (for import)
+    #[arg(long, default_value = "ask")]
     pub on_conflict: ConflictStrategy,
-}
 
-#[derive(Subcommand)]
-pub enum Commands {
-    /// List entries
-    #[command(visible_alias = "ls")]
-    List {
-        /// Entry type: alias|func|env|source (a/f/e/s)
-        entry_type: Option<EntryTypeArg>,
-    },
+    /// Import entries from file or URL
+    #[arg(short, long, value_name = "SOURCE", group = "action")]
+    pub import: Option<String>,
 
-    /// Check for issues
-    Check,
+    /// Export entries to file
+    #[arg(short, long, value_name = "OUTPUT", group = "action")]
+    pub export: Option<PathBuf>,
 
-    /// Show entry details
-    #[command(visible_alias = "i")]
-    Info {
-        /// Entry type: a/f/e/s
-        entry_type: EntryTypeArg,
-        /// Entry name
-        name: String,
-    },
+    /// Open source file in $EDITOR
+    #[arg(short, long, group = "action")]
+    pub source: bool,
 
-    /// Add entry
-    Add {
-        #[command(subcommand)]
-        add_command: AddCommands,
-    },
+    /// Skip confirmation prompts (for import)
+    #[arg(short, long)]
+    pub yes: bool,
 
-    /// Remove entry
-    #[command(visible_alias = "rm")]
-    Remove {
-        /// Entry type: a/f/e/s
-        entry_type: EntryTypeArg,
-        /// Entry name
-        name: String,
-    },
-
-    /// Edit entry
-    /// Use "edit ." to open config file in editor
-    Edit {
-        /// Entry type: a/f/e/s, or use "." to edit config file directly
-        entry_type: Option<String>,
-        /// Entry name
-        name: Option<String>,
-    },
-
-    /// Import entries
-    Import {
-        /// File path or URL
-        source: String,
-        /// Skip preview confirmation
-        #[arg(short, long)]
-        yes: bool,
-    },
-
-    /// Export entries
-    Export {
-        /// Entry type: a/f/e/s
-        entry_type: Option<EntryTypeArg>,
-        /// Output file
-        #[arg(short, long)]
-        output: PathBuf,
-    },
-
-    /// Format configuration file
-    Format {
-        /// Dry run - show changes without writing
-        #[arg(long)]
-        dry_run: bool,
-    },
-
-    /// Backup management
-    Backup {
-        #[command(subcommand)]
-        backup_command: BackupCommands,
-    },
-
-    /// Interactive TUI mode
-    Tui,
-}
-
-#[derive(Subcommand)]
-pub enum AddCommands {
-    /// Add alias
-    #[command(visible_alias = "a")]
-    Alias {
-        /// NAME=VALUE format
-        definition: String,
-    },
-    /// Add function
-    #[command(visible_alias = "f")]
-    Func {
-        /// Function name
-        name: String,
-        /// Function body
-        body: String,
-    },
-    /// Add environment variable
-    #[command(visible_alias = "e")]
-    Env {
-        /// NAME=VALUE format
-        definition: String,
-    },
-    /// Add source
-    #[command(visible_alias = "s")]
-    Source {
-        /// File path
-        path: String,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum BackupCommands {
-    /// List backups
-    List,
-    /// Restore backup
-    Restore {
-        /// Backup ID
-        id: String,
-    },
-    /// Clean old backups
-    Clean {
-        /// Number to keep
-        #[arg(long, default_value = "20")]
-        keep: usize,
-    },
+    /// Filter by entry type (for export)
+    #[arg(short, long)]
+    pub r#type: Option<EntryTypeArg>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -192,25 +81,6 @@ impl From<EntryTypeArg> for crate::model::EntryType {
             EntryTypeArg::Source => crate::model::EntryType::Source,
             EntryTypeArg::Code => crate::model::EntryType::Code,
             EntryTypeArg::Comment => crate::model::EntryType::Comment,
-        }
-    }
-}
-
-impl std::str::FromStr for EntryTypeArg {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "alias" | "a" => Ok(EntryTypeArg::Alias),
-            "func" | "function" | "f" => Ok(EntryTypeArg::Func),
-            "env" | "envvar" | "e" => Ok(EntryTypeArg::Env),
-            "source" | "s" => Ok(EntryTypeArg::Source),
-            "code" | "c" => Ok(EntryTypeArg::Code),
-            "comment" | "cm" => Ok(EntryTypeArg::Comment),
-            _ => Err(format!(
-                "Invalid entry type '{}'. Must be one of: alias (a), func (f), env (e), source (s), code (c), comment (cm)",
-                s
-            )),
         }
     }
 }

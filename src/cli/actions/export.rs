@@ -4,17 +4,13 @@ use anyhow::Result;
 use colored::Colorize;
 use std::path::PathBuf;
 
-use super::CommandContext;
 use crate::cli::args::EntryTypeArg;
+use crate::cli::context::Context;
 use crate::formatter::get_formatter;
 use crate::model::EntryType;
 
-/// Execute the export command
-pub fn execute(
-    ctx: &CommandContext,
-    entry_type: Option<EntryTypeArg>,
-    output: &PathBuf,
-) -> Result<()> {
+/// Execute the export action
+pub fn execute(ctx: &Context, entry_type: Option<EntryTypeArg>, output: &PathBuf) -> Result<()> {
     let parse_result = ctx.parse_config_file()?;
 
     // Filter entries if type specified
