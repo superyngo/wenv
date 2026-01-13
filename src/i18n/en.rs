@@ -103,7 +103,7 @@ pub fn messages() -> &'static Messages {
         tui_help_quit: "Quit",
 
         // TUI status bar
-        tui_status_normal: "[Up/Down]Navigate [Home/End]Jump [PgUp/PgDn]Page [Enter/i]Info [d]Delete [n]New [r]Rename [e]Edit [c]Check [f]Format [?]Help [q/Esc]Quit",
+        tui_status_normal: "[Up/Down]Navigate [Home/End]Jump [PgUp/PgDn]Page [Enter/i]Info [d]Delete [n]New [r]Rename [e]Edit [f]Format [?]Help [q/Esc]Quit",
         tui_status_detail: "[Enter/i/q/Esc]Close",
         tui_status_help: "[q/Esc]Close",
         tui_status_confirm_delete: "[y]Yes [n]No [Esc]Cancel",

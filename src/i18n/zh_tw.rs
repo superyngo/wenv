@@ -103,7 +103,7 @@ pub fn messages() -> &'static Messages {
         tui_help_quit: "退出",
 
         // TUI status bar
-        tui_status_normal: "[上/下]導航 [Home/End]跳至首尾 [PgUp/PgDn]翻頁 [Enter/i]詳情 [d]刪除 [n]新增 [r]重命名 [e]編輯 [c]檢查 [f]格式化 [?]說明 [q/Esc]退出",
+        tui_status_normal: "[上/下]導航 [Home/End]跳至首尾 [PgUp/PgDn]翻頁 [Enter/i]詳情 [d]刪除 [n]新增 [r]重命名 [e]編輯 [f]格式化 [?]說明 [q/Esc]退出",
         tui_status_detail: "[Enter/i/q/Esc]關閉",
         tui_status_help: "[q/Esc]關閉",
         tui_status_confirm_delete: "[y]是 [n]否 [Esc]取消",

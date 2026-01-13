@@ -56,6 +56,12 @@ impl ShellType {
                 .unwrap_or_else(|| PathBuf::from("~"))
                 .join(".bashrc"),
             ShellType::PowerShell => {
+                // Prioritize $PROFILE environment variable (only available in PowerShell sessions)
+                if let Ok(profile_path) = env::var("PROFILE") {
+                    return PathBuf::from(profile_path);
+                }
+
+                // Fallback to standard paths
                 #[cfg(windows)]
                 {
                     dirs::document_dir()

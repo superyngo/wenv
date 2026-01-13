@@ -139,8 +139,28 @@ The default TUI interface provides:
 - **Edit** / **编辑**: Modify entries directly
 - **Add** / **添加**: Create new entries
 - **Delete** / **删除**: Remove unwanted entries
-- **Check** / **检查**: Validate for duplicates and syntax errors
+- **Copy/Paste** / **复制/粘贴**: Copy entries with Ctrl+C and paste with Ctrl+V
+- **Format** / **格式化**: Auto-format with preview and confirmation
 - **Save** / **保存**: Apply changes to configuration file (with automatic backup)
+
+### Format Operation / 格式化操作
+
+The format function (press `f` in TUI) performs the following operations with a preview before applying:  
+格式化功能（TUI 中按 `f`）在应用前提供预览，执行以下操作：
+
+| Operation / 操作 | Description / 说明 |
+|------------------|-------------------|
+| **Preview changes** / **预览变更** | Shows a summary of all changes before applying / 在应用前显示所有变更摘要 |
+| **Duplicate detection** / **重复检测** | Warns about duplicate entries / 警告重复条目 |
+| **PATH merging** / **PATH 合并** | Merges multiple PATH definitions into one / 将多个 PATH 定义合并为一个 |
+| **Group by type** / **按类型分组** | Groups entries at their first occurrence position / 在首次出现位置对条目分组 |
+| **Alphabetical sort** / **字母排序** | Sorts entries within groups / 组内条目按字母顺序排序 |
+| **Dependency ordering** / **依赖排序** | Sorts environment variables by dependency (topological sort) / 环境变量按依赖关系排序 |
+
+**Usage / 使用方法:**
+1. Press `f` in TUI to start format / 在 TUI 中按 `f` 开始格式化
+2. Review the preview showing all changes / 查看显示所有变更的预览
+3. Press `y` to apply or `n` to cancel / 按 `y` 应用或 `n` 取消
 
 ### Quick Actions / 快速操作
 
@@ -204,6 +224,10 @@ wenv --version
 ---
 
 ## Shell Support / Shell 支持
+
+> **Note**: wenv currently supports **Bash** and **PowerShell** only. Other shells (zsh, fish, etc.) are not yet supported.
+>
+> **注意**: wenv 目前**仅支援 Bash 和 PowerShell**。其他 shell（zsh、fish 等）尚未支援。
 
 ### Bash
 

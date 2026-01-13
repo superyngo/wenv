@@ -25,6 +25,7 @@ pub enum AppMode {
     ShowingHelp,
     ConfirmDelete,
     ConfirmQuit,   // Confirm quit with unsaved changes
+    ConfirmFormat, // Confirm format with preview
     SelectingType, // For [a]Add - selecting entry type
     Editing,       // Unified editing mode
     Moving,        // Moving entry up/down
@@ -90,6 +91,24 @@ pub struct EditState {
     pub scroll_offset: usize,   // Scroll offset for value display
 }
 
+/// Format preview information
+#[derive(Debug, Clone)]
+pub struct FormatPreview {
+    pub summary: Vec<String>,      // Summary lines to display
+    pub formatted_content: String, // Full formatted content ready to apply
+    pub scroll_offset: usize,      // Scroll offset for preview display
+}
+
+impl FormatPreview {
+    pub fn new(summary: Vec<String>, formatted_content: String) -> Self {
+        Self {
+            summary,
+            formatted_content,
+            scroll_offset: 0,
+        }
+    }
+}
+
 /// TUI Application state
 pub struct TuiApp {
     // State
@@ -111,6 +130,9 @@ pub struct TuiApp {
     // Edit state (unified)
     pub edit_state: Option<EditState>,
 
+    // Format preview state
+    pub format_preview: Option<FormatPreview>,
+
     // Type selection for Add
     pub type_selection_index: usize,
     pub type_list_scroll_offset: usize,
@@ -131,6 +153,9 @@ pub struct TuiApp {
     // Multi-selection state
     pub selection_anchor: Option<usize>,
     pub selected_range: Option<(usize, usize)>, // (min, max) inclusive
+
+    // Clipboard state (internal buffer, not system clipboard)
+    pub clipboard_buffer: Option<String>,
 }
 
 impl TuiApp {
@@ -163,6 +188,7 @@ impl TuiApp {
             message: None,
             should_quit: false,
             edit_state: None,
+            format_preview: None,
             type_selection_index: 0,
             type_list_scroll_offset: 0,
             move_original_index: None,
@@ -172,6 +198,7 @@ impl TuiApp {
             temp_file_path,
             selection_anchor: None,
             selected_range: None,
+            clipboard_buffer: None,
         })
     }
 
@@ -288,6 +315,7 @@ impl TuiApp {
             AppMode::ShowingHelp => self.handle_help_mode(key.code)?,
             AppMode::ConfirmDelete => self.handle_confirm_delete_mode(key.code)?,
             AppMode::ConfirmQuit => self.handle_confirm_quit_mode(key.code)?,
+            AppMode::ConfirmFormat => self.handle_confirm_format_mode(key.code)?,
             AppMode::SelectingType => self.handle_selecting_type_mode(key.code)?,
             AppMode::Editing => self.handle_editing_mode(key.code)?,
             AppMode::Moving => self.handle_moving_mode(key.code)?,
@@ -305,6 +333,14 @@ impl TuiApp {
             // Ctrl+S: Save to original file
             KeyCode::Char('s') if has_ctrl => {
                 self.save_to_original_file()?;
+            }
+            // Ctrl+C: Copy selected entries
+            KeyCode::Char('c') if has_ctrl => {
+                self.copy_selected()?;
+            }
+            // Ctrl+V: Paste from clipboard
+            KeyCode::Char('v') if has_ctrl => {
+                self.paste_entry()?;
             }
             // Quit
             KeyCode::Char('q') | KeyCode::Esc => {
@@ -359,9 +395,6 @@ impl TuiApp {
             }
             KeyCode::Char('f') => {
                 self.format_file()?;
-            }
-            KeyCode::Char('c') => {
-                self.check_entry()?;
             }
             KeyCode::Char('a') => {
                 self.clear_selection();
@@ -462,6 +495,46 @@ impl TuiApp {
             KeyCode::Esc => {
                 // Cancel, go back to Normal
                 self.mode = AppMode::Normal;
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    /// Handle keys in confirm format mode
+    fn handle_confirm_format_mode(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                self.apply_format()?;
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                self.cancel_format();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if let Some(ref mut preview) = self.format_preview {
+                    preview.scroll_offset = preview.scroll_offset.saturating_sub(1);
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let Some(ref mut preview) = self.format_preview {
+                    preview.scroll_offset = preview.scroll_offset.saturating_add(1);
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(ref mut preview) = self.format_preview {
+                    preview.scroll_offset = preview.scroll_offset.saturating_sub(10);
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(ref mut preview) = self.format_preview {
+                    preview.scroll_offset = preview.scroll_offset.saturating_add(10);
+                }
+            }
+            KeyCode::Home => {
+                if let Some(ref mut preview) = self.format_preview {
+                    preview.scroll_offset = 0;
+                }
             }
             _ => {}
         }
@@ -641,12 +714,18 @@ impl TuiApp {
             KeyCode::Char(c) => {
                 match state.field {
                     EditField::Name => {
-                        state.name_buffer.insert(state.cursor_position, c);
-                        state.cursor_position += c.len_utf8();
+                        // Ensure cursor is at a valid character boundary
+                        let safe_pos =
+                            find_char_boundary(&state.name_buffer, state.cursor_position);
+                        state.name_buffer.insert(safe_pos, c);
+                        state.cursor_position = safe_pos + c.len_utf8();
                     }
                     EditField::Value => {
-                        state.value_buffer.insert(state.cursor_position, c);
-                        state.cursor_position += c.len_utf8();
+                        // Ensure cursor is at a valid character boundary
+                        let safe_pos =
+                            find_char_boundary(&state.value_buffer, state.cursor_position);
+                        state.value_buffer.insert(safe_pos, c);
+                        state.cursor_position = safe_pos + c.len_utf8();
                         state.cursor_col += 1;
                     }
                     EditField::Submit => {
@@ -793,28 +872,43 @@ impl TuiApp {
             return;
         };
 
+        let lines: Vec<&str> = state.value_buffer.lines().collect();
+
         if state.cursor_row == 0 {
             return;
         }
 
-        let lines: Vec<&str> = state.value_buffer.lines().collect();
         let target_row = state.cursor_row - 1;
         let target_line = lines.get(target_row).unwrap_or(&"");
-        let target_col = state.cursor_col.min(target_line.len());
 
-        // Calculate new cursor position
+        // Calculate target column in characters (not bytes)
+        let target_line_chars = target_line.chars().count();
+        let target_col_chars = state.cursor_col.min(target_line_chars);
+
+        // Convert character offset to byte offset
+        let target_col_bytes = target_line
+            .char_indices()
+            .nth(target_col_chars)
+            .map(|(i, _)| i)
+            .unwrap_or(target_line.len());
+
+        // Calculate new cursor position in bytes
         let mut new_pos = 0;
         for (i, line) in lines.iter().enumerate() {
             if i == target_row {
-                new_pos += target_col;
+                new_pos += target_col_bytes;
                 break;
             }
             new_pos += line.len() + 1; // +1 for newline
         }
 
-        state.cursor_position = new_pos.min(state.value_buffer.len());
+        // Ensure the position is at a valid character boundary
+        new_pos = new_pos.min(state.value_buffer.len());
+        new_pos = find_char_boundary(&state.value_buffer, new_pos);
+
+        state.cursor_position = new_pos;
         state.cursor_row = target_row;
-        state.cursor_col = target_col;
+        state.cursor_col = target_col_chars;
     }
 
     /// Move cursor down in multi-line value field
@@ -832,21 +926,35 @@ impl TuiApp {
 
         let target_row = state.cursor_row + 1;
         let target_line = lines.get(target_row).unwrap_or(&"");
-        let target_col = state.cursor_col.min(target_line.len());
 
-        // Calculate new cursor position
+        // Calculate target column in characters (not bytes)
+        let target_line_chars = target_line.chars().count();
+        let target_col_chars = state.cursor_col.min(target_line_chars);
+
+        // Convert character offset to byte offset
+        let target_col_bytes = target_line
+            .char_indices()
+            .nth(target_col_chars)
+            .map(|(i, _)| i)
+            .unwrap_or(target_line.len());
+
+        // Calculate new cursor position in bytes
         let mut new_pos = 0;
         for (i, line) in lines.iter().enumerate() {
             if i == target_row {
-                new_pos += target_col;
+                new_pos += target_col_bytes;
                 break;
             }
             new_pos += line.len() + 1; // +1 for newline
         }
 
-        state.cursor_position = new_pos.min(state.value_buffer.len());
+        // Ensure the position is at a valid character boundary
+        new_pos = new_pos.min(state.value_buffer.len());
+        new_pos = find_char_boundary(&state.value_buffer, new_pos);
+
+        state.cursor_position = new_pos;
         state.cursor_row = target_row;
-        state.cursor_col = target_col;
+        state.cursor_col = target_col_chars;
     }
 
     /// Recalculate cursor row and column from cursor position
@@ -1095,40 +1203,165 @@ impl TuiApp {
         Ok(())
     }
 
-    /// Format the configuration file
+    /// Format the configuration file (with preview)
     fn format_file(&mut self) -> Result<()> {
+        self.preview_format()?;
+        Ok(())
+    }
+
+    /// Generate format preview
+    fn preview_format(&mut self) -> Result<()> {
+        use crate::checker::{check_all, Severity};
+        use crate::utils::path_merge;
+
         let config = crate::config::load_or_create_config()?;
+
+        // Clone entries and merge PATH if needed
+        let mut entries_to_format = self.entries.clone();
+        let mut path_merge_info: Option<path_merge::PathMergeResult> = None;
+
+        // Check for PATH merging
+        let path_entries: Vec<&Entry> = entries_to_format
+            .iter()
+            .filter(|e| e.entry_type == EntryType::EnvVar && e.name.to_uppercase() == "PATH")
+            .collect();
+
+        if let Some(merge_result) = path_merge::merge_path_definitions(&path_entries) {
+            // Remove all PATH entries and add merged one
+            entries_to_format.retain(|e| {
+                !(e.entry_type == EntryType::EnvVar && e.name.to_uppercase() == "PATH")
+            });
+
+            let merged_entry = Entry::new(
+                EntryType::EnvVar,
+                "PATH".to_string(),
+                merge_result.merged_value.clone(),
+            )
+            .with_line_number(merge_result.source_lines.first().copied().unwrap_or(0));
+
+            entries_to_format.push(merged_entry);
+            path_merge_info = Some(merge_result);
+        }
+
         let formatter = crate::formatter::get_formatter(self.shell_type);
-        let formatted = formatter.format(&self.entries, &config);
+        let formatted = formatter.format(&entries_to_format, &config);
 
-        // Create backup before writing
-        let backup_manager = crate::backup::BackupManager::new(self.shell_type, &config);
-        backup_manager.create_backup(&self.file_path)?;
+        // Build summary
+        let mut summary = Vec::new();
 
-        // Write formatted content
-        std::fs::write(&self.file_path, formatted)?;
+        // 1. Check for duplicates
+        let check_result = check_all(&self.entries);
+        if !check_result.issues.is_empty() {
+            summary.push(format!("⚠ Found {} issues:", check_result.issues.len()));
+            for issue in check_result.issues.iter().take(10) {
+                let prefix = match issue.severity {
+                    Severity::Warning => "  •",
+                    Severity::Error => "  ✗",
+                };
+                summary.push(format!("{} {}", prefix, issue.message));
+            }
+            if check_result.issues.len() > 10 {
+                summary.push(format!("  ... and {} more", check_result.issues.len() - 10));
+            }
+            summary.push(String::new());
+        }
 
-        // Refresh entries
-        self.refresh()?;
-        self.message = Some("File formatted successfully".to_string());
+        // 2. Show PATH merging info
+        if let Some(merge_info) = path_merge_info {
+            summary.push(format!(
+                "✓ Merging {} PATH definitions (lines: {})",
+                merge_info.source_lines.len(),
+                merge_info
+                    .source_lines
+                    .iter()
+                    .map(|l| l.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+            summary.push(format!("  → {}", merge_info.merged_value));
+            summary.push(String::new());
+        }
+
+        // 3. Count entries by type
+        let mut alias_count = 0;
+        let mut func_count = 0;
+        let mut env_count = 0;
+        let mut source_count = 0;
+
+        for entry in &self.entries {
+            match entry.entry_type {
+                EntryType::Alias => alias_count += 1,
+                EntryType::Function => func_count += 1,
+                EntryType::EnvVar => env_count += 1,
+                EntryType::Source => source_count += 1,
+                _ => {}
+            }
+        }
+
+        if config.format.sort_alphabetically {
+            if alias_count > 0 {
+                summary.push(format!("✓ Sorting {} aliases alphabetically", alias_count));
+            }
+            if func_count > 0 {
+                summary.push(format!("✓ Sorting {} functions alphabetically", func_count));
+            }
+            if env_count > 0 {
+                summary.push(format!(
+                    "✓ Sorting {} environment variables by dependency",
+                    env_count
+                ));
+            }
+            if source_count > 0 {
+                summary.push(format!(
+                    "✓ Sorting {} source statements alphabetically",
+                    source_count
+                ));
+            }
+        }
+
+        if config.format.group_by_type {
+            summary.push(String::new());
+            summary.push("✓ Grouping entries by type at first occurrence".to_string());
+        }
+
+        if summary.is_empty() {
+            summary.push("No changes needed - file is already formatted.".to_string());
+        }
+
+        // Create preview and switch to ConfirmFormat mode
+        self.format_preview = Some(FormatPreview::new(summary, formatted));
+        self.mode = AppMode::ConfirmFormat;
+        self.message = Some("Review changes and press [y] to confirm or [n] to cancel".to_string());
 
         Ok(())
     }
 
-    /// Check the current entry or all entries
-    fn check_entry(&mut self) -> Result<()> {
-        use crate::checker::{Checker, DuplicateChecker};
+    /// Apply the format (after confirmation)
+    fn apply_format(&mut self) -> Result<()> {
+        if let Some(preview) = self.format_preview.take() {
+            let config = crate::config::load_or_create_config()?;
 
-        let checker = DuplicateChecker;
-        let result = checker.check(&self.entries);
+            // Create backup before writing
+            let backup_manager = crate::backup::BackupManager::new(self.shell_type, &config);
+            backup_manager.create_backup(&self.file_path)?;
 
-        if result.issues.is_empty() {
-            self.message = Some("No issues found".to_string());
-        } else {
-            self.message = Some(format!("Found {} issue(s)", result.issues.len()));
+            // Write formatted content
+            std::fs::write(&self.file_path, preview.formatted_content)?;
+
+            // Refresh entries
+            self.refresh()?;
+            self.message = Some("File formatted successfully".to_string());
         }
 
+        self.mode = AppMode::Normal;
         Ok(())
+    }
+
+    /// Cancel format preview
+    fn cancel_format(&mut self) {
+        self.format_preview = None;
+        self.mode = AppMode::Normal;
+        self.message = Some("Format cancelled".to_string());
     }
 
     /// Start adding a new entry (show type selection menu)
@@ -1533,6 +1766,109 @@ impl TuiApp {
         } else {
             "Entry toggled".to_string()
         });
+
+        Ok(())
+    }
+
+    /// Copy selected entries to internal clipboard buffer
+    fn copy_selected(&mut self) -> Result<()> {
+        if self.entries.is_empty() {
+            return Ok(());
+        }
+
+        let indices = self.get_selected_indices();
+        if indices.is_empty() {
+            self.message = Some("No entry selected to copy".to_string());
+            return Ok(());
+        }
+
+        // Read current content
+        let content = self.read_current_content()?;
+        let all_lines: Vec<&str> = content.lines().collect();
+
+        // Collect lines from all selected entries
+        let mut copied_lines = Vec::new();
+
+        for idx in &indices {
+            if let Some(entry) = self.entries.get(*idx) {
+                let start = entry.line_number.unwrap_or(1).saturating_sub(1); // 0-indexed
+                let end = entry
+                    .end_line
+                    .unwrap_or(entry.line_number.unwrap_or(1))
+                    .saturating_sub(1);
+
+                // Extract lines for this entry
+                for line_idx in start..=end.min(all_lines.len().saturating_sub(1)) {
+                    if let Some(line) = all_lines.get(line_idx) {
+                        copied_lines.push(line.to_string());
+                    }
+                }
+            }
+        }
+
+        if !copied_lines.is_empty() {
+            self.clipboard_buffer = Some(copied_lines.join("\n"));
+            let count = indices.len();
+            self.message = Some(if count > 1 {
+                format!("Copied {} entries", count)
+            } else {
+                "Entry copied".to_string()
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Paste content from internal clipboard buffer
+    fn paste_entry(&mut self) -> Result<()> {
+        if let Some(ref clipboard_content) = self.clipboard_buffer {
+            if self.entries.is_empty() {
+                // Paste at end of file
+                let content = self.read_current_content()?;
+                let mut new_content = content;
+                if !new_content.ends_with('\n') {
+                    new_content.push('\n');
+                }
+                new_content.push_str(clipboard_content);
+                new_content.push('\n');
+
+                std::fs::write(&self.temp_file_path, &new_content)?;
+                self.dirty = true;
+                self.reload_from_temp()?;
+                self.message = Some("Entry pasted".to_string());
+            } else {
+                // Paste after current entry
+                let current_entry = self
+                    .get_selected_entry()
+                    .ok_or_else(|| anyhow::anyhow!("No entry selected"))?
+                    .clone();
+                let insert_line = current_entry
+                    .end_line
+                    .or(current_entry.line_number)
+                    .unwrap_or(1);
+
+                // Read current content
+                let content = self.read_current_content()?;
+                let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
+                // Insert clipboard content after current entry
+                let insert_idx = insert_line.min(lines.len()); // 0-indexed insert position
+
+                for (i, line) in clipboard_content.lines().enumerate() {
+                    lines.insert(insert_idx + i, line.to_string());
+                }
+
+                // Write to temp file and reload
+                let new_content = lines.join("\n") + "\n";
+                std::fs::write(&self.temp_file_path, &new_content)?;
+                self.dirty = true;
+                self.reload_from_temp()?;
+
+                self.message = Some("Entry pasted".to_string());
+            }
+        } else {
+            self.message = Some("Clipboard is empty".to_string());
+        }
 
         Ok(())
     }

@@ -37,6 +37,7 @@ pub fn draw(f: &mut Frame, app: &mut TuiApp) {
         AppMode::ShowingHelp => draw_help_popup(f, app),
         AppMode::ConfirmDelete => draw_confirm_popup(f, app),
         AppMode::ConfirmQuit => draw_confirm_quit_popup(f, app),
+        AppMode::ConfirmFormat => draw_format_preview_popup(f, app),
         AppMode::SelectingType => draw_type_selection_popup(f, app),
         AppMode::Editing => draw_edit_popup(f, app),
         AppMode::Moving => {} // No popup, just show indicator in status bar
@@ -247,6 +248,7 @@ fn draw_status_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
         AppMode::ShowingHelp => "[q/Esc]Close",
         AppMode::ConfirmDelete => "[y/Enter]Yes [n]No [Esc]Cancel",
         AppMode::ConfirmQuit => "[y]Save & Quit [n]Discard [Esc]Cancel",
+        AppMode::ConfirmFormat => "[y/Enter]Apply [n/Esc]Cancel [↑↓]Scroll",
         AppMode::SelectingType => "[↑/↓]Select [Enter]Confirm [Esc]Cancel",
         AppMode::Editing => "[Tab]Next [↑/↓/Scroll/PgUp/PgDn]Navigate [Enter]Submit/Newline [Esc]Cancel",
         AppMode::Moving => "[↑/↓/Scroll]Move [Enter]Confirm [Esc]Cancel",
@@ -584,6 +586,52 @@ fn draw_confirm_quit_popup(f: &mut Frame, _app: &TuiApp) {
 
     f.render_widget(Clear, area);
     f.render_widget(paragraph, area);
+}
+
+/// Draw format preview popup
+fn draw_format_preview_popup(f: &mut Frame, app: &TuiApp) {
+    let area = centered_rect(80, 70, f.size());
+
+    if let Some(ref preview) = app.format_preview {
+        // Calculate available height for content
+        let available_height = area.height.saturating_sub(4) as usize; // borders + title + footer
+
+        // Build lines with scroll
+        let total_lines = preview.summary.len();
+        let scroll_offset = preview.scroll_offset.min(total_lines.saturating_sub(1));
+        let end_line = (scroll_offset + available_height).min(total_lines);
+
+        let mut lines: Vec<Line> = preview.summary[scroll_offset..end_line]
+            .iter()
+            .map(|s| Line::from(s.as_str()))
+            .collect();
+
+        // Add scroll indicator if needed
+        if total_lines > available_height {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "[Showing {}-{} of {} lines]",
+                    scroll_offset + 1,
+                    end_line,
+                    total_lines
+                ),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        let paragraph = Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .title(" Format Preview ")
+                    .borders(Borders::ALL)
+                    .style(Style::default().bg(Color::Black).fg(Color::White)),
+            )
+            .wrap(ratatui::widgets::Wrap { trim: false });
+
+        f.render_widget(Clear, area);
+        f.render_widget(paragraph, area);
+    }
 }
 
 /// Draw type selection popup for Add
