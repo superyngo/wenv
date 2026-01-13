@@ -4,6 +4,17 @@ on:
   push:
     tags:
       - "v*.*.*" # 當推送 v1.0.0 格式的 tag 時觸發
+  workflow_dispatch: # 允許手動觸發
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.1.1)'
+        required: true
+        type: string
+      draft:
+        description: 'Create as draft release'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -255,12 +266,20 @@ jobs:
       - name: Get tag message
         id: tag_message
         run: |
-          # 獲取當前 tag 名稱
-          TAG_NAME=${GITHUB_REF#refs/tags/}
-          echo "Tag name: $TAG_NAME"
+          # 獲取當前 tag 名稱（支持手動觸發和 push tag）
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_NAME="${{ github.event.inputs.tag }}"
+            echo "Manual trigger with tag: $TAG_NAME"
+          else
+            TAG_NAME=${GITHUB_REF#refs/tags/}
+            echo "Tag push event: $TAG_NAME"
+          fi
+          
+          # 輸出 tag 名稱供後續步驟使用
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
 
           # 獲取 tag 的註解消息（如果是 annotated tag）
-          TAG_MESSAGE=$(git tag -l --format='%(contents)' "$TAG_NAME")
+          TAG_MESSAGE=$(git tag -l --format='%(contents)' "$TAG_NAME" 2>/dev/null || echo "")
 
           # 如果 tag 沒有消息，使用默認消息
           if [ -z "$TAG_MESSAGE" ]; then
@@ -278,8 +297,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ steps.tag_message.outputs.tag_name }}
           files: release_files/*
-          draft: false
+          draft: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.draft == 'true' || false }}
           prerelease: false
           body: |
             ${{ steps.tag_message.outputs.message }}
