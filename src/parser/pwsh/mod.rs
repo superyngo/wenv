@@ -37,7 +37,10 @@ use crate::parser::builders::{
 use crate::parser::Parser;
 
 use control::{count_control_end, count_control_start};
-use parsers::{detect_function_start, try_parse_alias, try_parse_env, try_parse_source};
+use parsers::{
+    detect_env_heredoc_start, detect_function_start, is_heredoc_end, try_parse_alias,
+    try_parse_env, try_parse_source,
+};
 
 /// PowerShell configuration file parser.
 ///
@@ -79,6 +82,12 @@ impl Parser for PowerShellParser {
         // Pending comment for association
         let mut pending_comment: Option<String> = None;
 
+        // Environment variable Here-String state
+        let mut in_env_heredoc = false;
+        let mut env_heredoc_var_name: Option<String> = None;
+        let mut env_heredoc_lines: Vec<String> = Vec::new();
+        let mut env_heredoc_start_line: usize = 0;
+
         for (line_num, line) in content.lines().enumerate() {
             let line_number = line_num + 1;
             let trimmed = line.trim();
@@ -102,6 +111,27 @@ impl Parser for PowerShellParser {
                         }
                         result.add_entry(entry);
                     }
+                }
+                continue;
+            }
+
+            // Handle environment variable Here-String content (before control structure check)
+            if in_env_heredoc {
+                if is_heredoc_end(trimmed) {
+                    // End of Here-String
+                    in_env_heredoc = false;
+                    let value = env_heredoc_lines.join("\n");
+                    let mut entry = Entry::new(
+                        EntryType::EnvVar,
+                        env_heredoc_var_name.take().unwrap(),
+                        value,
+                    );
+                    entry = entry.with_line_number(env_heredoc_start_line);
+                    entry = entry.with_end_line(line_number);
+                    result.add_entry(entry);
+                } else {
+                    // Collect Here-String content line
+                    env_heredoc_lines.push(line.to_string());
                 }
                 continue;
             }
@@ -186,6 +216,18 @@ impl Parser for PowerShellParser {
                 continue;
             }
 
+            // Check for Here-String environment variable start (only outside control structures)
+            if control_depth == 0 {
+                if let Some(var_name) = detect_env_heredoc_start(trimmed) {
+                    in_env_heredoc = true;
+                    env_heredoc_var_name = Some(var_name);
+                    env_heredoc_lines.clear();
+                    env_heredoc_start_line = line_number;
+                    pending_comment = None;
+                    continue;
+                }
+            }
+
             if let Some(mut entry) = try_parse_env(trimmed, line_number) {
                 if let Some(comment) = pending_comment.take() {
                     entry = entry.with_comment(comment);
@@ -252,6 +294,14 @@ impl Parser for PowerShellParser {
             result.add_warning(crate::model::ParseWarning::new(
                 current_func.as_ref().map(|f| f.start_line).unwrap_or(0),
                 "Unclosed function definition at end of file",
+                "",
+            ));
+        }
+
+        if in_env_heredoc {
+            result.add_warning(crate::model::ParseWarning::new(
+                env_heredoc_start_line,
+                "Unclosed environment variable Here-String at end of file",
                 "",
             ));
         }
@@ -400,5 +450,214 @@ mod tests {
             .unwrap();
 
         assert_eq!(alias.comment, Some("List files".to_string()));
+    }
+
+    #[test]
+    fn test_env_heredoc_simple() {
+        let parser = PowerShellParser::new();
+        let content = r#"$env:PATH = @"
+C:\Program Files\bin
+D:\tools
+"@"#;
+        let result = parser.parse(content);
+
+        let envs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::EnvVar)
+            .collect();
+
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].name, "PATH");
+        assert_eq!(envs[0].value, "C:\\Program Files\\bin\nD:\\tools");
+        assert_eq!(envs[0].line_number, Some(1));
+        assert_eq!(envs[0].end_line, Some(4));
+    }
+
+    #[test]
+    fn test_env_heredoc_with_spaces() {
+        let parser = PowerShellParser::new();
+        let content = r#"$env:CONFIG = @"
+  line with leading spaces
+    indented line
+"@"#;
+        let result = parser.parse(content);
+
+        let envs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::EnvVar)
+            .collect();
+
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].name, "CONFIG");
+        assert_eq!(
+            envs[0].value,
+            "  line with leading spaces\n    indented line"
+        );
+    }
+
+    #[test]
+    fn test_env_heredoc_single_line_backward_compat() {
+        let parser = PowerShellParser::new();
+        let content = r#"$env:EDITOR = "code""#;
+        let result = parser.parse(content);
+
+        let envs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::EnvVar)
+            .collect();
+
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].name, "EDITOR");
+        assert_eq!(envs[0].value, "code");
+        assert_eq!(envs[0].line_number, Some(1));
+        assert!(envs[0].end_line.is_none());
+    }
+
+    #[test]
+    fn test_env_heredoc_mixed_with_single_line() {
+        let parser = PowerShellParser::new();
+        let content = r#"$env:EDITOR = "code"
+$env:PATH = @"
+C:\bin
+D:\tools
+"@
+$env:SHELL = "pwsh""#;
+        let result = parser.parse(content);
+
+        let envs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::EnvVar)
+            .collect();
+
+        assert_eq!(envs.len(), 3);
+        assert_eq!(envs[0].name, "EDITOR");
+        assert_eq!(envs[0].value, "code");
+        assert_eq!(envs[1].name, "PATH");
+        assert_eq!(envs[1].value, "C:\\bin\nD:\\tools");
+        assert_eq!(envs[2].name, "SHELL");
+        assert_eq!(envs[2].value, "pwsh");
+    }
+
+    #[test]
+    fn test_env_heredoc_empty_lines() {
+        let parser = PowerShellParser::new();
+        let content = r#"$env:DATA = @"
+line1
+
+line3
+"@"#;
+        let result = parser.parse(content);
+
+        let envs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::EnvVar)
+            .collect();
+
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].name, "DATA");
+        assert_eq!(envs[0].value, "line1\n\nline3");
+    }
+
+    #[test]
+    fn test_env_heredoc_with_special_chars() {
+        let parser = PowerShellParser::new();
+        let content = r#"$env:NOTES = @"
+Line with "quotes"
+Line with $variable
+Line with 'single quotes'
+"@"#;
+        let result = parser.parse(content);
+
+        let envs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::EnvVar)
+            .collect();
+
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].name, "NOTES");
+        assert!(envs[0].value.contains("\"quotes\""));
+        assert!(envs[0].value.contains("$variable"));
+    }
+
+    #[test]
+    fn test_env_heredoc_unclosed_warning() {
+        let parser = PowerShellParser::new();
+        let content = r#"$env:PATH = @"
+C:\bin
+D:\tools"#;
+        let result = parser.parse(content);
+
+        assert!(result.warnings.iter().any(|w| w
+            .message
+            .contains("Unclosed environment variable Here-String")));
+    }
+
+    #[test]
+    fn test_env_heredoc_not_inside_function() {
+        let parser = PowerShellParser::new();
+        let content = r#"function Test {
+    $env:PATH = @"
+C:\bin
+"@
+}"#;
+        let result = parser.parse(content);
+
+        let envs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::EnvVar)
+            .collect();
+
+        assert_eq!(
+            envs.len(),
+            0,
+            "Here-String inside function should not be parsed as EnvVar"
+        );
+
+        let funcs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Function)
+            .collect();
+
+        assert_eq!(funcs.len(), 1);
+        assert!(funcs[0].value.contains("$env:PATH"));
+    }
+
+    #[test]
+    fn test_env_heredoc_not_inside_control_structure() {
+        let parser = PowerShellParser::new();
+        let content = r#"if ($true) {
+    $env:PATH = @"
+C:\bin
+"@
+}"#;
+        let result = parser.parse(content);
+
+        let envs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::EnvVar)
+            .collect();
+
+        assert_eq!(
+            envs.len(),
+            0,
+            "Here-String inside control structure should not be parsed as EnvVar"
+        );
+
+        let code_blocks: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Code)
+            .collect();
+
+        assert!(code_blocks.iter().any(|c| c.value.contains("$env:PATH")));
     }
 }

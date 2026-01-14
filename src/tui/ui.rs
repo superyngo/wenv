@@ -38,6 +38,7 @@ pub fn draw(f: &mut Frame, app: &mut TuiApp) {
         AppMode::ConfirmDelete => draw_confirm_popup(f, app),
         AppMode::ConfirmQuit => draw_confirm_quit_popup(f, app),
         AppMode::ConfirmFormat => draw_format_preview_popup(f, app),
+        AppMode::ConfirmSaveWithErrors => draw_validation_error_popup(f, app),
         AppMode::SelectingType => draw_type_selection_popup(f, app),
         AppMode::Editing => draw_edit_popup(f, app),
         AppMode::Moving => {} // No popup, just show indicator in status bar
@@ -249,6 +250,7 @@ fn draw_status_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
         AppMode::ConfirmDelete => "[y/Enter]Yes [n]No [Esc]Cancel",
         AppMode::ConfirmQuit => "[y]Save & Quit [n]Discard [Esc]Cancel",
         AppMode::ConfirmFormat => "[y/Enter]Apply [n/Esc]Cancel [↑↓]Scroll",
+        AppMode::ConfirmSaveWithErrors => "[y/Enter]Save Anyway [n/Esc]Cancel [↑↓]Scroll",
         AppMode::SelectingType => "[↑/↓]Select [Enter]Confirm [Esc]Cancel",
         AppMode::Editing => "[Tab]Next [↑/↓/Scroll/PgUp/PgDn]Navigate [Enter]Submit/Newline [Esc]Cancel",
         AppMode::Moving => "[↑/↓/Scroll]Move [Enter]Confirm [Esc]Cancel",
@@ -447,6 +449,18 @@ fn draw_help_popup(f: &mut Frame, app: &TuiApp) {
             Span::raw(msg.tui_help_format),
         ]),
         Line::from(vec![
+            Span::styled("Ctrl+S    ", Style::default().fg(Color::Yellow)),
+            Span::raw("Save to file"),
+        ]),
+        Line::from(vec![
+            Span::styled("Ctrl+C/V  ", Style::default().fg(Color::Yellow)),
+            Span::raw("Copy/Paste entries"),
+        ]),
+        Line::from(vec![
+            Span::styled("Shift+↑/↓ ", Style::default().fg(Color::Yellow)),
+            Span::raw("Multi-select entries"),
+        ]),
+        Line::from(vec![
             Span::styled("?         ", Style::default().fg(Color::Yellow)),
             Span::raw(msg.tui_help_help),
         ]),
@@ -626,6 +640,63 @@ fn draw_format_preview_popup(f: &mut Frame, app: &TuiApp) {
                     .title(" Format Preview ")
                     .borders(Borders::ALL)
                     .style(Style::default().bg(Color::Black).fg(Color::White)),
+            )
+            .wrap(ratatui::widgets::Wrap { trim: false });
+
+        f.render_widget(Clear, area);
+        f.render_widget(paragraph, area);
+    }
+}
+
+/// Draw validation error popup
+fn draw_validation_error_popup(f: &mut Frame, app: &TuiApp) {
+    let area = centered_rect(80, 70, f.size());
+
+    if let Some(ref error_msg) = app.validation_errors {
+        // Calculate available height for content
+        let available_height = area.height.saturating_sub(5) as usize; // borders + title + footer
+
+        // Split error message into lines
+        let error_lines: Vec<&str> = error_msg.lines().collect();
+        let total_lines = error_lines.len();
+        let scroll_offset = app
+            .validation_scroll_offset
+            .min(total_lines.saturating_sub(1));
+        let end_line = (scroll_offset + available_height).min(total_lines);
+
+        let mut lines: Vec<Line> = error_lines[scroll_offset..end_line]
+            .iter()
+            .map(|s| Line::from(*s))
+            .collect();
+
+        // Add scroll indicator if needed
+        if total_lines > available_height {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "[Showing {}-{} of {} lines]",
+                    scroll_offset + 1,
+                    end_line,
+                    total_lines
+                ),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        // Add footer with instructions
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "[y/Enter] Save Anyway  [n/Esc] Cancel  [↑/↓] Scroll",
+            Style::default().fg(Color::Yellow),
+        )));
+
+        let paragraph = Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .title(" Shell Validation Failed ")
+                    .title_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                    .borders(Borders::ALL)
+                    .style(Style::default().bg(Color::Black).fg(Color::Red)),
             )
             .wrap(ratatui::widgets::Wrap { trim: false });
 

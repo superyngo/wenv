@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-01-14
+
+### Added
+- **PowerShell Here-String support**: Environment variables can now use multi-line Here-String syntax (`$env:VAR = @"...@"`)
+- **Comment association**: Comments immediately before entries now follow their associated entries when reordering
+- **Integration tests**: Added PowerShell heredoc integration tests
+
+### Changed
+- TUI interface enhancements for better user experience
+- Improved PowerShell parser to handle multi-line environment variable values
+- Enhanced Bash and PowerShell formatters to preserve comment-entry relationships
+
 ## [0.2.0] - 2026-01-14
 
 ### Added

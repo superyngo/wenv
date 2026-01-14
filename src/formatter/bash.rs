@@ -22,6 +22,56 @@ impl BashFormatter {
         Self { indent_style }
     }
 
+    /// Find comments that are attached to entries (comments immediately before an entry)
+    /// Returns a HashMap mapping entry line numbers to their associated comment entries
+    fn find_attached_comments(
+        &self,
+        entries: &[Entry],
+    ) -> std::collections::HashMap<usize, Vec<Entry>> {
+        let mut attached_comments = std::collections::HashMap::new();
+
+        // Sort entries by line number
+        let mut sorted_entries: Vec<_> = entries.iter().collect();
+        sorted_entries.sort_by_key(|e| e.line_number.unwrap_or(0));
+
+        for i in 0..sorted_entries.len() {
+            let entry = sorted_entries[i];
+
+            // Only process Comment entries
+            if entry.entry_type != EntryType::Comment {
+                continue;
+            }
+
+            // Check if there's a next entry
+            if i + 1 >= sorted_entries.len() {
+                continue;
+            }
+
+            let next_entry = sorted_entries[i + 1];
+
+            // Skip if next entry is also a Comment or Code (these stay in place)
+            if next_entry.entry_type == EntryType::Comment
+                || next_entry.entry_type == EntryType::Code
+            {
+                continue;
+            }
+
+            // Check if comment is immediately before the next entry
+            // Comment should end right before the next entry starts
+            if let (Some(comment_end), Some(next_line)) = (entry.end_line, next_entry.line_number) {
+                if comment_end + 1 == next_line {
+                    // This comment is attached to the next entry
+                    attached_comments
+                        .entry(next_line)
+                        .or_insert_with(Vec::new)
+                        .push(entry.clone());
+                }
+            }
+        }
+
+        attached_comments
+    }
+
     fn format_alias(&self, entry: &Entry) -> String {
         // Check if value needs quotes
         let value = &entry.value;
@@ -118,6 +168,10 @@ impl Formatter for BashFormatter {
         } else {
             // Group entries by type (for format command with grouping enabled)
             // Strategy: Keep Comment/Code in original positions, only reorder Alias/EnvVar/Source/Function
+            // BUT: Comments that are immediately before an entry should follow that entry when it's moved
+
+            // Find comments attached to entries
+            let attached_comments = self.find_attached_comments(entries);
 
             // Group parseable entries by type
             let mut grouped: std::collections::HashMap<EntryType, Vec<&Entry>> =
@@ -175,6 +229,17 @@ impl Formatter for BashFormatter {
             for entry in sorted_entries {
                 match entry.entry_type {
                     EntryType::Code | EntryType::Comment => {
+                        // Skip comments that are attached to other entries (they'll be output with those entries)
+                        if entry.entry_type == EntryType::Comment {
+                            let entry_line = entry.line_number.unwrap_or(0);
+                            let is_attached = attached_comments.values().any(|comments| {
+                                comments.iter().any(|c| c.line_number == Some(entry_line))
+                            });
+                            if is_attached {
+                                continue;
+                            }
+                        }
+
                         if entry.entry_type == EntryType::Code && entry.value.is_empty() {
                             if let (Some(start), Some(end)) = (entry.line_number, entry.end_line) {
                                 for _ in 0..(end - start + 1) {
@@ -200,6 +265,16 @@ impl Formatter for BashFormatter {
 
                             if let Some(type_entries) = grouped.get(&entry_type) {
                                 for grouped_entry in type_entries {
+                                    // Output attached comments before the entry
+                                    if let Some(comments) = attached_comments
+                                        .get(&grouped_entry.line_number.unwrap_or(0))
+                                    {
+                                        for comment in comments {
+                                            output.push_str(&self.format_entry(comment));
+                                            output.push('\n');
+                                        }
+                                    }
+
                                     output.push_str(&self.format_entry(grouped_entry));
                                     output.push('\n');
                                 }
@@ -335,5 +410,81 @@ greet() {
 
         let formatted = formatter.format_entry(&entry);
         assert_eq!(formatted, "# This is a comment");
+    }
+
+    #[test]
+    fn test_comment_follows_entry_when_grouped() {
+        use crate::model::ShellType;
+
+        let original_content = r#"# Git shortcuts
+alias gs='git status'
+# Directory shortcuts
+alias ll='ls -la'
+
+# Environment variables
+export EDITOR=nvim
+"#;
+
+        // Parse the content
+        let parser = crate::parser::get_parser(ShellType::Bash);
+        let result = parser.parse(original_content);
+
+        // Format with grouping enabled (default)
+        let formatter = BashFormatter::new();
+        let config = Config::default();
+        let formatted = formatter.format(&result.entries, &config);
+
+        // Debug: print the formatted output
+        println!("Formatted output:\n{}", formatted);
+
+        // Comments should follow their entries when sorted alphabetically
+        // The order should be: gs (with "Git shortcuts"), ll (with "Directory shortcuts")
+        // followed by env vars
+
+        // Check that comments appear before their respective entries
+        let ll_pos = formatted
+            .find("alias ll=")
+            .expect("ll alias should be present");
+        let gs_pos = formatted
+            .find("alias gs=")
+            .expect("gs alias should be present");
+        let dir_comment_pos = formatted
+            .find("# Directory shortcuts")
+            .expect("Directory comment should be present");
+        let git_comment_pos = formatted
+            .find("# Git shortcuts")
+            .expect("Git comment should be present");
+
+        // Directory comment should be right before ll
+        assert!(dir_comment_pos < ll_pos);
+        // Git comment should be right before gs
+        assert!(git_comment_pos < gs_pos);
+
+        // Since alphabetically gs comes before ll, check ordering
+        assert!(gs_pos < ll_pos, "gs should come before ll alphabetically");
+        assert!(
+            git_comment_pos < dir_comment_pos,
+            "Git comment should come before Directory comment"
+        );
+    }
+
+    #[test]
+    fn test_standalone_comments_stay_in_place() {
+        use crate::model::ShellType;
+
+        let original_content = r#"# This is a standalone comment
+
+alias test='echo test'
+"#;
+
+        let parser = crate::parser::get_parser(ShellType::Bash);
+        let result = parser.parse(original_content);
+
+        let formatter = BashFormatter::new();
+        let config = Config::default();
+        let formatted = formatter.format(&result.entries, &config);
+
+        // Standalone comment (with blank line after) should stay in its original position
+        assert!(formatted.contains("# This is a standalone comment"));
     }
 }

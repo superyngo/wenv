@@ -60,6 +60,14 @@ lazy_static! {
         r#"^\$env:(\w+)\s*=\s*(.+)$"#
     ).unwrap();
 
+    /// Matches environment variable Here-String start: `$env:VAR = @"`
+    ///
+    /// Captures:
+    /// - Group 1: variable name
+    pub static ref ENV_HEREDOC_START_RE: Regex = Regex::new(
+        r#"^\$env:(\w+)\s*=\s*@"$"#
+    ).unwrap();
+
     // =========================================================================
     // Source Patterns
     // =========================================================================
@@ -110,6 +118,19 @@ mod tests {
         let caps = ENV_RE.captures(r#"$env:EDITOR = "code""#).unwrap();
         assert_eq!(&caps[1], "EDITOR");
         assert_eq!(&caps[2], r#""code""#);
+    }
+
+    #[test]
+    fn test_env_heredoc_start_re() {
+        let caps = ENV_HEREDOC_START_RE.captures(r#"$env:PATH = @""#).unwrap();
+        assert_eq!(&caps[1], "PATH");
+    }
+
+    #[test]
+    fn test_env_heredoc_start_re_no_match() {
+        assert!(ENV_HEREDOC_START_RE
+            .captures(r#"$env:PATH = "value""#)
+            .is_none());
     }
 
     #[test]

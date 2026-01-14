@@ -12,17 +12,72 @@ impl PowerShellFormatter {
         Self
     }
 
+    /// Find comments that are attached to entries (comments immediately before an entry)
+    /// Returns a HashMap mapping entry line numbers to their associated comment entries
+    fn find_attached_comments(
+        &self,
+        entries: &[Entry],
+    ) -> std::collections::HashMap<usize, Vec<Entry>> {
+        let mut attached_comments = std::collections::HashMap::new();
+
+        // Sort entries by line number
+        let mut sorted_entries: Vec<_> = entries.iter().collect();
+        sorted_entries.sort_by_key(|e| e.line_number.unwrap_or(0));
+
+        for i in 0..sorted_entries.len() {
+            let entry = sorted_entries[i];
+
+            // Only process Comment entries
+            if entry.entry_type != EntryType::Comment {
+                continue;
+            }
+
+            // Check if there's a next entry
+            if i + 1 >= sorted_entries.len() {
+                continue;
+            }
+
+            let next_entry = sorted_entries[i + 1];
+
+            // Skip if next entry is also a Comment or Code (these stay in place)
+            if next_entry.entry_type == EntryType::Comment
+                || next_entry.entry_type == EntryType::Code
+            {
+                continue;
+            }
+
+            // Check if comment is immediately before the next entry
+            // Comment should end right before the next entry starts
+            if let (Some(comment_end), Some(next_line)) = (entry.end_line, next_entry.line_number) {
+                if comment_end + 1 == next_line {
+                    // This comment is attached to the next entry
+                    attached_comments
+                        .entry(next_line)
+                        .or_insert_with(Vec::new)
+                        .push(entry.clone());
+                }
+            }
+        }
+
+        attached_comments
+    }
+
     fn format_alias(&self, entry: &Entry) -> String {
         format!("Set-Alias {} {}", entry.name, entry.value)
     }
 
     fn format_env(&self, entry: &Entry) -> String {
-        // PowerShell env vars are always quoted
-        format!("$env:{} = \"{}\"", entry.name, entry.value)
+        // Use Here-String format for multi-line values
+        if entry.value.contains('\n') {
+            format!("$env:{} = @\"\n{}\n\"@", entry.name, entry.value)
+        } else {
+            // Single-line env vars are always quoted
+            format!("$env:{} = \"{}\"", entry.name, entry.value)
+        }
     }
 
     fn format_source(&self, entry: &Entry) -> String {
-        format!(". {}", entry.name)
+        format!(". {}", entry.value)
     }
 
     fn format_function(&self, entry: &Entry) -> String {
@@ -65,6 +120,9 @@ impl Formatter for PowerShellFormatter {
                 }
             }
         } else {
+            // Find comments attached to entries
+            let attached_comments = self.find_attached_comments(entries);
+
             let mut grouped: std::collections::HashMap<EntryType, Vec<&Entry>> =
                 std::collections::HashMap::new();
             let mut type_first_line: std::collections::HashMap<EntryType, usize> =
@@ -117,6 +175,17 @@ impl Formatter for PowerShellFormatter {
             for entry in sorted_entries {
                 match entry.entry_type {
                     EntryType::Code | EntryType::Comment => {
+                        // Skip comments that are attached to other entries (they'll be output with those entries)
+                        if entry.entry_type == EntryType::Comment {
+                            let entry_line = entry.line_number.unwrap_or(0);
+                            let is_attached = attached_comments.values().any(|comments| {
+                                comments.iter().any(|c| c.line_number == Some(entry_line))
+                            });
+                            if is_attached {
+                                continue;
+                            }
+                        }
+
                         if entry.entry_type == EntryType::Code && entry.value.is_empty() {
                             if let (Some(start), Some(end)) = (entry.line_number, entry.end_line) {
                                 for _ in 0..(end - start + 1) {
@@ -142,6 +211,16 @@ impl Formatter for PowerShellFormatter {
 
                             if let Some(type_entries) = grouped.get(&entry_type) {
                                 for grouped_entry in type_entries {
+                                    // Output attached comments before the entry
+                                    if let Some(comments) = attached_comments
+                                        .get(&grouped_entry.line_number.unwrap_or(0))
+                                    {
+                                        for comment in comments {
+                                            output.push_str(&self.format_entry(comment));
+                                            output.push('\n');
+                                        }
+                                    }
+
                                     output.push_str(&self.format_entry(grouped_entry));
                                     output.push('\n');
                                 }
@@ -189,6 +268,15 @@ mod tests {
         let formatter = PowerShellFormatter::new();
         let entry = Entry::new(EntryType::EnvVar, "EDITOR".into(), "code".into());
         assert_eq!(formatter.format_entry(&entry), "$env:EDITOR = \"code\"");
+    }
+
+    #[test]
+    fn test_format_env_multiline() {
+        let formatter = PowerShellFormatter::new();
+        let value = "C:\\Program Files\\bin\nD:\\tools\nE:\\bin";
+        let entry = Entry::new(EntryType::EnvVar, "PATH".into(), value.into());
+        let expected = "$env:PATH = @\"\nC:\\Program Files\\bin\nD:\\tools\nE:\\bin\n\"@";
+        assert_eq!(formatter.format_entry(&entry), expected);
     }
 
     #[test]

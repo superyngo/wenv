@@ -5,10 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-        KeyModifiers, MouseEventKind,
-    },
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -24,11 +21,12 @@ pub enum AppMode {
     ShowingDetail,
     ShowingHelp,
     ConfirmDelete,
-    ConfirmQuit,   // Confirm quit with unsaved changes
-    ConfirmFormat, // Confirm format with preview
-    SelectingType, // For [a]Add - selecting entry type
-    Editing,       // Unified editing mode
-    Moving,        // Moving entry up/down
+    ConfirmQuit,           // Confirm quit with unsaved changes
+    ConfirmFormat,         // Confirm format with preview
+    ConfirmSaveWithErrors, // Confirm save despite shell validation errors
+    SelectingType,         // For [a]Add - selecting entry type
+    Editing,               // Unified editing mode
+    Moving,                // Moving entry up/down
 }
 
 /// Edit field focus
@@ -156,6 +154,10 @@ pub struct TuiApp {
 
     // Clipboard state (internal buffer, not system clipboard)
     pub clipboard_buffer: Option<String>,
+
+    // Shell validation state
+    pub validation_errors: Option<String>,
+    pub validation_scroll_offset: usize,
 }
 
 impl TuiApp {
@@ -199,6 +201,8 @@ impl TuiApp {
             selection_anchor: None,
             selected_range: None,
             clipboard_buffer: None,
+            validation_errors: None,
+            validation_scroll_offset: 0,
         })
     }
 
@@ -207,7 +211,7 @@ impl TuiApp {
         // Setup terminal
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        execute!(stdout, EnterAlternateScreen)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
@@ -216,11 +220,7 @@ impl TuiApp {
 
         // Restore terminal
         disable_raw_mode()?;
-        execute!(
-            terminal.backend_mut(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        )?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
         terminal.show_cursor()?;
 
         result
@@ -276,6 +276,16 @@ impl TuiApp {
                             }
                         }
                     }
+                    AppMode::ConfirmFormat => {
+                        if let Some(ref mut preview) = self.format_preview {
+                            preview.scroll_offset = preview.scroll_offset.saturating_sub(3);
+                        }
+                    }
+                    AppMode::SelectingType => {
+                        if self.type_selection_index > 0 {
+                            self.type_selection_index -= 1;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -298,6 +308,17 @@ impl TuiApp {
                             }
                         }
                     }
+                    AppMode::ConfirmFormat => {
+                        if let Some(ref mut preview) = self.format_preview {
+                            preview.scroll_offset = preview.scroll_offset.saturating_add(3);
+                        }
+                    }
+                    AppMode::SelectingType => {
+                        const NUM_TYPES: usize = 5;
+                        if self.type_selection_index < NUM_TYPES - 1 {
+                            self.type_selection_index += 1;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -316,6 +337,9 @@ impl TuiApp {
             AppMode::ConfirmDelete => self.handle_confirm_delete_mode(key.code)?,
             AppMode::ConfirmQuit => self.handle_confirm_quit_mode(key.code)?,
             AppMode::ConfirmFormat => self.handle_confirm_format_mode(key.code)?,
+            AppMode::ConfirmSaveWithErrors => {
+                self.handle_confirm_save_with_errors_mode(key.code)?
+            }
             AppMode::SelectingType => self.handle_selecting_type_mode(key.code)?,
             AppMode::Editing => self.handle_editing_mode(key.code)?,
             AppMode::Moving => self.handle_moving_mode(key.code)?,
@@ -542,6 +566,58 @@ impl TuiApp {
         Ok(())
     }
 
+    /// Handle keys in confirm save with errors mode
+    fn handle_confirm_save_with_errors_mode(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                // User confirmed, force save without validation
+                self.validation_errors = None;
+                self.validation_scroll_offset = 0;
+
+                // Check if this is from format or normal save
+                if self.format_preview.is_some() {
+                    // Apply format without validation
+                    self.force_apply_format()?;
+                } else {
+                    self.force_save_to_original_file()?;
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                // Cancel save/format
+                self.validation_errors = None;
+                self.validation_scroll_offset = 0;
+
+                if self.format_preview.is_some() {
+                    // Return to format preview mode
+                    self.mode = AppMode::ConfirmFormat;
+                    self.message = Some("Format cancelled due to validation errors".to_string());
+                } else {
+                    self.mode = AppMode::Normal;
+                    self.message = Some("Save cancelled due to validation errors".to_string());
+                }
+            }
+            // Scroll through error message
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.validation_scroll_offset = self.validation_scroll_offset.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.validation_scroll_offset = self.validation_scroll_offset.saturating_add(1);
+            }
+            KeyCode::PageUp => {
+                self.validation_scroll_offset = self.validation_scroll_offset.saturating_sub(10);
+            }
+            KeyCode::PageDown => {
+                self.validation_scroll_offset = self.validation_scroll_offset.saturating_add(10);
+            }
+            KeyCode::Home => {
+                self.validation_scroll_offset = 0;
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     /// Handle type selection mode for Add
     fn handle_selecting_type_mode(&mut self, key: KeyCode) -> Result<()> {
         const NUM_TYPES: usize = 5; // Alias, Function, EnvVar, Source, Code/Comment
@@ -668,11 +744,19 @@ impl TuiApp {
                     // Submit the edit
                     self.submit_editing()?;
                 } else if state.field == EditField::Value {
-                    // For Source type, Enter submits directly (single-line only)
-                    if state.entry_type == EntryType::Source {
-                        self.submit_editing()?;
+                    // For PowerShell: Source/Alias are single-line, Enter jumps to Submit
+                    // For Bash: only Source is single-line
+                    let is_single_line = if self.shell_type == ShellType::PowerShell {
+                        matches!(state.entry_type, EntryType::Source | EntryType::Alias)
                     } else {
-                        // Insert newline in value field for other types
+                        state.entry_type == EntryType::Source
+                    };
+
+                    if is_single_line {
+                        // Jump to Submit button (user needs to press Enter again to confirm)
+                        state.field = EditField::Submit;
+                    } else {
+                        // Insert newline in value field for multi-line types
                         state.value_buffer.insert(state.cursor_position, '\n');
                         state.cursor_position += 1;
                         state.cursor_row += 1;
@@ -750,10 +834,10 @@ impl TuiApp {
                         // Find the previous character boundary
                         let new_pos =
                             prev_char_boundary(&state.value_buffer, state.cursor_position);
-                        let removed: String = state
-                            .value_buffer
-                            .drain(new_pos..state.cursor_position)
-                            .collect();
+                        // Ensure cursor_position doesn't exceed buffer length
+                        let safe_cursor = state.cursor_position.min(state.value_buffer.len());
+                        let removed: String =
+                            state.value_buffer.drain(new_pos..safe_cursor).collect();
                         state.cursor_position = new_pos;
                         if removed.contains('\n') {
                             // Recalculate row and col
@@ -1341,6 +1425,26 @@ impl TuiApp {
         if let Some(preview) = self.format_preview.take() {
             let config = crate::config::load_or_create_config()?;
 
+            // Write formatted content to temp file for validation
+            std::fs::write(&self.temp_file_path, &preview.formatted_content)?;
+
+            // Validate with shell
+            match self.validate_with_shell()? {
+                Some(error_msg) => {
+                    // Validation failed, show confirmation dialog
+                    self.validation_errors = Some(error_msg);
+                    self.validation_scroll_offset = 0;
+                    self.mode = AppMode::ConfirmSaveWithErrors;
+                    self.message = Some("Shell validation failed after formatting. Review errors and confirm to apply anyway.".to_string());
+                    // Restore preview for potential retry
+                    self.format_preview = Some(preview);
+                    return Ok(());
+                }
+                None => {
+                    // Validation passed
+                }
+            }
+
             // Create backup before writing
             let backup_manager = crate::backup::BackupManager::new(self.shell_type, &config);
             backup_manager.create_backup(&self.file_path)?;
@@ -1362,6 +1466,27 @@ impl TuiApp {
         self.format_preview = None;
         self.mode = AppMode::Normal;
         self.message = Some("Format cancelled".to_string());
+    }
+
+    /// Force apply format without validation (after user confirmation)
+    fn force_apply_format(&mut self) -> Result<()> {
+        if let Some(preview) = self.format_preview.take() {
+            let config = crate::config::load_or_create_config()?;
+
+            // Create backup before writing
+            let backup_manager = crate::backup::BackupManager::new(self.shell_type, &config);
+            backup_manager.create_backup(&self.file_path)?;
+
+            // Write formatted content
+            std::fs::write(&self.file_path, preview.formatted_content)?;
+
+            // Refresh entries
+            self.refresh()?;
+            self.mode = AppMode::Normal;
+            self.message = Some("File formatted successfully (validation bypassed)".to_string());
+        }
+
+        Ok(())
     }
 
     /// Start adding a new entry (show type selection menu)
@@ -1574,8 +1699,26 @@ impl TuiApp {
         Ok(())
     }
 
-    /// Save entries to original file (with backup)
+    /// Save entries to original file (with backup and validation)
     fn save_to_original_file(&mut self) -> Result<()> {
+        // Validate with shell first
+        match self.validate_with_shell()? {
+            Some(error_msg) => {
+                // Validation failed, show confirmation dialog
+                self.validation_errors = Some(error_msg);
+                self.validation_scroll_offset = 0;
+                self.mode = AppMode::ConfirmSaveWithErrors;
+                self.message = Some(
+                    "Shell validation failed. Review errors and confirm to save anyway."
+                        .to_string(),
+                );
+                return Ok(());
+            }
+            None => {
+                // Validation passed, proceed with save
+            }
+        }
+
         // Create backup
         let config = crate::config::load_or_create_config()?;
         let backup_manager = crate::backup::BackupManager::new(self.shell_type, &config);
@@ -1870,6 +2013,74 @@ impl TuiApp {
             self.message = Some("Clipboard is empty".to_string());
         }
 
+        Ok(())
+    }
+
+    /// Validate temp file using shell syntax check
+    fn validate_with_shell(&self) -> Result<Option<String>> {
+        let file_to_check = if self.temp_file_path.exists() {
+            &self.temp_file_path
+        } else {
+            &self.file_path
+        };
+
+        let (cmd, args): (&str, Vec<String>) = match self.shell_type {
+            ShellType::Bash => {
+                let path_str = file_to_check.to_string_lossy().to_string();
+                ("bash", vec!["-n".to_string(), path_str])
+            }
+            ShellType::PowerShell => {
+                let path_str = file_to_check.display().to_string();
+                let script = format!(
+                    "try {{ $null = [ScriptBlock]::Create((Get-Content '{}' -Raw)) }} catch {{ Write-Error $_.Exception.Message; exit 1 }}",
+                    path_str.replace('\\', "\\\\").replace('\'', "''")
+                );
+                ("pwsh", vec!["-Command".to_string(), script])
+            }
+        };
+
+        let output = std::process::Command::new(cmd).args(&args).output();
+
+        match output {
+            Ok(output) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let error_msg = if !stderr.is_empty() {
+                        stderr.to_string()
+                    } else {
+                        stdout.to_string()
+                    };
+                    Ok(Some(error_msg))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => {
+                // Shell command not available, skip validation
+                eprintln!("Warning: Shell validation failed: {}", e);
+                Ok(None)
+            }
+        }
+    }
+
+    /// Save to original file without validation (force save)
+    fn force_save_to_original_file(&mut self) -> Result<()> {
+        // Create backup
+        let config = crate::config::load_or_create_config()?;
+        let backup_manager = crate::backup::BackupManager::new(self.shell_type, &config);
+        backup_manager.create_backup(&self.file_path)?;
+
+        // Generate content and write
+        let content = self.generate_file_content();
+        std::fs::write(&self.file_path, &content)?;
+
+        // Clean up temp file and reset dirty flag
+        self.cleanup_temp_file();
+        self.dirty = false;
+
+        self.mode = AppMode::Normal;
+        self.message = Some("File saved (validation bypassed)".to_string());
         Ok(())
     }
 }

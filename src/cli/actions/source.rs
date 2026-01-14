@@ -9,7 +9,13 @@ use crate::cli::context::Context;
 
 /// Execute the source action (open config file in editor)
 pub fn execute(ctx: &Context) -> Result<()> {
-    let editor = env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+    let editor = env::var("EDITOR").unwrap_or_else(|_| {
+        if cfg!(windows) {
+            "notepad".to_string()
+        } else {
+            "vi".to_string()
+        }
+    });
 
     println!(
         "Opening {} in {}...",

@@ -120,6 +120,39 @@ pub fn detect_function_start(line: &str) -> Option<String> {
     None
 }
 
+/// Detect if a line starts an environment variable Here-String.
+///
+/// Matches: `$env:VAR = @"`
+///
+/// # Arguments
+///
+/// - `line`: The trimmed line to check
+///
+/// # Returns
+///
+/// `Some(variable_name)` if this is a Here-String start, `None` otherwise.
+pub fn detect_env_heredoc_start(line: &str) -> Option<String> {
+    if let Some(caps) = ENV_HEREDOC_START_RE.captures(line) {
+        return Some(caps[1].to_string());
+    }
+    None
+}
+
+/// Check if a line is a Here-String end marker.
+///
+/// Matches: `"@`
+///
+/// # Arguments
+///
+/// - `line`: The trimmed line to check
+///
+/// # Returns
+///
+/// `true` if this is a Here-String end marker.
+pub fn is_heredoc_end(line: &str) -> bool {
+    line == r#""@"#
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +197,26 @@ mod tests {
             Some("Test-Func".into())
         );
         assert_eq!(detect_function_start("Write-Host 'hello'"), None);
+    }
+
+    #[test]
+    fn test_detect_env_heredoc_start() {
+        assert_eq!(
+            detect_env_heredoc_start(r#"$env:PATH = @""#),
+            Some("PATH".into())
+        );
+        assert_eq!(
+            detect_env_heredoc_start(r#"$env:CONFIG = @""#),
+            Some("CONFIG".into())
+        );
+        assert_eq!(detect_env_heredoc_start(r#"$env:VAR = "value""#), None);
+    }
+
+    #[test]
+    fn test_is_heredoc_end() {
+        assert!(is_heredoc_end(r#""@"#));
+        assert!(!is_heredoc_end(r#""#));
+        assert!(!is_heredoc_end(r#"@""#));
+        assert!(!is_heredoc_end(r#"  "@  "#));
     }
 }
