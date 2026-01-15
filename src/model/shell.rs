@@ -65,7 +65,7 @@ impl ShellType {
                 // Try to query the shell directly for the profile path
                 let get_profile = |cmd: &str| -> Option<PathBuf> {
                     Command::new(cmd)
-                        .args(&["-NoProfile", "-Command", "Write-Output $PROFILE"])
+                        .args(&["-NoProfile", "-Command", "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output $PROFILE"])
                         .output()
                         .ok()
                         .and_then(|output| {
