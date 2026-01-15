@@ -5,7 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-01-15
+
+### Added
+- **Undo/Redo support**: Full undo/redo functionality with Ctrl+Z/Ctrl+Y
+  - Tracks up to 50 operations in history
+  - Works for all temp file modifications (add, edit, delete, move, paste, toggle comment)
+  - Memory-efficient snapshot-based implementation
+  - No impact on visual buffer rendering
+- **Editor Shortcut**: Support `wenv .` to quickly open the configuration file in the default editor
+- **Copy/Paste Shortcuts**: Added Alt+C/V as alternative keybindings for copy/paste in TUI
+
+### Changed
+- **PowerShell Detection**: Improved profile path detection to better respect standard Windows PowerShell locations
+- **TUI UX**: Simplified save hotkey and visual improvements
 
 ## [0.3.0] - 2026-01-14
 

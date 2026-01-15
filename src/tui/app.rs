@@ -135,8 +135,7 @@ pub struct TuiApp {
     pub type_selection_index: usize,
     pub type_list_scroll_offset: usize,
 
-    // Move mode original position
-    pub move_original_index: Option<usize>,
+    // Move mode - no longer needed (using reload on cancel)
 
     // Detail popup scroll offset
     pub detail_scroll: usize,
@@ -158,6 +157,11 @@ pub struct TuiApp {
     // Shell validation state
     pub validation_errors: Option<String>,
     pub validation_scroll_offset: usize,
+
+    // Undo/Redo state (stores full temp file content snapshots)
+    pub undo_stack: Vec<String>,
+    pub redo_stack: Vec<String>,
+    pub max_undo_history: usize,
 }
 
 impl TuiApp {
@@ -178,6 +182,9 @@ impl TuiApp {
             file_path.with_file_name(format!("{}.wenv.tmp", filename))
         };
 
+        // Initialize temp file with original content at startup
+        std::fs::write(&temp_file_path, &file_content)?;
+
         Ok(Self {
             entries,
             selected_index: 0,
@@ -193,7 +200,7 @@ impl TuiApp {
             format_preview: None,
             type_selection_index: 0,
             type_list_scroll_offset: 0,
-            move_original_index: None,
+
             detail_scroll: 0,
             messages,
             dirty: false,
@@ -203,6 +210,9 @@ impl TuiApp {
             clipboard_buffer: None,
             validation_errors: None,
             validation_scroll_offset: 0,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            max_undo_history: 50,
         })
     }
 
@@ -263,7 +273,7 @@ impl TuiApp {
                         self.move_up();
                     }
                     AppMode::Moving => {
-                        self.move_entry_up();
+                        self.move_selection_up();
                     }
                     AppMode::ShowingDetail => {
                         self.detail_scroll = self.detail_scroll.saturating_sub(3);
@@ -295,7 +305,7 @@ impl TuiApp {
                         self.move_down();
                     }
                     AppMode::Moving => {
-                        self.move_entry_down();
+                        self.move_selection_down();
                     }
                     AppMode::ShowingDetail => {
                         self.detail_scroll = self.detail_scroll.saturating_add(3);
@@ -352,19 +362,37 @@ impl TuiApp {
     fn handle_normal_mode(&mut self, key: KeyEvent) -> Result<()> {
         let has_shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let has_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let has_alt = key.modifiers.contains(KeyModifiers::ALT);
 
         match key.code {
-            // Ctrl+S: Save to original file
+            // Ctrl+S or s: Save to original file
             KeyCode::Char('s') if has_ctrl => {
                 self.save_to_original_file()?;
             }
-            // Ctrl+C: Copy selected entries
+            KeyCode::Char('s') if !has_ctrl && !has_shift && !has_alt => {
+                self.save_to_original_file()?;
+            }
+            // Ctrl+C or Alt+C: Copy selected entries
             KeyCode::Char('c') if has_ctrl => {
                 self.copy_selected()?;
             }
-            // Ctrl+V: Paste from clipboard
+            KeyCode::Char('c') if has_alt => {
+                self.copy_selected()?;
+            }
+            // Ctrl+V or Alt+V: Paste from clipboard
             KeyCode::Char('v') if has_ctrl => {
                 self.paste_entry()?;
+            }
+            KeyCode::Char('v') if has_alt => {
+                self.paste_entry()?;
+            }
+            // Ctrl+Z: Undo
+            KeyCode::Char('z') if has_ctrl => {
+                self.undo()?;
+            }
+            // Ctrl+Y: Redo
+            KeyCode::Char('y') if has_ctrl => {
+                self.redo()?;
             }
             // Quit
             KeyCode::Char('q') | KeyCode::Esc => {
@@ -429,7 +457,7 @@ impl TuiApp {
                 self.start_editing();
             }
             KeyCode::Char('m') => {
-                self.clear_selection();
+                // Don't clear selection - support moving selected block
                 self.start_moving();
             }
             KeyCode::Char('t') => {
@@ -1062,31 +1090,20 @@ impl TuiApp {
     fn handle_moving_mode(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Up | KeyCode::Char('k') => {
-                self.move_entry_up();
+                self.move_selection_up();
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.move_entry_down();
+                self.move_selection_down();
             }
             KeyCode::Enter => {
-                // Confirm move - update line numbers to reflect new order
-                self.reindex_line_numbers();
-                self.save_to_file()?;
-                self.mode = AppMode::Normal;
-                self.move_original_index = None;
-                self.message = Some("Entry moved successfully".to_string());
+                // Confirm move - write to file using line-based cut-paste
+                self.confirm_move()?;
             }
             KeyCode::Esc | KeyCode::Char('q') => {
-                // Cancel move - restore original position
-                if let Some(original) = self.move_original_index {
-                    // Swap back to original position
-                    if original != self.selected_index {
-                        let entry = self.entries.remove(self.selected_index);
-                        self.entries.insert(original, entry);
-                        self.selected_index = original;
-                    }
-                }
+                // Cancel move - reload from temp file to discard buffer changes
+                self.reload_from_temp()?;
                 self.mode = AppMode::Normal;
-                self.move_original_index = None;
+                self.clear_selection();
                 self.message = None;
             }
             _ => {}
@@ -1094,40 +1111,158 @@ impl TuiApp {
         Ok(())
     }
 
-    /// Reindex line numbers to match current entry order
-    /// This ensures the formatter preserves the user's intended order
-    fn reindex_line_numbers(&mut self) {
-        let mut line = 1;
-        for entry in &mut self.entries {
-            entry.line_number = Some(line);
-            // For multi-line entries, calculate end_line based on content
-            let line_count = entry.value.lines().count().max(1);
-            if line_count > 1 {
-                entry.end_line = Some(line + line_count - 1);
-                line += line_count;
-            } else {
-                entry.end_line = None;
-                line += 1;
-            }
+    /// Get sorted indices of selected entries (or current index if no selection)
+    fn get_selected_indices_sorted(&self) -> Vec<usize> {
+        if self.selected_range.is_some() {
+            // Multi-selection: get range
+            let (min, max) = self.selected_range.unwrap();
+            (min..=max).collect()
+        } else {
+            // Single selection: just current index
+            vec![self.selected_index]
         }
     }
 
-    /// Move entry up in the list
-    fn move_entry_up(&mut self) {
-        if self.selected_index > 0 {
-            self.entries
-                .swap(self.selected_index, self.selected_index - 1);
-            self.selected_index -= 1;
+    /// Move selected block up (buffer-level operation for preview)
+    fn move_selection_up(&mut self) {
+        let indices = self.get_selected_indices_sorted();
+        if indices.is_empty() || indices[0] == 0 {
+            return; // Already at top
         }
+
+        let first = indices[0];
+        let count = indices.len();
+
+        // Extract selected entries (cut)
+        let mut extracted: Vec<Entry> = indices
+            .iter()
+            .rev()
+            .map(|&i| self.entries.remove(i))
+            .collect();
+        extracted.reverse();
+
+        // Insert above (paste)
+        let insert_pos = first - 1;
+        for (offset, entry) in extracted.into_iter().enumerate() {
+            self.entries.insert(insert_pos + offset, entry);
+        }
+
+        // Update selection range
+        if let Some((min, max)) = self.selected_range {
+            self.selected_range = Some((min - 1, max - 1));
+            self.selection_anchor = self.selection_anchor.map(|a| a.saturating_sub(1));
+        }
+
+        // Update cursor position
+        if self.selected_index >= first && self.selected_index < first + count {
+            self.selected_index = self.selected_index.saturating_sub(1);
+        }
+
+        self.adjust_scroll_for_selection();
     }
 
-    /// Move entry down in the list
-    fn move_entry_down(&mut self) {
-        if self.selected_index < self.entries.len().saturating_sub(1) {
-            self.entries
-                .swap(self.selected_index, self.selected_index + 1);
+    /// Move selected block down (buffer-level operation for preview)
+    fn move_selection_down(&mut self) {
+        let indices = self.get_selected_indices_sorted();
+        if indices.is_empty() || *indices.last().unwrap() >= self.entries.len() - 1 {
+            return; // Already at bottom
+        }
+
+        let first = indices[0];
+        let count = indices.len();
+
+        // Extract selected entries (cut)
+        let mut extracted: Vec<Entry> = indices
+            .iter()
+            .rev()
+            .map(|&i| self.entries.remove(i))
+            .collect();
+        extracted.reverse();
+
+        // Insert below (paste)
+        let insert_pos = first + 1;
+        for (offset, entry) in extracted.into_iter().enumerate() {
+            self.entries.insert(insert_pos + offset, entry);
+        }
+
+        // Update selection range
+        if let Some((min, max)) = self.selected_range {
+            self.selected_range = Some((min + 1, max + 1));
+            self.selection_anchor = self.selection_anchor.map(|a| a + 1);
+        }
+
+        // Update cursor position
+        if self.selected_index >= first && self.selected_index < first + count {
             self.selected_index += 1;
         }
+
+        self.adjust_scroll_for_selection();
+    }
+
+    /// Confirm move: write changes to temp file using line-based cut-paste
+    fn confirm_move(&mut self) -> Result<()> {
+        let indices = self.get_selected_indices_sorted();
+        if indices.is_empty() {
+            self.mode = AppMode::Normal;
+            return Ok(());
+        }
+
+        // Get selected entries
+        let selected_entries: Vec<&Entry> = indices.iter().map(|&i| &self.entries[i]).collect();
+
+        // Extract file line range for the selected block
+        let start_line = selected_entries
+            .iter()
+            .filter_map(|e| e.line_number)
+            .min()
+            .ok_or_else(|| anyhow::anyhow!("Selected entries have no line numbers"))?;
+
+        let end_line = selected_entries
+            .iter()
+            .filter_map(|e| e.end_line.or(e.line_number))
+            .max()
+            .ok_or_else(|| anyhow::anyhow!("Cannot determine end line"))?;
+
+        // Read all lines from temp file or original file
+        let content = self.read_current_content()?;
+        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
+        // Cut the selected lines (line numbers are 1-indexed, array is 0-indexed)
+        let cut_start = (start_line - 1).min(lines.len());
+        let cut_end = end_line.min(lines.len());
+        let extracted_lines: Vec<String> = lines.drain(cut_start..cut_end).collect();
+
+        // Calculate insert position based on buffer position
+        let new_first_index = indices[0];
+        let insert_line = if new_first_index == 0 {
+            1 // Insert at file beginning
+        } else {
+            // Find the line number after the previous entry
+            let prev_entry = &self.entries[new_first_index - 1];
+            prev_entry
+                .end_line
+                .unwrap_or(prev_entry.line_number.unwrap_or(1))
+                + 1
+        };
+
+        // Insert at new position
+        let insert_index = (insert_line - 1).min(lines.len());
+        for (offset, line) in extracted_lines.iter().enumerate() {
+            lines.insert(insert_index + offset, line.clone());
+        }
+
+        // Write back to temp file
+        let new_content = lines.join("\n") + "\n";
+        self.write_temp_with_undo(&new_content)?;
+
+        // Reload from temp file to sync state
+        self.reload_from_temp()?;
+
+        self.mode = AppMode::Normal;
+        self.clear_selection();
+        self.message = Some(format!("Moved {} entries", indices.len()));
+
+        Ok(())
     }
 
     /// Move selection up
@@ -1255,8 +1390,7 @@ impl TuiApp {
         } else {
             new_lines.join("\n") + "\n"
         };
-        std::fs::write(&self.temp_file_path, &new_content)?;
-        self.dirty = true;
+        self.write_temp_with_undo(&new_content)?;
         self.reload_from_temp()?;
 
         // Adjust selection
@@ -1530,12 +1664,26 @@ impl TuiApp {
         }
     }
 
-    /// Start moving the selected entry
+    /// Start moving the selected entry or selection
     fn start_moving(&mut self) {
         if !self.entries.is_empty() {
+            // Don't clear selection - support multi-select moving
+            // If no selection exists, auto-select current entry
+            if self.selected_range.is_none() {
+                self.selected_range = Some((self.selected_index, self.selected_index));
+            }
+
             self.mode = AppMode::Moving;
-            self.move_original_index = Some(self.selected_index);
-            self.message = Some("Use ↑/↓ to move, Enter to confirm, Esc to cancel".to_string());
+
+            let count = self.get_selected_indices_sorted().len();
+            if count == 1 {
+                self.message = Some("Use ↑/↓ to move, Enter to confirm, Esc to cancel".to_string());
+            } else {
+                self.message = Some(format!(
+                    "Moving {} entries - Use ↑/↓, Enter to confirm, Esc to cancel",
+                    count
+                ));
+            }
         }
     }
 
@@ -1593,8 +1741,7 @@ impl TuiApp {
 
             // Write to temp file and reload
             let new_content = lines.join("\n") + "\n";
-            std::fs::write(&self.temp_file_path, &new_content)?;
-            self.dirty = true;
+            self.write_temp_with_undo(&new_content)?;
             self.reload_from_temp()?;
 
             // Select the newly inserted entry
@@ -1630,8 +1777,7 @@ impl TuiApp {
 
                 // Write to temp file and reload
                 let new_content = lines.join("\n") + "\n";
-                std::fs::write(&self.temp_file_path, &new_content)?;
-                self.dirty = true;
+                self.write_temp_with_undo(&new_content)?;
                 self.reload_from_temp()?;
 
                 // Re-select the entry
@@ -1671,6 +1817,7 @@ impl TuiApp {
 
     /// Save entries to temp file (preserves original order, no reformatting)
     /// After writing, reloads from temp to ensure entries match file content
+    #[allow(dead_code)]
     fn save_to_temp(&mut self) -> Result<()> {
         let content = self.generate_file_content();
         std::fs::write(&self.temp_file_path, &content)?;
@@ -1750,6 +1897,66 @@ impl TuiApp {
         } else {
             Ok(std::fs::read_to_string(&self.file_path)?)
         }
+    }
+
+    /// Write to temp file with undo support
+    /// Saves current content to undo stack before writing
+    fn write_temp_with_undo(&mut self, new_content: &str) -> Result<()> {
+        // Save current content to undo stack before modifying
+        let current_content = self.read_current_content()?;
+        self.undo_stack.push(current_content);
+
+        // Limit undo stack size
+        if self.undo_stack.len() > self.max_undo_history {
+            self.undo_stack.remove(0);
+        }
+
+        // Clear redo stack (new action invalidates redo history)
+        self.redo_stack.clear();
+
+        // Write new content
+        std::fs::write(&self.temp_file_path, new_content)?;
+        self.dirty = true;
+
+        Ok(())
+    }
+
+    /// Undo last change
+    pub fn undo(&mut self) -> Result<()> {
+        if let Some(previous_content) = self.undo_stack.pop() {
+            // Save current content to redo stack
+            let current_content = self.read_current_content()?;
+            self.redo_stack.push(current_content);
+
+            // Restore previous content
+            std::fs::write(&self.temp_file_path, &previous_content)?;
+            self.dirty = true;
+            self.reload_from_temp()?;
+
+            self.message = Some("Undo successful".to_string());
+        } else {
+            self.message = Some("Nothing to undo".to_string());
+        }
+        Ok(())
+    }
+
+    /// Redo last undone change
+    pub fn redo(&mut self) -> Result<()> {
+        if let Some(next_content) = self.redo_stack.pop() {
+            // Save current content to undo stack
+            let current_content = self.read_current_content()?;
+            self.undo_stack.push(current_content);
+
+            // Restore next content
+            std::fs::write(&self.temp_file_path, &next_content)?;
+            self.dirty = true;
+            self.reload_from_temp()?;
+
+            self.message = Some("Redo successful".to_string());
+        } else {
+            self.message = Some("Nothing to redo".to_string());
+        }
+        Ok(())
     }
 
     /// Remove comment prefix from a line, preserving leading whitespace
@@ -1855,6 +2062,7 @@ impl TuiApp {
     }
 
     /// Legacy save_to_file - now calls save_to_temp for backward compatibility
+    #[allow(dead_code)]
     fn save_to_file(&mut self) -> Result<()> {
         self.save_to_temp()
     }
@@ -1899,8 +2107,7 @@ impl TuiApp {
 
         // Write to temp file and reload
         let new_content = lines.join("\n") + "\n";
-        std::fs::write(&self.temp_file_path, &new_content)?;
-        self.dirty = true;
+        self.write_temp_with_undo(&new_content)?;
         self.reload_from_temp()?;
 
         self.clear_selection();
@@ -1975,8 +2182,7 @@ impl TuiApp {
                 new_content.push_str(clipboard_content);
                 new_content.push('\n');
 
-                std::fs::write(&self.temp_file_path, &new_content)?;
-                self.dirty = true;
+                self.write_temp_with_undo(&new_content)?;
                 self.reload_from_temp()?;
                 self.message = Some("Entry pasted".to_string());
             } else {
@@ -2003,8 +2209,7 @@ impl TuiApp {
 
                 // Write to temp file and reload
                 let new_content = lines.join("\n") + "\n";
-                std::fs::write(&self.temp_file_path, &new_content)?;
-                self.dirty = true;
+                self.write_temp_with_undo(&new_content)?;
                 self.reload_from_temp()?;
 
                 self.message = Some("Entry pasted".to_string());

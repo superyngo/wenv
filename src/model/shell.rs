@@ -2,6 +2,7 @@
 
 use std::env;
 use std::path::PathBuf;
+use std::process::Command;
 
 /// Supported shell types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +60,28 @@ impl ShellType {
                 // Prioritize $PROFILE environment variable (only available in PowerShell sessions)
                 if let Ok(profile_path) = env::var("PROFILE") {
                     return PathBuf::from(profile_path);
+                }
+
+                // Try to query the shell directly for the profile path
+                let get_profile = |cmd: &str| -> Option<PathBuf> {
+                    Command::new(cmd)
+                        .args(&["-NoProfile", "-Command", "Write-Output $PROFILE"])
+                        .output()
+                        .ok()
+                        .and_then(|output| {
+                            if output.status.success() {
+                                let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                                if !s.is_empty() {
+                                    return Some(PathBuf::from(s));
+                                }
+                            }
+                            None
+                        })
+                };
+
+                // Try pwsh (PowerShell Core) first, then powershell (Windows PowerShell)
+                if let Some(path) = get_profile("pwsh").or_else(|| get_profile("powershell")) {
+                    return path;
                 }
 
                 // Fallback to standard paths

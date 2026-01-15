@@ -140,6 +140,7 @@ The default TUI interface provides:
 - **Add** / **添加**: Create new entries
 - **Delete** / **删除**: Remove unwanted entries
 - **Copy/Paste** / **复制/粘贴**: Copy entries with Ctrl+C and paste with Ctrl+V
+- **Undo/Redo** / **复原/重做**: Undo changes with Ctrl+Z and redo with Ctrl+Y (up to 50 operations)
 - **Format** / **格式化**: Auto-format with preview and confirmation
 - **Save** / **保存**: Apply changes to configuration file (with automatic backup)
 

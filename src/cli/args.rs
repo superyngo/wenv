@@ -39,6 +39,10 @@ pub struct Cli {
     /// Filter by entry type (for export)
     #[arg(short, long)]
     pub r#type: Option<EntryTypeArg>,
+
+    /// Positional command (e.g., "." to open in editor)
+    #[arg(value_name = "COMMAND")]
+    pub command: Option<String>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]

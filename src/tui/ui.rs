@@ -126,7 +126,7 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
         .map(|(i, entry)| {
             let type_color = match entry.entry_type {
                 EntryType::Alias => Color::Green,
-                EntryType::Function => Color::Blue,
+                EntryType::Function => Color::LightBlue,
                 EntryType::EnvVar => Color::Yellow,
                 EntryType::Source => Color::Magenta,
                 EntryType::Code => Color::Cyan,
@@ -244,7 +244,7 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
 /// Draw the status bar
 fn draw_status_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
     let help_text = match app.mode {
-        AppMode::Normal => "[↑/↓]Navigate [Shift+↑/↓]Select [i]Info [a]Add [e]Edit [m]Move [d]Del [t]Toggle [Ctrl+s]Save [?]Help [q]Quit",
+        AppMode::Normal => "[↑/↓]Navigate [Shift+↑/↓]Select [i]Info [a]Add [e]Edit [m]Move [d]Del [t]Toggle [s]Save [?]Help [q]Quit",
         AppMode::ShowingDetail => "[↑/↓/Scroll/PgUp/PgDn]Scroll [e]Edit [Esc]Close",
         AppMode::ShowingHelp => "[q/Esc]Close",
         AppMode::ConfirmDelete => "[y/Enter]Yes [n]No [Esc]Cancel",
@@ -338,7 +338,7 @@ fn draw_detail_popup(f: &mut Frame, app: &mut TuiApp) {
 
     for value_line in entry.value.lines() {
         lines.push(Line::from(Span::styled(
-            format!("  {}", value_line),
+            value_line.to_string(),
             Style::default().fg(Color::Gray),
         )));
     }
@@ -449,12 +449,16 @@ fn draw_help_popup(f: &mut Frame, app: &TuiApp) {
             Span::raw(msg.tui_help_format),
         ]),
         Line::from(vec![
-            Span::styled("Ctrl+S    ", Style::default().fg(Color::Yellow)),
+            Span::styled("s, Ctrl+S ", Style::default().fg(Color::Yellow)),
             Span::raw("Save to file"),
         ]),
         Line::from(vec![
-            Span::styled("Ctrl+C/V  ", Style::default().fg(Color::Yellow)),
-            Span::raw("Copy/Paste entries"),
+            Span::styled("Ctrl/Alt+C", Style::default().fg(Color::Yellow)),
+            Span::raw("Copy entries"),
+        ]),
+        Line::from(vec![
+            Span::styled("Ctrl/Alt+V", Style::default().fg(Color::Yellow)),
+            Span::raw("Paste entries"),
         ]),
         Line::from(vec![
             Span::styled("Shift+↑/↓ ", Style::default().fg(Color::Yellow)),

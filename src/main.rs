@@ -35,7 +35,7 @@ fn main() -> Result<()> {
     if let Some(output) = &cli.export {
         return actions::export::execute(&ctx, cli.r#type, output);
     }
-    if cli.source {
+    if cli.command.as_deref() == Some(".") || cli.source {
         return actions::source::execute(&ctx);
     }
 
