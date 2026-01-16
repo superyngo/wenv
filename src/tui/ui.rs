@@ -33,6 +33,7 @@ pub fn draw(f: &mut Frame, app: &mut TuiApp) {
 
     // Draw popups based on mode
     match app.mode {
+        AppMode::Searching => draw_search_popup(f, app),
         AppMode::ShowingDetail => draw_detail_popup(f, app),
         AppMode::ShowingHelp => draw_help_popup(f, app),
         AppMode::ConfirmDelete => draw_confirm_popup(f, app),
@@ -170,6 +171,9 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
                 .map(|(min, max)| i >= min && i <= max)
                 .unwrap_or(false);
 
+            // Check if this item is a search match
+            let is_search_match = app.search_active && app.search_matches.contains(&i);
+
             let style = if i == app.selected_index {
                 Style::default()
                     .bg(Color::Blue)
@@ -178,6 +182,11 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
             } else if is_in_range {
                 Style::default()
                     .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_search_match {
+                // Highlight search matches with different background
+                Style::default()
+                    .bg(Color::Rgb(40, 40, 0)) // Dark yellow background
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -245,6 +254,7 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
 fn draw_status_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
     let help_text = match app.mode {
         AppMode::Normal => "[↑/↓]Navigate [Shift+↑/↓]Select [i]Info [a]Add [e]Edit [m]Move [d]Del [t]Toggle [s]Save [?]Help [q]Quit",
+        AppMode::Searching => "[Type]Search [Enter]Confirm [Esc]Exit [PgUp/PgDn]Jump",
         AppMode::ShowingDetail => "[↑/↓/Scroll/PgUp/PgDn]Scroll [e]Edit [Esc]Close",
         AppMode::ShowingHelp => "[q/Esc]Close",
         AppMode::ConfirmDelete => "[y/Enter]Yes [n]No [Esc]Cancel",
@@ -259,10 +269,25 @@ fn draw_status_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
     // Build status text with dirty indicator
     let dirty_indicator = if app.dirty { "[*] " } else { "" };
 
-    let status_text = if let Some(ref msg) = app.message {
-        format!("{}{} | {}", dirty_indicator, msg, help_text)
+    // Add search info if search is active
+    let search_info = if app.search_active && app.mode == AppMode::Normal {
+        if !app.search_query.is_empty() {
+            format!(
+                "[Search: \"{}\" ({} matches)] ",
+                app.search_query,
+                app.search_matches.len()
+            )
+        } else {
+            String::new()
+        }
     } else {
-        format!("{}{}", dirty_indicator, help_text)
+        String::new()
+    };
+
+    let status_text = if let Some(ref msg) = app.message {
+        format!("{}{}{} | {}", dirty_indicator, search_info, msg, help_text)
+    } else {
+        format!("{}{}{}", dirty_indicator, search_info, help_text)
     };
 
     let status_style = if app.dirty {
@@ -280,6 +305,66 @@ fn draw_status_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
 }
 
 /// Draw detail popup
+/// Draw search popup
+fn draw_search_popup(f: &mut Frame, app: &TuiApp) {
+    let area = centered_rect(60, 20, f.size());
+
+    // Build search input with cursor
+    let search_display = if app.search_cursor <= app.search_query.len() {
+        let pos = app.search_cursor.min(app.search_query.len());
+        let safe_pos = find_char_boundary(&app.search_query, pos);
+        let (before, after) = app.search_query.split_at(safe_pos);
+        format!("{}│{}", before, after)
+    } else {
+        app.search_query.clone()
+    };
+
+    let match_count = app.search_matches.len();
+    let match_info = if match_count > 0 {
+        format!("({} matches)", match_count)
+    } else {
+        "(no matches)".to_string()
+    };
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "Search",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Query: ", Style::default().fg(Color::Yellow)),
+            Span::styled(&search_display, Style::default().fg(Color::White)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            &match_info,
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "[Enter] Confirm  [Esc] Exit  [PgUp/PgDn] Jump",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    let paragraph = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .title(" Search Entries ")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Black)),
+        )
+        .alignment(Alignment::Center);
+
+    f.render_widget(Clear, area);
+    f.render_widget(paragraph, area);
+}
+
+/// Detail popup
 /// Unified format: Type, Line(s) → Name, Value
 /// Fixed footer for hints
 fn draw_detail_popup(f: &mut Frame, app: &mut TuiApp) {
@@ -441,11 +526,15 @@ fn draw_help_popup(f: &mut Frame, app: &TuiApp) {
             Span::raw("Toggle comment (comment/uncomment)"),
         ]),
         Line::from(vec![
+            Span::styled("f         ", Style::default().fg(Color::Yellow)),
+            Span::raw("Search entries (Name and Value)"),
+        ]),
+        Line::from(vec![
             Span::styled("c         ", Style::default().fg(Color::Yellow)),
             Span::raw(msg.tui_help_check),
         ]),
         Line::from(vec![
-            Span::styled("f         ", Style::default().fg(Color::Yellow)),
+            Span::styled("r         ", Style::default().fg(Color::Yellow)),
             Span::raw(msg.tui_help_format),
         ]),
         Line::from(vec![

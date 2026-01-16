@@ -18,6 +18,7 @@ use crate::model::{Entry, EntryType, ShellType};
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppMode {
     Normal,
+    Searching, // Search mode
     ShowingDetail,
     ShowingHelp,
     ConfirmDelete,
@@ -162,6 +163,12 @@ pub struct TuiApp {
     pub undo_stack: Vec<String>,
     pub redo_stack: Vec<String>,
     pub max_undo_history: usize,
+
+    // Search state
+    pub search_query: String,       // Search query (persistent)
+    pub search_active: bool,        // Search mode active
+    pub search_matches: Vec<usize>, // Matched entry indices
+    pub search_cursor: usize,       // Cursor position in search input
 }
 
 impl TuiApp {
@@ -213,6 +220,10 @@ impl TuiApp {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             max_undo_history: 50,
+            search_query: String::new(),
+            search_active: false,
+            search_matches: Vec::new(),
+            search_cursor: 0,
         })
     }
 
@@ -342,6 +353,7 @@ impl TuiApp {
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
         match self.mode {
             AppMode::Normal => self.handle_normal_mode(key)?,
+            AppMode::Searching => self.handle_searching_mode(key.code)?,
             AppMode::ShowingDetail => self.handle_detail_mode(key.code)?,
             AppMode::ShowingHelp => self.handle_help_mode(key.code)?,
             AppMode::ConfirmDelete => self.handle_confirm_delete_mode(key.code)?,
@@ -439,13 +451,25 @@ impl TuiApp {
             }
             KeyCode::PageUp => {
                 self.clear_selection();
-                self.page_up();
+                if self.search_active && !self.search_matches.is_empty() {
+                    self.jump_to_prev_match();
+                } else {
+                    self.page_up();
+                }
             }
             KeyCode::PageDown => {
                 self.clear_selection();
-                self.page_down();
+                if self.search_active && !self.search_matches.is_empty() {
+                    self.jump_to_next_match();
+                } else {
+                    self.page_down();
+                }
             }
             KeyCode::Char('f') => {
+                self.clear_selection();
+                self.start_search();
+            }
+            KeyCode::Char('r') => {
                 self.format_file()?;
             }
             KeyCode::Char('a') => {
@@ -2287,6 +2311,108 @@ impl TuiApp {
         self.mode = AppMode::Normal;
         self.message = Some("File saved (validation bypassed)".to_string());
         Ok(())
+    }
+
+    /// Start search mode
+    fn start_search(&mut self) {
+        self.mode = AppMode::Searching;
+        self.search_active = true;
+        self.search_cursor = self.search_query.len();
+        self.update_search_matches();
+    }
+
+    /// Handle searching mode keys
+    fn handle_searching_mode(&mut self, key: KeyCode) -> Result<()> {
+        match key {
+            KeyCode::Esc => {
+                // Exit search mode, keep query
+                self.mode = AppMode::Normal;
+            }
+            KeyCode::Enter => {
+                // Confirm search, jump to first match
+                self.mode = AppMode::Normal;
+                if !self.search_matches.is_empty() {
+                    self.selected_index = self.search_matches[0];
+                    self.adjust_scroll_for_selection();
+                }
+            }
+            KeyCode::Char(c) => {
+                self.search_query.insert(self.search_cursor, c);
+                self.search_cursor += c.len_utf8();
+                self.update_search_matches();
+            }
+            KeyCode::Backspace => {
+                if self.search_cursor > 0 {
+                    let new_pos = prev_char_boundary(&self.search_query, self.search_cursor);
+                    self.search_query.drain(new_pos..self.search_cursor);
+                    self.search_cursor = new_pos;
+                    self.update_search_matches();
+                }
+            }
+            KeyCode::Left => {
+                if self.search_cursor > 0 {
+                    self.search_cursor = prev_char_boundary(&self.search_query, self.search_cursor);
+                }
+            }
+            KeyCode::Right => {
+                if self.search_cursor < self.search_query.len() {
+                    self.search_cursor = next_char_boundary(&self.search_query, self.search_cursor);
+                }
+            }
+            KeyCode::PageDown => self.jump_to_next_match(),
+            KeyCode::PageUp => self.jump_to_prev_match(),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Update search matches (search Name and Value)
+    fn update_search_matches(&mut self) {
+        self.search_matches.clear();
+        if self.search_query.is_empty() {
+            return;
+        }
+        let query_lower = self.search_query.to_lowercase();
+        for (i, entry) in self.entries.iter().enumerate() {
+            if entry.name.to_lowercase().contains(&query_lower)
+                || entry.value.to_lowercase().contains(&query_lower)
+            {
+                self.search_matches.push(i);
+            }
+        }
+    }
+
+    /// Jump to next match
+    fn jump_to_next_match(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        // Find first match after current position
+        let next = self
+            .search_matches
+            .iter()
+            .find(|&&idx| idx > self.selected_index)
+            .copied()
+            .unwrap_or(self.search_matches[0]); // Loop to first
+        self.selected_index = next;
+        self.adjust_scroll_for_selection();
+    }
+
+    /// Jump to previous match
+    fn jump_to_prev_match(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        // Find last match before current position
+        let prev = self
+            .search_matches
+            .iter()
+            .rev()
+            .find(|&&idx| idx < self.selected_index)
+            .copied()
+            .unwrap_or(*self.search_matches.last().unwrap()); // Loop to last
+        self.selected_index = prev;
+        self.adjust_scroll_for_selection();
     }
 }
 
