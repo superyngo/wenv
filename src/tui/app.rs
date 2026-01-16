@@ -407,11 +407,27 @@ impl TuiApp {
                 self.redo()?;
             }
             // Quit
-            KeyCode::Char('q') | KeyCode::Esc => {
+            KeyCode::Char('q') => {
                 if self.dirty {
                     self.mode = AppMode::ConfirmQuit;
                 } else {
                     self.should_quit = true;
+                }
+            }
+            KeyCode::Esc => {
+                if self.search_active {
+                    // Close search mode: clear highlights and search state
+                    self.search_active = false;
+                    self.search_query.clear();
+                    self.search_matches.clear();
+                    self.search_cursor = 0;
+                } else {
+                    // When not in search mode, behave same as 'q'
+                    if self.dirty {
+                        self.mode = AppMode::ConfirmQuit;
+                    } else {
+                        self.should_quit = true;
+                    }
                 }
             }
             KeyCode::Char('?') => {
