@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.5.0] - 2026-01-16
+
+### Added
+- **TUI Search Mode**: Press `f` to search entries by Name and Value with PageUp/PageDown navigation between matches
+  - Search input with live match count display
+  - Highlighted search matches in the entry list
+  - Persistent search query even after exiting search mode
+  - Navigate matches with PageUp/PageDown
+
+### Changed
+- Format function key changed from `f` to `r` to accommodate search mode
+
 ## [0.4.1] - 2026-01-15
 
 ### Fixed
