@@ -257,7 +257,7 @@ fn draw_status_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
         AppMode::Searching => "[Type]Search [Enter]Confirm [Esc]Exit [PgUp/PgDn]Jump",
         AppMode::ShowingDetail => "[↑/↓/Scroll/PgUp/PgDn]Scroll [e]Edit [Esc]Close",
         AppMode::ShowingHelp => "[q/Esc]Close",
-        AppMode::ConfirmDelete => "[y/Enter]Yes [n]No [Esc]Cancel",
+        AppMode::ConfirmDelete => "[↑/↓/PgUp/PgDn]Scroll [y/Enter]Yes [n/Esc]No",
         AppMode::ConfirmQuit => "[y]Save & Quit [n]Discard [Esc]Cancel",
         AppMode::ConfirmFormat => "[y/Enter]Apply [n/Esc]Cancel [↑↓]Scroll",
         AppMode::ConfirmSaveWithErrors => "[y/Enter]Save Anyway [n/Esc]Cancel [↑↓]Scroll",
@@ -597,68 +597,177 @@ fn draw_help_popup(f: &mut Frame, app: &TuiApp) {
     f.render_widget(paragraph, area);
 }
 
-/// Draw confirm delete popup
-fn draw_confirm_popup(f: &mut Frame, app: &TuiApp) {
-    // Check if multi-select is active
-    let count = if let Some((min, max)) = app.selected_range {
-        max - min + 1
-    } else {
-        1
-    };
-
-    let area = centered_rect(50, 20, f.size());
+/// Draw confirm delete popup with full entry details
+/// Single entry: shows Type, Line, Name, Value (scrollable like detail popup)
+/// Multi-select: shows summary list of all selected entries
+fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
     let msg = app.messages;
+    // Clone entries to avoid borrow issues
+    let selected_entries: Vec<_> = app.get_selected_entries().into_iter().cloned().collect();
+    let count = selected_entries.len();
 
-    let text = if count > 1 {
-        vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                format!("Delete {} selected entries?", count),
-                Style::default().add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "[y/Enter] Yes  [n/Esc] No",
-                Style::default().fg(Color::Yellow),
-            )),
-        ]
-    } else if let Some(entry) = app.get_selected_entry() {
-        vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                msg.tui_delete_prompt,
-                Style::default().add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("Type: ", Style::default().fg(Color::Cyan)),
-                Span::raw(format!("{}", entry.entry_type)),
-            ]),
-            Line::from(vec![
-                Span::styled("Name: ", Style::default().fg(Color::Cyan)),
-                Span::raw(&entry.name),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled(
-                "[y/Enter] Yes  [n/Esc] No",
-                Style::default().fg(Color::Yellow),
-            )),
-        ]
-    } else {
+    if count == 0 {
         return;
+    }
+
+    // Use larger area for better readability (same as detail popup)
+    let area = centered_rect(70, 60, f.size());
+
+    // Split area: main content + fixed footer
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(3),    // Content area (scrollable)
+            Constraint::Length(3), // Fixed footer for hints
+        ])
+        .split(area);
+
+    let content_area = chunks[0];
+    let footer_area = chunks[1];
+
+    // Build content lines based on single/multi selection
+    let mut lines: Vec<Line> = Vec::new();
+
+    if count == 1 {
+        // Single entry: show full details like detail popup
+        let entry = &selected_entries[0];
+        let line_info = format_line_info(entry);
+        let is_multi_line = entry
+            .end_line
+            .is_some_and(|end| entry.line_number.is_some_and(|start| end > start));
+        let line_label = if is_multi_line {
+            msg.header_lines
+        } else {
+            msg.header_line
+        };
+
+        lines.push(Line::from(Span::styled(
+            msg.tui_delete_prompt,
+            Style::default().add_modifier(Modifier::BOLD).fg(Color::Red),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Type: ", Style::default().fg(Color::Cyan)),
+            Span::raw(format!("{}", entry.entry_type)),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(line_label, Style::default().fg(Color::Cyan)),
+            Span::raw(line_info),
+        ]));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Name: ", Style::default().fg(Color::Cyan)),
+            Span::raw(&entry.name),
+        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "Value:",
+            Style::default().fg(Color::Cyan),
+        )]));
+
+        // Add value lines
+        for value_line in entry.value.lines() {
+            lines.push(Line::from(Span::styled(
+                value_line.to_string(),
+                Style::default().fg(Color::Gray),
+            )));
+        }
+    } else {
+        // Multi-select: show summary list
+        lines.push(Line::from(Span::styled(
+            format!("Delete {} selected entries?", count),
+            Style::default().add_modifier(Modifier::BOLD).fg(Color::Red),
+        )));
+        lines.push(Line::from(""));
+
+        // Header for the list
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{:<10}", msg.header_type),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::styled(
+                format!("{:<8}", msg.header_line),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::styled("Name", Style::default().fg(Color::Cyan)),
+        ]));
+        lines.push(Line::from("─".repeat(50)));
+
+        // List each entry
+        for entry in &selected_entries {
+            let line_info = format_line_info(entry);
+            let type_str = format!("{}", entry.entry_type);
+            // Truncate name if too long
+            let name_display = if entry.name.len() > 30 {
+                format!("{}...", &entry.name[..27])
+            } else {
+                entry.name.clone()
+            };
+
+            lines.push(Line::from(vec![
+                Span::raw(format!("{:<10}", type_str)),
+                Span::styled(
+                    format!("{:<8}", line_info),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(name_display),
+            ]));
+        }
+    }
+
+    // Calculate scroll limits
+    let visible_height = content_area.height.saturating_sub(2) as usize;
+    let total_lines = lines.len();
+    let max_scroll = total_lines.saturating_sub(visible_height);
+
+    // Clamp scroll offset
+    if app.delete_confirm_scroll > max_scroll {
+        app.delete_confirm_scroll = max_scroll;
+    }
+
+    // Build scroll indicator for title
+    let title = if total_lines > visible_height {
+        format!(
+            "{} ({}/{})",
+            msg.tui_confirm_delete_title,
+            app.delete_confirm_scroll + 1,
+            max_scroll + 1
+        )
+    } else {
+        msg.tui_confirm_delete_title.to_string()
     };
 
+    let text = Text::from(lines);
     let paragraph = Paragraph::new(text)
         .block(
             Block::default()
-                .title(msg.tui_confirm_delete_title)
-                .borders(Borders::ALL)
+                .title(title)
+                .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+                .style(Style::default().bg(Color::Black).fg(Color::Red)),
+        )
+        .scroll((app.delete_confirm_scroll as u16, 0))
+        .wrap(Wrap { trim: false });
+
+    f.render_widget(Clear, area);
+    f.render_widget(paragraph, content_area);
+
+    // Draw fixed footer with confirmation hints
+    let footer_lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "[y/Enter] Yes  [n/Esc] No  [↑/↓] Scroll",
+            Style::default().fg(Color::Yellow),
+        )),
+    ];
+    let footer = Paragraph::new(footer_lines)
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
                 .style(Style::default().bg(Color::Black).fg(Color::Red)),
         )
         .alignment(Alignment::Center);
 
-    f.render_widget(Clear, area);
-    f.render_widget(paragraph, area);
+    f.render_widget(footer, footer_area);
 }
 
 /// Draw confirm quit popup (unsaved changes)

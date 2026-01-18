@@ -141,6 +141,9 @@ pub struct TuiApp {
     // Detail popup scroll offset
     pub detail_scroll: usize,
 
+    // Delete confirm popup scroll offset (for viewing entry details before deletion)
+    pub delete_confirm_scroll: usize,
+
     // i18n
     pub messages: &'static Messages,
 
@@ -209,6 +212,7 @@ impl TuiApp {
             type_list_scroll_offset: 0,
 
             detail_scroll: 0,
+            delete_confirm_scroll: 0,
             messages,
             dirty: false,
             temp_file_path,
@@ -455,6 +459,7 @@ impl TuiApp {
                 self.mode = AppMode::ShowingDetail;
             }
             KeyCode::Char('d') | KeyCode::Delete => {
+                self.delete_confirm_scroll = 0;
                 self.mode = AppMode::ConfirmDelete;
             }
             KeyCode::Home => {
@@ -565,6 +570,22 @@ impl TuiApp {
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 self.mode = AppMode::Normal;
+            }
+            // Scroll support for viewing entry details before deletion
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.delete_confirm_scroll = self.delete_confirm_scroll.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.delete_confirm_scroll = self.delete_confirm_scroll.saturating_add(1);
+            }
+            KeyCode::PageUp => {
+                self.delete_confirm_scroll = self.delete_confirm_scroll.saturating_sub(10);
+            }
+            KeyCode::PageDown => {
+                self.delete_confirm_scroll = self.delete_confirm_scroll.saturating_add(10);
+            }
+            KeyCode::Home => {
+                self.delete_confirm_scroll = 0;
             }
             _ => {}
         }
@@ -1380,6 +1401,14 @@ impl TuiApp {
     /// Get the currently selected entry
     pub fn get_selected_entry(&self) -> Option<&Entry> {
         self.entries.get(self.selected_index)
+    }
+
+    /// Get all selected entries (for multi-select operations)
+    pub fn get_selected_entries(&self) -> Vec<&Entry> {
+        self.get_selected_indices()
+            .iter()
+            .filter_map(|&i| self.entries.get(i))
+            .collect()
     }
 
     /// Get all selected indices (for multi-select operations)
