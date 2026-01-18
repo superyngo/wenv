@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-01-18
+
 ### Changed
-- **TUI Delete Confirmation**: Enhanced delete popup to show full entry details (Type, Line, Name, Value) for single entry deletion, and summary list for multi-select deletion. Added scroll support for reviewing long entries before deletion. (2026-01-18)
+- **TUI Delete Confirmation**: Enhanced delete popup to show full entry details (Type, Line, Name, Value) for single entry deletion, and summary list for multi-select deletion. Added scroll support for reviewing long entries before deletion.
 
 ## [0.6.0] - 2026-01-18
 
