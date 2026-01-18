@@ -8,6 +8,7 @@ use std::process::Command;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellType {
     Bash,
+    Zsh,
     PowerShell,
 }
 
@@ -16,6 +17,9 @@ impl ShellType {
     pub fn detect() -> Option<Self> {
         // Check $SHELL environment variable
         if let Ok(shell) = env::var("SHELL") {
+            if shell.contains("zsh") {
+                return Some(ShellType::Zsh);
+            }
             if shell.contains("bash") {
                 return Some(ShellType::Bash);
             }
@@ -56,6 +60,9 @@ impl ShellType {
             ShellType::Bash => dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("~"))
                 .join(".bashrc"),
+            ShellType::Zsh => dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("~"))
+                .join(".zshrc"),
             ShellType::PowerShell => {
                 // Prioritize $PROFILE environment variable (only available in PowerShell sessions)
                 if let Ok(profile_path) = env::var("PROFILE") {
@@ -111,6 +118,7 @@ impl ShellType {
     pub fn name(&self) -> &'static str {
         match self {
             ShellType::Bash => "bash",
+            ShellType::Zsh => "zsh",
             ShellType::PowerShell => "pwsh",
         }
     }
@@ -128,6 +136,7 @@ impl std::str::FromStr for ShellType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "bash" => Ok(ShellType::Bash),
+            "zsh" => Ok(ShellType::Zsh),
             "pwsh" | "powershell" => Ok(ShellType::PowerShell),
             _ => Err(format!("Unknown shell type: {}", s)),
         }
@@ -141,12 +150,14 @@ mod tests {
     #[test]
     fn test_shell_type_name() {
         assert_eq!(ShellType::Bash.name(), "bash");
+        assert_eq!(ShellType::Zsh.name(), "zsh");
         assert_eq!(ShellType::PowerShell.name(), "pwsh");
     }
 
     #[test]
     fn test_shell_type_from_str() {
         assert_eq!("bash".parse::<ShellType>().unwrap(), ShellType::Bash);
+        assert_eq!("zsh".parse::<ShellType>().unwrap(), ShellType::Zsh);
         assert_eq!("pwsh".parse::<ShellType>().unwrap(), ShellType::PowerShell);
         assert_eq!(
             "powershell".parse::<ShellType>().unwrap(),
@@ -158,5 +169,8 @@ mod tests {
     fn test_default_config_path() {
         let bash_path = ShellType::Bash.default_config_path();
         assert!(bash_path.to_string_lossy().contains(".bashrc"));
+
+        let zsh_path = ShellType::Zsh.default_config_path();
+        assert!(zsh_path.to_string_lossy().contains(".zshrc"));
     }
 }

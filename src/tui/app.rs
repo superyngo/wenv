@@ -813,10 +813,11 @@ impl TuiApp {
                     self.submit_editing()?;
                 } else if state.field == EditField::Value {
                     // For PowerShell: Source/Alias are single-line, Enter jumps to Submit
-                    // For Bash: only Source is single-line
+                    // For Bash/Zsh: only Source is single-line
                     let is_single_line = if self.shell_type == ShellType::PowerShell {
                         matches!(state.entry_type, EntryType::Source | EntryType::Alias)
                     } else {
+                        // Bash and Zsh
                         state.entry_type == EntryType::Source
                     };
 
@@ -2270,7 +2271,7 @@ impl TuiApp {
         };
 
         let (cmd, args): (&str, Vec<String>) = match self.shell_type {
-            ShellType::Bash => {
+            ShellType::Bash | ShellType::Zsh => {
                 let path_str = file_to_check.to_string_lossy().to_string();
                 ("bash", vec!["-n".to_string(), path_str])
             }

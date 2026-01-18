@@ -140,7 +140,7 @@ pub trait Parser: Send + Sync {
 /// ```
 pub fn get_parser(shell_type: ShellType) -> Box<dyn Parser> {
     match shell_type {
-        ShellType::Bash => Box::new(BashParser::new()),
+        ShellType::Bash | ShellType::Zsh => Box::new(BashParser::new()),
         ShellType::PowerShell => Box::new(PowerShellParser::new()),
     }
 }

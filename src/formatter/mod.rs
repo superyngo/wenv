@@ -24,7 +24,7 @@ pub trait Formatter {
 /// Get a formatter for the specified shell type
 pub fn get_formatter(shell_type: ShellType) -> Box<dyn Formatter> {
     match shell_type {
-        ShellType::Bash => Box::new(BashFormatter::new()),
+        ShellType::Bash | ShellType::Zsh => Box::new(BashFormatter::new()),
         ShellType::PowerShell => Box::new(PowerShellFormatter::new()),
     }
 }

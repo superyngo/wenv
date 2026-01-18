@@ -23,11 +23,17 @@ impl Context {
         let config = crate::config::load_or_create_config()?;
         let lang: Language = config.ui.language.parse().unwrap_or_default();
         let messages = init_messages(lang);
-        let shell_type = get_shell_type(cli.shell.map(|s| s.into()), cli.file.as_deref());
-        let config_file = cli
-            .file
-            .clone()
-            .unwrap_or_else(|| shell_type.default_config_path());
+
+        // Get path from -f option or positional argument (except ".")
+        let provided_path: Option<PathBuf> = cli.file.clone().or_else(|| {
+            cli.command
+                .as_ref()
+                .filter(|c| c.as_str() != ".")
+                .map(PathBuf::from)
+        });
+
+        let shell_type = get_shell_type(cli.shell.map(|s| s.into()), provided_path.as_deref());
+        let config_file = provided_path.unwrap_or_else(|| shell_type.default_config_path());
 
         Ok(Self {
             config,
@@ -63,7 +69,7 @@ impl Context {
     /// Print reload hint after modifying configuration
     pub fn print_reload_hint(&self) {
         let reload_cmd = match self.shell_type {
-            ShellType::Bash => format!("source {}", self.config_file.display()),
+            ShellType::Bash | ShellType::Zsh => format!("source {}", self.config_file.display()),
             ShellType::PowerShell => format!(". {}", self.config_file.display()),
         };
         println!(

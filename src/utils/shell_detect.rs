@@ -7,6 +7,16 @@ use std::path::Path;
 pub fn detect_from_file(path: &Path) -> Option<ShellType> {
     // First check filename for common patterns (for files without extensions)
     if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
+        // Zsh patterns
+        if filename.contains("zshrc")
+            || filename.contains("zprofile")
+            || filename.contains("zaliases")
+            || filename.contains("zshenv")
+            || filename.contains("zlogin")
+        {
+            return Some(ShellType::Zsh);
+        }
+        // Bash patterns
         if filename.contains("bashrc")
             || filename.contains("bash_profile")
             || filename.contains("bash_aliases")
@@ -21,6 +31,7 @@ pub fn detect_from_file(path: &Path) -> Option<ShellType> {
     // Then check extension
     if let Some(extension) = path.extension().and_then(|e| e.to_str()) {
         match extension.to_lowercase().as_str() {
+            "zsh" => return Some(ShellType::Zsh),
             "sh" | "bash" => return Some(ShellType::Bash),
             "ps1" | "psm1" => return Some(ShellType::PowerShell),
             _ => {}
@@ -55,6 +66,18 @@ mod tests {
     fn test_detect_from_file_bash() {
         let path = PathBuf::from("/home/user/.bashrc");
         assert_eq!(detect_from_file(&path), Some(ShellType::Bash));
+    }
+
+    #[test]
+    fn test_detect_from_file_zsh() {
+        let path = PathBuf::from("/home/user/.zshrc");
+        assert_eq!(detect_from_file(&path), Some(ShellType::Zsh));
+
+        let path2 = PathBuf::from("/home/user/.zprofile");
+        assert_eq!(detect_from_file(&path2), Some(ShellType::Zsh));
+
+        let path3 = PathBuf::from("/home/user/custom.zsh");
+        assert_eq!(detect_from_file(&path3), Some(ShellType::Zsh));
     }
 
     #[test]

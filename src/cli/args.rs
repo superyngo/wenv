@@ -40,14 +40,15 @@ pub struct Cli {
     #[arg(short, long)]
     pub r#type: Option<EntryTypeArg>,
 
-    /// Positional command (e.g., "." to open in editor)
-    #[arg(value_name = "COMMAND")]
+    /// Positional argument: "." to open editor, or file path
+    #[arg(value_name = "PATH_OR_DOT")]
     pub command: Option<String>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 pub enum ShellArg {
     Bash,
+    Zsh,
     Pwsh,
 }
 
@@ -55,6 +56,7 @@ impl From<ShellArg> for crate::model::ShellType {
     fn from(arg: ShellArg) -> Self {
         match arg {
             ShellArg::Bash => crate::model::ShellType::Bash,
+            ShellArg::Zsh => crate::model::ShellType::Zsh,
             ShellArg::Pwsh => crate::model::ShellType::PowerShell,
         }
     }

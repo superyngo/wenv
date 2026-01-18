@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Unreleased Update - 2026-01-18
+- feat: add Zsh shell support on Linux (auto-detect from $SHELL and file patterns)
+- feat: allow positional argument as config file path (e.g., `wenv /path/to/file`)
+
 ## [0.5.1] - 2026-01-17
 
 ### Fixed
