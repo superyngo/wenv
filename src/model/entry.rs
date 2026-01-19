@@ -86,6 +86,59 @@ impl Entry {
         self.raw_line = Some(raw_line);
         self
     }
+
+    /// Merge another entry into this one, extending the line range.
+    ///
+    /// Merging rules:
+    /// - Updates end_line to cover both entries
+    /// - Merges raw_line content with newline separator (raw_line contains complete original content)
+    /// - Type upgrade: Comment + non-empty Code → Code
+    /// - No need to store comment in `.comment` field - raw_line already has complete content
+    pub fn merge_trailing(&mut self, other: Entry) {
+        // Update end_line to cover the other entry
+        self.end_line = other.end_line.or(other.line_number);
+
+        // Merge raw_line content (contains complete original content including comments, blanks)
+        if let Some(ref mut raw) = self.raw_line {
+            if let Some(other_raw) = other.raw_line {
+                raw.push('\n');
+                raw.push_str(&other_raw);
+            }
+        } else {
+            self.raw_line = other.raw_line;
+        }
+
+        // Type upgrade: Comment + non-empty Code → Code
+        // Keep self.value (first line of original Comment) for list display
+        // raw_line already contains complete content
+        if self.entry_type == EntryType::Comment
+            && other.entry_type == EntryType::Code
+            && !other.value.is_empty()
+        {
+            self.entry_type = EntryType::Code;
+            // Don't overwrite self.name and self.value - preserve Comment's first line
+            // for display purposes. Complete content is in raw_line.
+        }
+
+        // Update name to reflect new line range
+        if let (Some(start), Some(end)) = (self.line_number, self.end_line) {
+            let prefix = if self.entry_type == EntryType::Comment {
+                "#L"
+            } else {
+                "L"
+            };
+            if start == end {
+                self.name = format!("{}{}", prefix, start);
+            } else {
+                self.name = format!("{}{}-L{}", prefix, start, end);
+            }
+        }
+    }
+
+    /// Check if this is a blank line entry (Code with empty or whitespace-only value).
+    pub fn is_blank(&self) -> bool {
+        self.entry_type == EntryType::Code && self.value.trim().is_empty()
+    }
 }
 
 /// Parse result containing entries and warnings
@@ -174,5 +227,74 @@ mod tests {
         assert_eq!(entry.value, "ls -la");
         assert_eq!(entry.line_number, Some(10));
         assert_eq!(entry.comment, Some("List files".into()));
+    }
+
+    #[test]
+    fn test_entry_is_blank() {
+        let blank = Entry::new(EntryType::Code, "L1".into(), String::new()).with_line_number(1);
+        assert!(blank.is_blank());
+
+        let non_blank = Entry::new(EntryType::Code, "L1".into(), "echo hi".into());
+        assert!(!non_blank.is_blank());
+
+        let comment = Entry::new(EntryType::Comment, "#L1".into(), "header".into());
+        assert!(!comment.is_blank());
+    }
+
+    #[test]
+    fn test_entry_merge_trailing_comment_absorbs_blank() {
+        let mut comment = Entry::new(EntryType::Comment, "#L1".into(), "Header".into())
+            .with_line_number(1)
+            .with_raw_line("# Header".into());
+
+        let blank = Entry::new(EntryType::Code, "L2".into(), String::new())
+            .with_line_number(2)
+            .with_raw_line(String::new());
+
+        comment.merge_trailing(blank);
+
+        assert_eq!(comment.entry_type, EntryType::Comment);
+        assert_eq!(comment.line_number, Some(1));
+        assert_eq!(comment.end_line, Some(2));
+        assert_eq!(comment.name, "#L1-L2"); // Comment keeps #L prefix
+    }
+
+    #[test]
+    fn test_entry_merge_trailing_comment_plus_code() {
+        let mut comment = Entry::new(EntryType::Comment, "#L1".into(), "Note".into())
+            .with_line_number(1)
+            .with_raw_line("# Note".into());
+
+        let code = Entry::new(EntryType::Code, "L2".into(), "echo hello".into())
+            .with_line_number(2)
+            .with_raw_line("echo hello".into());
+
+        comment.merge_trailing(code);
+
+        assert_eq!(comment.entry_type, EntryType::Code);
+        assert_eq!(comment.line_number, Some(1));
+        assert_eq!(comment.end_line, Some(2));
+        // value preserves Comment's first line for list display
+        assert_eq!(comment.value, "Note");
+        // raw_line contains complete content (comment + code)
+        assert_eq!(comment.raw_line, Some("# Note\necho hello".into()));
+        // name updated to reflect line range
+        assert_eq!(comment.name, "L1-L2");
+        // comment field is no longer set in merge_trailing - raw_line has complete content
+    }
+
+    #[test]
+    fn test_entry_merge_trailing_raw_line() {
+        let mut entry = Entry::new(EntryType::Code, "L1".into(), "line1".into())
+            .with_line_number(1)
+            .with_raw_line("line1".into());
+
+        let other = Entry::new(EntryType::Code, "L2".into(), "line2".into())
+            .with_line_number(2)
+            .with_raw_line("line2".into());
+
+        entry.merge_trailing(other);
+
+        assert_eq!(entry.raw_line, Some("line1\nline2".into()));
     }
 }

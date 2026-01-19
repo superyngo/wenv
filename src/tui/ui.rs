@@ -421,7 +421,12 @@ fn draw_detail_popup(f: &mut Frame, app: &mut TuiApp) {
         )]),
     ];
 
-    for value_line in entry.value.lines() {
+    // Use raw_line for Comment/Code to show full content
+    let display_value = match entry.entry_type {
+        EntryType::Comment | EntryType::Code => entry.raw_line.as_deref().unwrap_or(&entry.value),
+        _ => &entry.value,
+    };
+    for value_line in display_value.lines() {
         lines.push(Line::from(Span::styled(
             value_line.to_string(),
             Style::default().fg(Color::Gray),
@@ -664,8 +669,14 @@ fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
             Style::default().fg(Color::Cyan),
         )]));
 
-        // Add value lines
-        for value_line in entry.value.lines() {
+        // Add value lines - use raw_line for Comment/Code
+        let display_value = match entry.entry_type {
+            EntryType::Comment | EntryType::Code => {
+                entry.raw_line.as_deref().unwrap_or(&entry.value)
+            }
+            _ => &entry.value,
+        };
+        for value_line in display_value.lines() {
             lines.push(Line::from(Span::styled(
                 value_line.to_string(),
                 Style::default().fg(Color::Gray),
@@ -679,38 +690,58 @@ fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
         )));
         lines.push(Line::from(""));
 
-        // Header for the list
+        // Header for the list: TYPE NAME LINE VALUE (matches main list format)
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{:<10}", msg.header_type),
                 Style::default().fg(Color::Cyan),
             ),
             Span::styled(
+                format!("{:<20}", msg.header_name),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::styled(
                 format!("{:<8}", msg.header_line),
                 Style::default().fg(Color::Cyan),
             ),
-            Span::styled("Name", Style::default().fg(Color::Cyan)),
+            Span::styled(msg.header_value, Style::default().fg(Color::Cyan)),
         ]));
-        lines.push(Line::from("─".repeat(50)));
+        lines.push(Line::from("─".repeat(70)));
 
         // List each entry
         for entry in &selected_entries {
             let line_info = format_line_info(entry);
             let type_str = format!("{}", entry.entry_type);
             // Truncate name if too long
-            let name_display = if entry.name.len() > 30 {
-                format!("{}...", &entry.name[..27])
+            let name_display = if entry.name.len() > 17 {
+                format!("{}...", &entry.name[..14])
             } else {
                 entry.name.clone()
             };
 
+            // Get display value with truncation - use raw_line for Comment/Code
+            let display_value = match entry.entry_type {
+                EntryType::Comment | EntryType::Code => {
+                    entry.raw_line.as_deref().unwrap_or(&entry.value)
+                }
+                _ => &entry.value,
+            };
+            // Truncate and replace newlines for display
+            let value_truncated: String = display_value.chars().take(27).collect();
+            let value_display = if display_value.len() > 27 {
+                format!("{}...", value_truncated.replace('\n', "\\n"))
+            } else {
+                value_truncated.replace('\n', "\\n")
+            };
+
             lines.push(Line::from(vec![
                 Span::raw(format!("{:<10}", type_str)),
+                Span::raw(format!("{:<20}", name_display)),
                 Span::styled(
                     format!("{:<8}", line_info),
                     Style::default().fg(Color::DarkGray),
                 ),
-                Span::raw(name_display),
+                Span::styled(value_display, Style::default().fg(Color::Gray)),
             ]));
         }
     }

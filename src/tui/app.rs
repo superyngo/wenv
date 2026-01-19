@@ -13,6 +13,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::i18n::Messages;
 use crate::model::{Entry, EntryType, ShellType};
+use crate::utils::strings::split_lines_preserve_trailing;
 
 /// Application mode
 #[derive(Debug, Clone, PartialEq)]
@@ -1092,14 +1093,24 @@ impl TuiApp {
         };
 
         let lines: Vec<&str> = state.value_buffer.lines().collect();
-        let line_count = lines.len().max(1);
+        // Check for trailing newline - lines() doesn't count it
+        let has_trailing_newline = state.value_buffer.ends_with('\n');
+        let line_count = if has_trailing_newline {
+            lines.len() + 1 // +1 for the empty line after trailing newline
+        } else {
+            lines.len().max(1)
+        };
 
         if state.cursor_row >= line_count - 1 {
             return;
         }
 
         let target_row = state.cursor_row + 1;
-        let target_line = lines.get(target_row).unwrap_or(&"");
+        let target_line = if target_row >= lines.len() {
+            "" // Empty line after trailing newline
+        } else {
+            lines.get(target_row).unwrap_or(&"")
+        };
 
         // Calculate target column in characters (not bytes)
         let target_line_chars = target_line.chars().count();
@@ -1120,6 +1131,14 @@ impl TuiApp {
                 break;
             }
             new_pos += line.len() + 1; // +1 for newline
+        }
+        // If target_row is beyond lines (trailing newline case)
+        if target_row >= lines.len() {
+            // Position is at the end of content
+            for line in lines.iter() {
+                new_pos += line.len() + 1;
+            }
+            new_pos = new_pos.min(state.value_buffer.len());
         }
 
         // Ensure the position is at a valid character boundary
@@ -1261,7 +1280,8 @@ impl TuiApp {
         self.adjust_scroll_for_selection();
     }
 
-    /// Confirm move: write changes to temp file using line-based cut-paste
+    /// Confirm move: write changes to temp file using marker-based cut-paste
+    /// Uses a unique marker to avoid line number invalidation issues
     fn confirm_move(&mut self) -> Result<()> {
         let indices = self.get_selected_indices_sorted();
         if indices.is_empty() {
@@ -1287,34 +1307,48 @@ impl TuiApp {
 
         // Read all lines from temp file or original file
         let content = self.read_current_content()?;
-        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        let lines: Vec<&str> = content.lines().collect();
 
-        // Cut the selected lines (line numbers are 1-indexed, array is 0-indexed)
-        let cut_start = (start_line - 1).min(lines.len());
-        let cut_end = end_line.min(lines.len());
-        let extracted_lines: Vec<String> = lines.drain(cut_start..cut_end).collect();
-
-        // Calculate insert position based on buffer position
+        // Calculate target position based on buffer position
         let new_first_index = indices[0];
-        let insert_line = if new_first_index == 0 {
-            1 // Insert at file beginning
-        } else {
-            // Find the line number after the previous entry
-            let prev_entry = &self.entries[new_first_index - 1];
-            prev_entry
-                .end_line
-                .unwrap_or(prev_entry.line_number.unwrap_or(1))
-                + 1
-        };
+        let marker = "__WENV_MOVE_MARKER__";
 
-        // Insert at new position
-        let insert_index = (insert_line - 1).min(lines.len());
-        for (offset, line) in extracted_lines.iter().enumerate() {
-            lines.insert(insert_index + offset, line.clone());
+        // Step 1: Insert marker at target position, then extract and remove source lines
+        let mut new_lines: Vec<String> = Vec::new();
+        let mut extracted: Vec<String> = Vec::new();
+
+        if new_first_index == 0 {
+            // Insert marker at file beginning
+            new_lines.push(marker.to_string());
         }
 
-        // Write back to temp file
-        let new_content = lines.join("\n") + "\n";
+        for (i, line) in lines.iter().enumerate() {
+            let line_num = i + 1;
+
+            // Extract lines in the selected range
+            if line_num >= start_line && line_num <= end_line {
+                extracted.push(line.to_string());
+            } else {
+                new_lines.push(line.to_string());
+            }
+
+            // Insert marker after the previous entry's end_line (for non-zero index)
+            if new_first_index > 0 {
+                let prev_entry = &self.entries[new_first_index - 1];
+                let insert_after_line = prev_entry
+                    .end_line
+                    .unwrap_or(prev_entry.line_number.unwrap_or(1));
+                if line_num == insert_after_line {
+                    new_lines.push(marker.to_string());
+                }
+            }
+        }
+
+        // Step 2: Replace marker with extracted content
+        let extracted_content = extracted.join("\n");
+        let temp_content = new_lines.join("\n");
+        let new_content = temp_content.replace(marker, &extracted_content) + "\n";
+
         self.write_temp_with_undo(&new_content)?;
 
         // Reload from temp file to sync state
@@ -1705,8 +1739,18 @@ impl TuiApp {
     fn start_editing(&mut self) {
         if let Some(entry) = self.get_selected_entry() {
             let name = entry.name.clone();
-            let value = entry.value.clone();
             let entry_type = entry.entry_type;
+
+            // For Comment/Code, use raw_line (contains complete original content)
+            // For other types, use value
+            let value = if matches!(entry_type, EntryType::Comment | EntryType::Code) {
+                entry
+                    .raw_line
+                    .clone()
+                    .unwrap_or_else(|| entry.value.clone())
+            } else {
+                entry.value.clone()
+            };
 
             // For Source/Code/Comment, start at Value field (skip Name)
             let (start_field, cursor_pos, cursor_col) = if matches!(
@@ -1784,9 +1828,10 @@ impl TuiApp {
 
         // Read current content
         let content = self.read_current_content()?;
-        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
         if state.is_new {
+            let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
             // Get insert line number (after current entry's last line)
             let insert_line = if let Some(current) = self.entries.get(self.selected_index) {
                 current
@@ -1805,7 +1850,10 @@ impl TuiApp {
             let insert_idx = insert_line.saturating_sub(1).min(lines.len());
 
             // Handle multi-line entries
-            for (i, new_line) in new_text.lines().enumerate() {
+            for (i, new_line) in split_lines_preserve_trailing(&new_text)
+                .into_iter()
+                .enumerate()
+            {
                 lines.insert(insert_idx + i, new_line.to_string());
             }
 
@@ -1820,34 +1868,47 @@ impl TuiApp {
         } else {
             // Update existing entry - replace lines in range
             if let Some(entry) = self.entries.get(self.selected_index) {
-                let start = entry.line_number.unwrap_or(1).saturating_sub(1); // 0-indexed
-                let end = entry
-                    .end_line
-                    .unwrap_or(entry.line_number.unwrap_or(1))
-                    .saturating_sub(1);
+                let start_line = entry.line_number.unwrap_or(1);
+                let end_line = entry.end_line.unwrap_or(start_line);
+                let entry_line = start_line;
 
-                // Format the updated entry
-                let new_text = self.format_new_entry(&state);
-                let new_lines: Vec<&str> = new_text.lines().collect();
+                // For Comment/Code, use direct byte-range replacement to preserve exact content
+                if matches!(state.entry_type, EntryType::Comment | EntryType::Code) {
+                    let new_content = self.replace_line_range(
+                        &content,
+                        start_line,
+                        end_line,
+                        &state.value_buffer,
+                    );
+                    self.write_temp_with_undo(&new_content)?;
+                } else {
+                    // For structured entries (Alias, Function, EnvVar, Source), use line-based approach
+                    let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+                    let start = start_line.saturating_sub(1); // 0-indexed
+                    let end = end_line.saturating_sub(1);
 
-                // Remove old lines
-                let remove_count = (end - start + 1).min(lines.len() - start);
-                for _ in 0..remove_count {
-                    if start < lines.len() {
-                        lines.remove(start);
+                    // Format the updated entry
+                    let new_text = self.format_new_entry(&state);
+                    let new_lines: Vec<&str> = new_text.lines().collect();
+
+                    // Remove old lines
+                    let remove_count = (end - start + 1).min(lines.len() - start);
+                    for _ in 0..remove_count {
+                        if start < lines.len() {
+                            lines.remove(start);
+                        }
                     }
+
+                    // Insert new lines
+                    for (i, new_line) in new_lines.iter().enumerate() {
+                        lines.insert(start + i, new_line.to_string());
+                    }
+
+                    // Write to temp file
+                    let new_content = lines.join("\n") + "\n";
+                    self.write_temp_with_undo(&new_content)?;
                 }
 
-                // Insert new lines
-                for (i, new_line) in new_lines.iter().enumerate() {
-                    lines.insert(start + i, new_line.to_string());
-                }
-
-                let entry_line = entry.line_number.unwrap_or(1);
-
-                // Write to temp file and reload
-                let new_content = lines.join("\n") + "\n";
-                self.write_temp_with_undo(&new_content)?;
                 self.reload_from_temp()?;
 
                 // Re-select the entry
@@ -2059,6 +2120,60 @@ impl TuiApp {
                 formatter.format_entry(&entry)
             }
         }
+    }
+
+    /// Replace a range of lines (1-indexed, inclusive) in content with replacement text.
+    /// This preserves the exact content without any line-based parsing.
+    fn replace_line_range(
+        &self,
+        content: &str,
+        start_line: usize,
+        end_line: usize,
+        replacement: &str,
+    ) -> String {
+        let mut result = String::new();
+        let mut current_line = 1;
+        let chars = content.chars();
+        let mut range_started = false;
+
+        for c in chars {
+            if current_line < start_line {
+                // Before the range - copy as-is
+                result.push(c);
+                if c == '\n' {
+                    current_line += 1;
+                }
+            } else if current_line >= start_line && current_line <= end_line {
+                // Inside the range - skip original content
+                if !range_started {
+                    // Insert replacement at the start of the range
+                    result.push_str(replacement);
+                    // Ensure replacement ends with newline if we're replacing multiple lines
+                    // and the replacement doesn't already end with one
+                    if !replacement.ends_with('\n') && end_line < content.lines().count() {
+                        result.push('\n');
+                    }
+                    range_started = true;
+                }
+                // Skip original content in range
+                if c == '\n' {
+                    current_line += 1;
+                }
+            } else {
+                // After the range - copy as-is
+                result.push(c);
+                if c == '\n' {
+                    current_line += 1;
+                }
+            }
+        }
+
+        // Handle case where replacement is at end of file and original didn't have trailing newline
+        if !range_started && current_line >= start_line {
+            result.push_str(replacement);
+        }
+
+        result
     }
 
     /// Select entry at a specific line number

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Trailing Empty Lines Loss Bug**: Fixed issue where trailing empty lines in Comment-prefixed merged entries would be lost on each save (2026-01-19)
+  - Root cause 1: Parser used `split_lines_preserve_trailing` which incorrectly handled `raw_line` format (N lines with N-1 newlines)
+  - Fix: Use `raw.split('\n')` directly for `raw_line` since newlines are separators, not terminators
+  - Root cause 2: TUI update used line-based manipulation which lost line count during replacement
+  - Fix: For Comment/Code entries, use direct byte-range replacement (`replace_line_range`) instead of line-based manipulation
+  - This preserves exact content including all trailing empty lines without any parsing/formatting
+
+### Changed
+- **TUI Comment/Code Display Enhancement**: Use `raw_line` for Comment/Code entries in info view and delete prompts (2026-01-19)
+  - Detail popup now shows full `raw_line` content for multi-line Comment/Code entries
+  - Single-entry delete confirmation shows full `raw_line` for Comment/Code
+  - Multi-entry delete confirmation now shows TYPE NAME LINE VALUE columns (matching main list format)
+- **Parser Comment+Control Structure Merge**: Comment blocks preceding control structures now merge into single Code entry (2026-01-19)
+  - Comment + (optional blank lines) + control structure (if/while/for/case) → merged Code entry
+  - Completed control blocks now become pending to absorb trailing blank lines
+- **Parser Merge Rules Enhancement**: Enhanced Comment/Code merge behavior (2026-01-19)
+  - Comment + non-blank Code + trailing blank lines now merge as single Code entry (previously blank lines caused separation)
+  - Code entry value now displays first line (Comment's content for upgraded entries) for consistent TUI list display
+  - `raw_line` remains source of truth containing complete original content
+- **TUI Move Logic Fix**: Refactored move operation using marker-based approach (2026-01-19)
+  - Fixed issue where moving entries down would insert at wrong position due to line number invalidation after extraction
+  - Uses unique marker to calculate correct insert position before content modification
+- **Parser Comment/Code Raw String Simplification**: Refactored Comment/Code handling to use raw_line as source of truth (2026-01-19)
+  - Comment and Code entries now store full raw line in `value` field (including leading whitespace)
+  - Removed `.comment` field storage in `merge_trailing` - `raw_line` contains complete original content
+  - TUI editing for Comment/Code now uses `raw_line` to preserve comments and empty lines
+  - Fixed cursor navigation for trailing newlines in multi-line value editing
+  - Type upgrade logic preserved: Comment + non-blank Code → Code
+
 ## [0.6.1] - 2026-01-18
 
 ### Changed
