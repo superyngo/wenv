@@ -7,32 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-01-20
+
 ### Changed
-- **Code Simplification**: Removed deprecated and unused code (2026-01-20)
-  - Deleted deprecated `FunctionBuilder` and `CodeBlockBuilder` (replaced by `PendingBlock` in v0.7.0)
+- **Code Simplification**: Removed deprecated and unused code
+  - Deleted deprecated `FunctionBuilder` and `CodeBlockBuilder` (replaced by `PendingBlock`)
   - Removed placeholder `SyntaxChecker` (always returned empty results)
   - Extracted common `find_attached_comments` function from BashFormatter and PowerShellFormatter to shared module
   - Reduced code duplication by ~100 lines
-
-### Fixed
-- **TUI Comment/Code Save Trailing Blank Line Loss**: Fixed trailing blank lines lost when saving Comment/Code entries (2026-01-20)
-  - Root cause: `replace_line_range` had complex logic to decide whether to add terminator
-  - Fix: Simplified to always add `\n` after replacement (value_buffer is separator format)
-- **Parser Trailing Blank Line Preservation**: Fixed trailing blank lines being lost during parsing (2026-01-20)
-  - Root cause: `content.lines()` treats `\n` as line terminator, so `"#\n\n"` → 2 elements instead of 3
-  - Fix: Use `content.split('\n')` and handle file terminator vs entry trailing blanks correctly
-  - Applied to both BashParser and PowerShellParser
-  - Also fixed `replace_line_range` in TUI to use consistent line counting logic
-- **Multi-line Alias Parsing Precedence**: Fixed multi-line alias detection being bypassed by noquote pattern (2026-01-20)
-  - Root cause: `ALIAS_NOQUOTE_RE` was checked before `ALIAS_MULTILINE_START_RE` in `try_parse_alias()`
-  - This caused `alias test1='123` to be incorrectly parsed as complete alias with value `'123` instead of multi-line start
-  - Fix: Move multi-line check before noquote check, matching the order in `try_parse_export()`
-- **Multi-line Export Formatter**: Use single quotes for multi-line env vars to match parser expectations (2026-01-20)
-  - Root cause: `format_export()` used double quotes for multi-line values, but parser only detects single-quote multi-line
-  - Fix: Prefer single quotes in `format_export()` like `format_alias()`, fall back to double quotes only when value contains single quotes
-
-### Changed
-- **Parser Refactored to Unified PendingBlock State Machine**: Major refactoring of parser architecture (2026-01-20)
+- **Parser Refactored to Unified PendingBlock State Machine**: Major refactoring of parser architecture
   - Created `src/parser/pending.rs` with unified `PendingBlock` and `BoundaryType` abstractions
   - Both BashParser and PowerShellParser now use the same pending state machine pattern
   - Removed `Entry.comment` field (redundant with independent Comment entry type)
@@ -40,7 +23,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - BoundaryType enums: Complete, BraceCounting, QuoteCounting, KeywordTracking, AdjacentMerging
   - Core concept: "First delimit the boundary of each entry, then produce the entry"
   - All entries now pass through pending state machine before becoming Entry objects
-  - Deprecated `CodeBlockBuilder` and `FunctionBuilder` (use `PendingBlock` instead)
+
+### Fixed
+- **TUI Comment/Code Save Trailing Blank Line Loss**: Fixed trailing blank lines lost when saving Comment/Code entries
+  - Root cause: `replace_line_range` had complex logic to decide whether to add terminator
+  - Fix: Simplified to always add `\n` after replacement (value_buffer is separator format)
+- **Parser Trailing Blank Line Preservation**: Fixed trailing blank lines being lost during parsing
+  - Root cause: `content.lines()` treats `\n` as line terminator, so `"#\n\n"` → 2 elements instead of 3
+  - Fix: Use `content.split('\n')` and handle file terminator vs entry trailing blanks correctly
+  - Applied to both BashParser and PowerShellParser
+  - Also fixed `replace_line_range` in TUI to use consistent line counting logic
+- **Multi-line Alias Parsing Precedence**: Fixed multi-line alias detection being bypassed by noquote pattern
+  - Root cause: `ALIAS_NOQUOTE_RE` was checked before `ALIAS_MULTILINE_START_RE` in `try_parse_alias()`
+  - This caused `alias test1='123` to be incorrectly parsed as complete alias with value `'123` instead of multi-line start
+  - Fix: Move multi-line check before noquote check, matching the order in `try_parse_export()`
+- **Multi-line Export Formatter**: Use single quotes for multi-line env vars to match parser expectations
+  - Root cause: `format_export()` used double quotes for multi-line values, but parser only detects single-quote multi-line
+  - Fix: Prefer single quotes in `format_export()` like `format_alias()`, fall back to double quotes only when value contains single quotes
 
 ### Fixed
 - **Formatter Preserves Original Format**: Unedited Alias/EnvVar/Source entries now preserve original format using `raw_line` (2026-01-20)
