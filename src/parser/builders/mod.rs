@@ -7,8 +7,6 @@
 //! ```text
 //! builders/
 //! ├── mod.rs          - This file: exports + utility functions
-//! ├── function.rs     - FunctionBuilder for multi-line functions
-//! ├── code_block.rs   - CodeBlockBuilder for control structures
 //! ├── quoted.rs       - QuotedValueBuilder for multi-line quoted values
 //! └── comment.rs      - CommentBlockBuilder for adjacent comments
 //! ```
@@ -26,8 +24,6 @@
 //!
 //! | Builder | Entry Types | Boundary Detection | Line Range |
 //! |---------|-------------|-------------------|------------|
-//! | [`FunctionBuilder`] | Function | Brace counting | ✅ `end_line` |
-//! | [`CodeBlockBuilder`] | Code | Control keywords | ✅ `end_line` |
 //! | [`QuotedValueBuilder`] | Alias, EnvVar | Quote counting | ✅ `end_line` |
 //! | [`CommentBlockBuilder`] | Comment | Non-comment line | ✅ `end_line` |
 //!
@@ -59,15 +55,11 @@
 //! - [`extract_comment`] - Extract inline comments respecting quotes
 //! - [`strip_quotes`] - Remove surrounding quotes from a value
 
-mod code_block;
 mod comment;
-mod function;
 mod quoted;
 
 // Re-export builders
-pub use code_block::{create_blank_line_entry, CodeBlockBuilder};
 pub use comment::CommentBlockBuilder;
-pub use function::FunctionBuilder;
 pub use quoted::QuotedValueBuilder;
 
 /// Count braces `{` and `}` outside of quoted strings.

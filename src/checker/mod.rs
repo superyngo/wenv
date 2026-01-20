@@ -1,10 +1,8 @@
 //! Checker module for validating configuration files
 
 mod duplicate;
-mod syntax;
 
 pub use duplicate::DuplicateChecker;
-pub use syntax::SyntaxChecker;
 
 use crate::model::Entry;
 
@@ -105,11 +103,6 @@ pub fn check_all(entries: &[Entry]) -> CheckResult {
     let dup_checker = DuplicateChecker;
     let dup_result = dup_checker.check(entries);
     result.issues.extend(dup_result.issues);
-
-    // Run syntax check
-    let syntax_checker = SyntaxChecker;
-    let syntax_result = syntax_checker.check(entries);
-    result.issues.extend(syntax_result.issues);
 
     result
 }

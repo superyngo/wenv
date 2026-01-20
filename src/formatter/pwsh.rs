@@ -1,8 +1,10 @@
 //! PowerShell configuration file formatter
 
-use super::Formatter;
+use crate::formatter::find_attached_comments;
 use crate::model::{Config, Entry, EntryType, ShellType};
 use crate::utils::dependency;
+
+use super::Formatter;
 
 /// PowerShell configuration file formatter
 pub struct PowerShellFormatter;
@@ -10,56 +12,6 @@ pub struct PowerShellFormatter;
 impl PowerShellFormatter {
     pub fn new() -> Self {
         Self
-    }
-
-    /// Find comments that are attached to entries (comments immediately before an entry)
-    /// Returns a HashMap mapping entry line numbers to their associated comment entries
-    fn find_attached_comments(
-        &self,
-        entries: &[Entry],
-    ) -> std::collections::HashMap<usize, Vec<Entry>> {
-        let mut attached_comments = std::collections::HashMap::new();
-
-        // Sort entries by line number
-        let mut sorted_entries: Vec<_> = entries.iter().collect();
-        sorted_entries.sort_by_key(|e| e.line_number.unwrap_or(0));
-
-        for i in 0..sorted_entries.len() {
-            let entry = sorted_entries[i];
-
-            // Only process Comment entries
-            if entry.entry_type != EntryType::Comment {
-                continue;
-            }
-
-            // Check if there's a next entry
-            if i + 1 >= sorted_entries.len() {
-                continue;
-            }
-
-            let next_entry = sorted_entries[i + 1];
-
-            // Skip if next entry is also a Comment or Code (these stay in place)
-            if next_entry.entry_type == EntryType::Comment
-                || next_entry.entry_type == EntryType::Code
-            {
-                continue;
-            }
-
-            // Check if comment is immediately before the next entry
-            // Comment should end right before the next entry starts
-            if let (Some(comment_end), Some(next_line)) = (entry.end_line, next_entry.line_number) {
-                if comment_end + 1 == next_line {
-                    // This comment is attached to the next entry
-                    attached_comments
-                        .entry(next_line)
-                        .or_insert_with(Vec::new)
-                        .push(entry.clone());
-                }
-            }
-        }
-
-        attached_comments
     }
 
     fn format_alias(&self, entry: &Entry) -> String {
@@ -121,7 +73,7 @@ impl Formatter for PowerShellFormatter {
             }
         } else {
             // Find comments attached to entries
-            let attached_comments = self.find_attached_comments(entries);
+            let attached_comments = find_attached_comments(entries);
 
             let mut grouped: std::collections::HashMap<EntryType, Vec<&Entry>> =
                 std::collections::HashMap::new();
@@ -236,10 +188,29 @@ impl Formatter for PowerShellFormatter {
 
     fn format_entry(&self, entry: &Entry) -> String {
         match entry.entry_type {
-            EntryType::Alias => self.format_alias(entry),
-            EntryType::EnvVar => self.format_env(entry),
-            EntryType::Source => self.format_source(entry),
+            // For Alias/EnvVar/Source: prioritize raw_line if available (unedited entries)
+            // This preserves original formatting for entries that haven't been modified
+            EntryType::Alias => {
+                if let Some(ref raw) = entry.raw_line {
+                    return raw.clone();
+                }
+                self.format_alias(entry)
+            }
+            EntryType::EnvVar => {
+                if let Some(ref raw) = entry.raw_line {
+                    return raw.clone();
+                }
+                self.format_env(entry)
+            }
+            EntryType::Source => {
+                if let Some(ref raw) = entry.raw_line {
+                    return raw.clone();
+                }
+                self.format_source(entry)
+            }
+            // Function: uses format_function which handles raw_line internally
             EntryType::Function => self.format_function(entry),
+            // Code/Comment: always use raw_line if available
             EntryType::Code | EntryType::Comment => entry
                 .raw_line
                 .clone()

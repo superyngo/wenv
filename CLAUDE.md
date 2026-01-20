@@ -110,33 +110,21 @@ Key principles:
 - **`value` displays first line** for Code entries (original Comment content for upgraded entries)
 - UI editing for Comment/Code uses `raw_line` to preserve all original formatting
 
-### raw_line 格式規範
+### 換行符格式規範（分隔符 vs 終止符）
 
-**重要**：`raw_line` 使用 `\n` 作為**行分隔符**，而非行終止符：
-- N 行內容存儲為 N-1 個換行符
-- 例如：3 行 (`"line1"`, `""`, `""`) 存儲為 `"line1\n\n"`
-- 分割時必須使用 `raw.split('\n')` 而非 `split_lines_preserve_trailing()`
-- `split('\n')` 對 `"line1\n\n"` 返回 `["line1", "", ""]`（3 個元素）✓
+**核心概念**：專案中存在兩種換行符語意，混淆會導致 off-by-one 錯誤。
+
+| 格式 | 規則 | 3 行範例 | 使用場景 |
+|------|------|----------|----------|
+| **分隔符格式** | N 行 = N-1 個 `\n` | `"line1\n\n"` | `raw_line`, `value_buffer` |
+| **終止符格式** | N 行 = N 個 `\n` | `"line1\n\n\n"` | 文件內容 |
+
+**關鍵規則**：
+- 分割 `raw_line` 必須用 `raw.split('\n')`，不可用 `.lines()` 或 `split_lines_preserve_trailing()`
+- 寫入文件時，分隔符格式內容需額外加終止符
+- 判斷「是否以換行結尾」時，要分清是內容的一部分還是終止符
 
 ### TUI Comment/Code 編輯保存
 
-對於 Comment/Code 類型 entry 的更新，使用**直接 byte 範圍替換**而非行級操作：
-- 使用 `replace_line_range()` 函數定位 entry 佔據的行範圍
-- 直接將 `value_buffer` 內容寫入該範圍
-- 避免任何 parsing 或 formatting 操作
-- 這樣可以保留所有尾部空行和原始格式
-
-## Known Issues & Solutions
-
-### 尾部空行遺失問題 (2026-01-19 已修復)
-
-**問題**：以 Comment 為首行的合併 entry（如 `# Section` + 空行 + control block + 空行），每次編輯儲存會丟失尾部空行。
-
-**根本原因**：
-1. Parser 合併 pending entry 到控制結構時，錯誤使用 `split_lines_preserve_trailing()` 分割 `raw_line`
-2. 該函數會 pop 尾部空字串，但 `raw_line` 格式下尾部空字串代表真正的空行
-3. TUI 更新時使用行級操作，導致行數不一致
-
-**解決方案**：
-1. `src/parser/bash/mod.rs:191`：改用 `raw.split('\n')` 直接分割
-2. `src/tui/app.rs`：對 Comment/Code 使用 `replace_line_range()` 直接替換
+使用 `replace_line_range()` 直接替換 entry 佔據的行範圍：
+- `value_buffer` 是分隔符格式，寫入時無條件加 `\n` 終止符

@@ -2149,10 +2149,9 @@ impl TuiApp {
                     // Insert replacement at the start of the range
                     result.push_str(replacement);
                     // Ensure replacement ends with newline if we're replacing multiple lines
-                    // and the replacement doesn't already end with one
-                    if !replacement.ends_with('\n') && end_line < content.lines().count() {
-                        result.push('\n');
-                    }
+                    // and the replacement doesn't already end with one.
+                    // value_buffer uses separator format, always add terminator
+                    result.push('\n');
                     range_started = true;
                 }
                 // Skip original content in range

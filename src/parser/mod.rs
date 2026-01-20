@@ -73,6 +73,7 @@
 
 mod bash;
 pub mod builders;
+pub mod pending;
 mod pwsh;
 
 pub use bash::BashParser;
@@ -146,4 +147,4 @@ pub fn get_parser(shell_type: ShellType) -> Box<dyn Parser> {
 }
 
 // Re-export commonly used items for convenience
-pub use builders::{CodeBlockBuilder, CommentBlockBuilder, FunctionBuilder, QuotedValueBuilder};
+pub use builders::{CommentBlockBuilder, QuotedValueBuilder};

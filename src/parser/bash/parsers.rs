@@ -76,16 +76,9 @@ pub fn try_parse_alias(line: &str, line_num: usize) -> AliasParseResult {
         );
     }
 
-    // Try unquoted alias
-    if let Some(caps) = ALIAS_NOQUOTE_RE.captures(line) {
-        return AliasParseResult::SingleLine(
-            Entry::new(EntryType::Alias, caps[1].to_string(), caps[2].to_string())
-                .with_line_number(line_num)
-                .with_raw_line(line.to_string()),
-        );
-    }
-
-    // Check for multi-line alias start
+    // Check for multi-line alias start FIRST (before noquote)
+    // This is critical: ALIAS_NOQUOTE_RE would incorrectly match `alias foo='123` as
+    // a complete alias with value `'123`, preventing multi-line detection
     if let Some(caps) = ALIAS_MULTILINE_START_RE.captures(line) {
         // Verify it has an unclosed single quote
         if QuotedValueBuilder::has_unclosed_single_quote(line) {
@@ -93,6 +86,15 @@ pub fn try_parse_alias(line: &str, line_num: usize) -> AliasParseResult {
             let builder = QuotedValueBuilder::new(name, line_num, line);
             return AliasParseResult::MultiLineStart { builder };
         }
+    }
+
+    // Try unquoted alias (LAST - after all quoted/multi-line checks)
+    if let Some(caps) = ALIAS_NOQUOTE_RE.captures(line) {
+        return AliasParseResult::SingleLine(
+            Entry::new(EntryType::Alias, caps[1].to_string(), caps[2].to_string())
+                .with_line_number(line_num)
+                .with_raw_line(line.to_string()),
+        );
     }
 
     AliasParseResult::NotAlias
@@ -241,6 +243,19 @@ mod tests {
                 assert!(!builder.is_complete());
             }
             _ => panic!("Expected MultiLineStart"),
+        }
+    }
+
+    #[test]
+    fn test_try_parse_alias_multiline_precedence() {
+        // This tests that multi-line detection takes precedence over noquote matching
+        // Before the fix, `alias test1='123` would be incorrectly matched by ALIAS_NOQUOTE_RE
+        // as a complete alias with value `'123`
+        match try_parse_alias("alias test1='123", 1) {
+            AliasParseResult::MultiLineStart { builder } => {
+                assert_eq!(builder.name, "test1");
+            }
+            other => panic!("Expected MultiLineStart, got {:?}", other),
         }
     }
 

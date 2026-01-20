@@ -30,10 +30,8 @@ pub mod parsers;
 pub mod patterns;
 
 use crate::model::{Entry, EntryType, ParseResult, ShellType};
-use crate::parser::builders::{
-    count_braces_outside_quotes, create_blank_line_entry, CodeBlockBuilder, CommentBlockBuilder,
-    FunctionBuilder,
-};
+use crate::parser::builders::{count_braces_outside_quotes, CommentBlockBuilder};
+use crate::parser::pending::{BoundaryType, PendingBlock};
 use crate::parser::Parser;
 
 use control::{count_control_end, count_control_start};
@@ -64,211 +62,253 @@ impl Parser for PowerShellParser {
     fn parse(&self, content: &str) -> ParseResult {
         let mut result = ParseResult::new();
 
-        // Function parsing state
-        let mut in_function = false;
-        let mut brace_count = 0;
-        let mut current_func: Option<FunctionBuilder> = None;
+        // === Unified pending state ===
 
-        // Control structure state
+        // For multi-line structures: function, control block, Here-String
+        let mut active_block: Option<PendingBlock> = None;
+
+        // For Comment/Code merging (separate from active_block)
+        let mut pending_entry: Option<PendingBlock> = None;
+
+        // Track control structure depth (needed for control block detection)
         let mut control_depth: usize = 0;
-        let mut current_code_block: Option<CodeBlockBuilder> = None;
 
-        // Comment block state
-        let mut current_comment_block: Option<CommentBlockBuilder> = None;
+        // === Main parsing loop ===
+        // Use split('\n') instead of lines() to preserve trailing empty lines.
+        // lines() treats '\n' as a line terminator, so "a\nb\n" → ["a", "b"]
+        // But for raw_line format (where '\n' is a separator), we need "a\nb\n" → ["a", "b", ""]
+        // However, a file ending with '\n' is just proper file termination, not an extra line.
+        // So we strip the final empty element only if content ends with '\n'.
+        let lines_vec: Vec<&str> = content.split('\n').collect();
+        let lines_to_process: &[&str] = if lines_vec.last() == Some(&"") && content.ends_with('\n')
+        {
+            &lines_vec[..lines_vec.len() - 1]
+        } else {
+            &lines_vec[..]
+        };
 
-        // Blank line tracking
-        let mut blank_line_start: Option<usize> = None;
-
-        // Pending comment for association
-        let mut pending_comment: Option<String> = None;
-
-        // Environment variable Here-String state
-        let mut in_env_heredoc = false;
-        let mut env_heredoc_var_name: Option<String> = None;
-        let mut env_heredoc_lines: Vec<String> = Vec::new();
-        let mut env_heredoc_start_line: usize = 0;
-
-        for (line_num, line) in content.lines().enumerate() {
+        for (line_num, line) in lines_to_process.iter().enumerate() {
             let line_number = line_num + 1;
             let trimmed = line.trim();
 
-            // Handle multi-line function body
-            if in_function {
-                let (open, close) = count_braces_outside_quotes(trimmed);
-                brace_count += open;
-                brace_count = brace_count.saturating_sub(close);
+            // ------------------------------------------------------------------
+            // Handle active multi-line block (function, control, Here-String)
+            // ------------------------------------------------------------------
+            if let Some(ref mut block) = active_block {
+                block.add_line(line, line_number);
 
-                if let Some(ref mut func) = current_func {
-                    func.add_line(line);
-                }
+                match &mut block.boundary {
+                    BoundaryType::BraceCounting {
+                        ref mut brace_count,
+                    } => {
+                        // Function body
+                        let (open, close) = count_braces_outside_quotes(trimmed);
+                        *brace_count += open as i32;
+                        *brace_count = (*brace_count).saturating_sub(close as i32);
 
-                if brace_count == 0 {
-                    in_function = false;
-                    if let Some(func) = current_func.take() {
-                        let mut entry = func.build(EntryType::Function);
-                        if let Some(comment) = pending_comment.take() {
-                            entry = entry.with_comment(comment);
+                        if *brace_count == 0 {
+                            let entry = self.build_entry_from_pending(active_block.take().unwrap());
+                            result.add_entry(entry);
                         }
-                        result.add_entry(entry);
                     }
+                    BoundaryType::QuoteCounting { quote_count: _ } => {
+                        // Here-String - check for terminator
+                        if is_heredoc_end(trimmed) {
+                            let mut completed = active_block.take().unwrap();
+                            // Value is collected lines (excluding start/end markers)
+                            let value = completed
+                                .lines
+                                .iter()
+                                .skip(1) // skip start line with @"
+                                .take(completed.lines.len().saturating_sub(2)) // skip end line with "@
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            completed.value = Some(value);
+                            let entry = self.build_entry_from_pending(completed);
+                            result.add_entry(entry);
+                        }
+                    }
+                    BoundaryType::KeywordTracking { ref mut depth } => {
+                        // Control structure
+                        let end_count = count_control_end(trimmed);
+                        let start_count = count_control_start(trimmed);
+                        *depth = (*depth).saturating_sub(end_count);
+                        *depth += start_count;
+
+                        if *depth == 0 {
+                            // Reset external control_depth to sync state
+                            control_depth = 0;
+
+                            // Emit code block directly (PowerShell doesn't merge like Bash)
+                            let entry = self.build_entry_from_pending(active_block.take().unwrap());
+                            result.add_entry(entry);
+                        }
+                    }
+                    _ => {}
                 }
                 continue;
             }
 
-            // Handle environment variable Here-String content (before control structure check)
-            if in_env_heredoc {
-                if is_heredoc_end(trimmed) {
-                    // End of Here-String
-                    in_env_heredoc = false;
-                    let value = env_heredoc_lines.join("\n");
-                    let mut entry = Entry::new(
-                        EntryType::EnvVar,
-                        env_heredoc_var_name.take().unwrap(),
-                        value,
-                    );
-                    entry = entry.with_line_number(env_heredoc_start_line);
-                    entry = entry.with_end_line(line_number);
-                    result.add_entry(entry);
-                } else {
-                    // Collect Here-String content line
-                    env_heredoc_lines.push(line.to_string());
-                }
-                continue;
-            }
-
-            // Handle control structure blocks
+            // ------------------------------------------------------------------
+            // Check for control structure start/continuation
+            // ------------------------------------------------------------------
             let prev_depth = control_depth;
             control_depth = control_depth.saturating_sub(count_control_end(trimmed));
             control_depth += count_control_start(trimmed);
 
             if control_depth > 0 || (prev_depth > 0 && control_depth == 0) {
-                // Flush pending items
-                flush_pending_items(
-                    &mut result,
-                    &mut current_comment_block,
-                    &mut blank_line_start,
-                    line_number,
-                );
-
-                if current_code_block.is_none() && prev_depth == 0 && control_depth > 0 {
-                    current_code_block = Some(CodeBlockBuilder::new(line_number));
+                // Flush pending items before starting control block
+                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                    result.add_entry(e);
                 }
 
-                if let Some(ref mut block) = current_code_block {
-                    block.add_line(line);
+                // Start control block
+                if prev_depth == 0 && control_depth > 0 {
+                    active_block = Some(PendingBlock::control(line_number, line, control_depth));
                 }
 
+                // Handle final line of control structure
                 if prev_depth > 0 && control_depth == 0 {
-                    if let Some(block) = current_code_block.take() {
-                        result.add_entry(block.build());
-                    }
+                    // This shouldn't normally happen since we process inside active_block
+                    // But handle it defensively
                 }
 
-                pending_comment = None;
                 continue;
             }
 
-            // Handle empty lines
+            // ------------------------------------------------------------------
+            // Handle empty lines (part of pending entry state machine)
+            // ------------------------------------------------------------------
             if trimmed.is_empty() {
-                // Flush comment block on blank line
-                if let Some(block) = current_comment_block.take() {
-                    result.add_entry(block.build());
-                }
+                let blank = PendingBlock::blank_lines(line_number, line);
 
-                if blank_line_start.is_none() {
-                    blank_line_start = Some(line_number);
-                }
-                pending_comment = None;
-                continue;
-            } else {
-                // Non-empty line, flush blank lines
-                if let Some(start) = blank_line_start.take() {
-                    let end = line_number - 1;
-                    result.add_entry(create_blank_line_entry(start, end));
-                }
-            }
-
-            // Handle comment lines (adjacent merging)
-            if CommentBlockBuilder::is_standalone_comment(trimmed) {
-                if let Some(ref mut block) = current_comment_block {
-                    block.add_line(line);
-                } else {
-                    current_comment_block = Some(CommentBlockBuilder::new(line_number, line));
-                }
-
-                if let Some(stripped) = trimmed.strip_prefix('#') {
-                    pending_comment = Some(stripped.trim().to_string());
-                }
-                continue;
-            } else {
-                // Non-comment line, flush comment block
-                if let Some(block) = current_comment_block.take() {
-                    result.add_entry(block.build());
-                }
-            }
-
-            // Try to parse entry types
-            if let Some(mut entry) = try_parse_alias(trimmed, line_number) {
-                if let Some(comment) = pending_comment.take() {
-                    entry = entry.with_comment(comment);
-                }
-                result.add_entry(entry);
-                continue;
-            }
-
-            // Check for Here-String environment variable start (only outside control structures)
-            if control_depth == 0 {
-                if let Some(var_name) = detect_env_heredoc_start(trimmed) {
-                    in_env_heredoc = true;
-                    env_heredoc_var_name = Some(var_name);
-                    env_heredoc_lines.clear();
-                    env_heredoc_start_line = line_number;
-                    pending_comment = None;
-                    continue;
-                }
-            }
-
-            if let Some(mut entry) = try_parse_env(trimmed, line_number) {
-                if let Some(comment) = pending_comment.take() {
-                    entry = entry.with_comment(comment);
-                }
-                result.add_entry(entry);
-                continue;
-            }
-
-            if let Some(mut entry) = try_parse_source(trimmed, line_number) {
-                if let Some(comment) = pending_comment.take() {
-                    entry = entry.with_comment(comment);
-                }
-                result.add_entry(entry);
-                continue;
-            }
-
-            if let Some(func_name) = detect_function_start(trimmed) {
-                in_function = true;
-                let (open, close) = count_braces_outside_quotes(trimmed);
-                brace_count = open.saturating_sub(close);
-
-                current_func = Some(FunctionBuilder::new(func_name, line_number));
-                if let Some(ref mut func) = current_func {
-                    func.add_line(line);
-                }
-
-                // Single-line function
-                if brace_count == 0 && trimmed.contains('}') {
-                    in_function = false;
-                    if let Some(func) = current_func.take() {
-                        let mut entry = func.build(EntryType::Function);
-                        if let Some(comment) = pending_comment.take() {
-                            entry = entry.with_comment(comment);
+                match &mut pending_entry {
+                    Some(pending) if pending.can_absorb_blank() => {
+                        // Comment or BlankLines absorbs blank
+                        pending.add_line(line, line_number);
+                    }
+                    Some(_) => {
+                        // Other pending types: flush and start new blank
+                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
+                            result.add_entry(entry);
                         }
-                        result.add_entry(entry);
+                        pending_entry = Some(blank);
+                    }
+                    None => {
+                        pending_entry = Some(blank);
                     }
                 }
                 continue;
             }
 
+            // ------------------------------------------------------------------
+            // Handle comment lines (part of pending entry state machine)
+            // ------------------------------------------------------------------
+            if CommentBlockBuilder::is_standalone_comment(trimmed) {
+                match &mut pending_entry {
+                    Some(pending) if pending.can_absorb_comment() => {
+                        // Comment merges with Comment
+                        pending.add_line(line, line_number);
+                    }
+                    Some(_) => {
+                        // Non-Comment pending: flush and start new comment
+                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
+                            result.add_entry(entry);
+                        }
+                        pending_entry = Some(PendingBlock::comment(line_number, line));
+                    }
+                    None => {
+                        pending_entry = Some(PendingBlock::comment(line_number, line));
+                    }
+                }
+                continue;
+            }
+
+            // ------------------------------------------------------------------
+            // Try to parse structured entry types (Alias, EnvVar, Source, Function)
+            // ------------------------------------------------------------------
+
+            // Try alias
+            if let Some(entry) = try_parse_alias(trimmed, line_number) {
+                // Flush pending entry
+                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                    result.add_entry(e);
+                }
+                result.add_entry(entry);
+                continue;
+            }
+
+            // Try Here-String env var (only outside control structures)
+            if let Some(var_name) = detect_env_heredoc_start(trimmed) {
+                // Flush pending entry
+                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                    result.add_entry(e);
+                }
+                // Start Here-String block
+                active_block = Some(PendingBlock {
+                    lines: vec![line.to_string()],
+                    start_line: line_number,
+                    end_line: line_number,
+                    boundary: BoundaryType::QuoteCounting { quote_count: 1 }, // Use odd count to indicate incomplete
+                    entry_hint: Some(EntryType::EnvVar),
+                    name: Some(var_name),
+                    value: None,
+                });
+                continue;
+            }
+
+            // Try regular env var
+            if let Some(entry) = try_parse_env(trimmed, line_number) {
+                // Flush pending entry
+                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                    result.add_entry(e);
+                }
+                result.add_entry(entry);
+                continue;
+            }
+
+            // Try source
+            if let Some(entry) = try_parse_source(trimmed, line_number) {
+                // Flush pending entry
+                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                    result.add_entry(e);
+                }
+                result.add_entry(entry);
+                continue;
+            }
+
+            // Try function
+            if let Some(func_name) = detect_function_start(trimmed) {
+                // Flush pending entry
+                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                    result.add_entry(e);
+                }
+
+                let (open, close) = count_braces_outside_quotes(trimmed);
+                let brace_count = (open as i32).saturating_sub(close as i32);
+
+                let func_block =
+                    PendingBlock::function(func_name.clone(), line_number, line, brace_count);
+
+                // Single-line function check
+                if brace_count == 0 && trimmed.contains('}') {
+                    let entry = self.build_entry_from_pending(func_block);
+                    result.add_entry(entry);
+                } else {
+                    active_block = Some(func_block);
+                }
+                continue;
+            }
+
+            // ------------------------------------------------------------------
             // Fallback: capture as Code
+            // ------------------------------------------------------------------
+            // Flush pending and create new Code entry
+            if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
+                result.add_entry(entry);
+            }
+
             let entry = Entry::new(
                 EntryType::Code,
                 format!("L{}", line_number),
@@ -277,33 +317,25 @@ impl Parser for PowerShellParser {
             .with_line_number(line_number)
             .with_raw_line(line.to_string());
             result.add_entry(entry);
-            pending_comment = None;
         }
 
-        // Flush remaining state
-        if let Some(block) = current_comment_block.take() {
-            result.add_entry(block.build());
+        // === Flush remaining state ===
+
+        // Flush remaining pending entry
+        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
+            result.add_entry(entry);
         }
 
-        if let Some(start) = blank_line_start.take() {
-            let end = content.lines().count();
-            result.add_entry(create_blank_line_entry(start, end));
-        }
-
-        if in_function {
-            result.add_warning(crate::model::ParseWarning::new(
-                current_func.as_ref().map(|f| f.start_line).unwrap_or(0),
-                "Unclosed function definition at end of file",
-                "",
-            ));
-        }
-
-        if in_env_heredoc {
-            result.add_warning(crate::model::ParseWarning::new(
-                env_heredoc_start_line,
-                "Unclosed environment variable Here-String at end of file",
-                "",
-            ));
+        // Warn about unclosed active block
+        if let Some(block) = active_block {
+            let msg = match block.entry_hint {
+                Some(EntryType::Function) => "Unclosed function definition at end of file",
+                Some(EntryType::EnvVar) => {
+                    "Unclosed environment variable Here-String at end of file"
+                }
+                _ => "Unclosed block at end of file",
+            };
+            result.add_warning(crate::model::ParseWarning::new(block.start_line, msg, ""));
         }
 
         result
@@ -314,19 +346,96 @@ impl Parser for PowerShellParser {
     }
 }
 
-/// Helper to flush pending comment blocks and blank lines.
-fn flush_pending_items(
-    result: &mut ParseResult,
-    comment_block: &mut Option<CommentBlockBuilder>,
-    blank_line_start: &mut Option<usize>,
-    current_line: usize,
-) {
-    if let Some(block) = comment_block.take() {
-        result.add_entry(block.build());
+impl PowerShellParser {
+    /// Build an Entry from a completed PendingBlock.
+    fn build_entry_from_pending(&self, block: PendingBlock) -> Entry {
+        let entry_type = block.entry_hint.unwrap_or(EntryType::Code);
+        let raw_content = block.raw_content();
+
+        match entry_type {
+            EntryType::Function => {
+                let name = block.name.unwrap_or_else(|| "anonymous".to_string());
+                let body = self.extract_function_body(&raw_content);
+                Entry::new(EntryType::Function, name, body)
+                    .with_line_number(block.start_line)
+                    .with_end_line(block.end_line)
+                    .with_raw_line(raw_content)
+            }
+            EntryType::EnvVar => {
+                let name = block.name.unwrap_or_else(|| "UNKNOWN".to_string());
+                let value = block.value.unwrap_or_default();
+                Entry::new(EntryType::EnvVar, name, value)
+                    .with_line_number(block.start_line)
+                    .with_end_line(block.end_line)
+            }
+            EntryType::Comment => {
+                let name = if block.start_line == block.end_line {
+                    format!("#L{}", block.start_line)
+                } else {
+                    format!("#L{}-L{}", block.start_line, block.end_line)
+                };
+                // First line's comment text as value
+                let value = block
+                    .lines
+                    .first()
+                    .map(|l| l.trim().to_string())
+                    .unwrap_or_default();
+                Entry::new(EntryType::Comment, name, value)
+                    .with_line_number(block.start_line)
+                    .with_end_line(block.end_line)
+                    .with_raw_line(raw_content)
+            }
+            EntryType::Code => {
+                let name = if block.start_line == block.end_line {
+                    format!("L{}", block.start_line)
+                } else {
+                    format!("L{}-L{}", block.start_line, block.end_line)
+                };
+                // First non-blank line as value, or empty for blank-only blocks
+                let first_non_blank = block
+                    .lines
+                    .iter()
+                    .find(|l| !l.trim().is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| block.lines.first().cloned().unwrap_or_default());
+                let value = if first_non_blank.trim().is_empty() {
+                    String::new()
+                } else {
+                    first_non_blank.trim().to_string()
+                };
+                Entry::new(EntryType::Code, name, value)
+                    .with_line_number(block.start_line)
+                    .with_end_line(block.end_line)
+                    .with_raw_line(raw_content)
+            }
+            _ => {
+                // Shouldn't happen, but handle gracefully
+                Entry::new(entry_type, "unknown".to_string(), raw_content.clone())
+                    .with_line_number(block.start_line)
+                    .with_end_line(block.end_line)
+                    .with_raw_line(raw_content)
+            }
+        }
     }
-    if let Some(start) = blank_line_start.take() {
-        let end = current_line - 1;
-        result.add_entry(create_blank_line_entry(start, end));
+
+    /// Extract function body from raw content.
+    fn extract_function_body(&self, raw: &str) -> String {
+        // Find opening brace and extract body
+        if let Some(start) = raw.find('{') {
+            if let Some(end) = raw.rfind('}') {
+                if start < end {
+                    return raw[start + 1..end].trim().to_string();
+                }
+            }
+        }
+        raw.to_string()
+    }
+
+    /// Flush pending Comment/Code entry.
+    fn flush_pending_comment_code(&self, pending: &mut Option<PendingBlock>) -> Option<Entry> {
+        pending
+            .take()
+            .map(|block| self.build_entry_from_pending(block))
     }
 }
 
@@ -435,21 +544,6 @@ mod tests {
 
         assert_eq!(blanks.len(), 1);
         assert_eq!(blanks[0].name, "L2-L3");
-    }
-
-    #[test]
-    fn test_comment_association() {
-        let parser = PowerShellParser::new();
-        let content = "# List files\nSet-Alias ll Get-ChildItem";
-        let result = parser.parse(content);
-
-        let alias = result
-            .entries
-            .iter()
-            .find(|e| e.entry_type == EntryType::Alias)
-            .unwrap();
-
-        assert_eq!(alias.comment, Some("List files".to_string()));
     }
 
     #[test]
@@ -658,6 +752,11 @@ C:\bin
             .filter(|e| e.entry_type == EntryType::Code)
             .collect();
 
-        assert!(code_blocks.iter().any(|c| c.value.contains("$env:PATH")));
+        // Check raw_line since value only contains first line for multi-line Code blocks
+        assert!(code_blocks.iter().any(|c| c
+            .raw_line
+            .as_ref()
+            .map(|r| r.contains("$env:PATH"))
+            .unwrap_or(false)));
     }
 }

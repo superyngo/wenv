@@ -21,14 +21,12 @@
 //!
 //! ## Parsing State Machine
 //!
-//! The parser maintains these states:
+//! The parser uses a unified PendingBlock state machine. All entries pass
+//! through the pending pattern:
 //!
-//! 1. **Normal** - Looking for new entries
-//! 2. **InFunction** - Accumulating function body (brace counting)
-//! 3. **InControlBlock** - Accumulating control structure (keyword tracking)
-//! 4. **InMultilineAlias** - Accumulating multi-line alias (quote counting)
-//! 5. **InMultilineEnv** - Accumulating multi-line env var (quote counting)
-//! 6. **InCommentBlock** - Accumulating adjacent comments
+//! 1. Detect entry start and create PendingBlock with appropriate boundary type
+//! 2. Accumulate lines until boundary condition is satisfied
+//! 3. Build Entry from completed PendingBlock
 //!
 //! ## Multi-line Detection
 //!
@@ -44,10 +42,9 @@ pub mod parsers;
 pub mod patterns;
 
 use crate::model::{Entry, EntryType, ParseResult, ShellType};
-use crate::parser::builders::{
-    count_braces_outside_quotes, CodeBlockBuilder, CommentBlockBuilder, FunctionBuilder,
-    QuotedValueBuilder,
-};
+use crate::parser::builders::QuotedValueBuilder;
+use crate::parser::builders::{count_braces_outside_quotes, CommentBlockBuilder};
+use crate::parser::pending::{BoundaryType, MergeType, PendingBlock};
 use crate::parser::Parser;
 
 use control::{count_control_end, count_control_start};
@@ -81,6 +78,86 @@ impl BashParser {
     pub fn new() -> Self {
         Self
     }
+
+    /// Build an Entry from a completed PendingBlock.
+    fn build_entry_from_pending(&self, block: PendingBlock) -> Entry {
+        let entry_type = block.entry_hint.unwrap_or(EntryType::Code);
+        let raw_content = block.raw_content();
+
+        // Determine name and value based on entry type
+        let (name, value) = match entry_type {
+            EntryType::Function => {
+                let name = block
+                    .name
+                    .unwrap_or_else(|| format!("L{}", block.start_line));
+                // Extract function body from raw content
+                let body = self.extract_function_body(&raw_content);
+                (name, body)
+            }
+            EntryType::Alias | EntryType::EnvVar => {
+                let name = block
+                    .name
+                    .unwrap_or_else(|| format!("L{}", block.start_line));
+                let value = block.value.unwrap_or_else(|| raw_content.clone());
+                (name, value)
+            }
+            EntryType::Comment => {
+                let prefix = if block.start_line == block.end_line {
+                    format!("#L{}", block.start_line)
+                } else {
+                    format!("#L{}-L{}", block.start_line, block.end_line)
+                };
+                // Value is first line for display
+                let first_line = block.lines.first().cloned().unwrap_or_default();
+                (prefix, first_line)
+            }
+            EntryType::Code => {
+                let prefix = if block.start_line == block.end_line {
+                    format!("L{}", block.start_line)
+                } else {
+                    format!("L{}-L{}", block.start_line, block.end_line)
+                };
+                // Value is first non-blank line for display (for control blocks with absorbed blank lines)
+                let first_non_blank = block
+                    .lines
+                    .iter()
+                    .find(|l| !l.trim().is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| block.lines.first().cloned().unwrap_or_default());
+                (prefix, first_non_blank)
+            }
+            EntryType::Source => {
+                let name = format!("L{}", block.start_line);
+                let value = block.value.unwrap_or_else(|| raw_content.clone());
+                (name, value)
+            }
+        };
+
+        Entry::new(entry_type, name, value)
+            .with_line_number(block.start_line)
+            .with_end_line(block.end_line)
+            .with_raw_line(raw_content)
+    }
+
+    /// Extract function body from raw content.
+    fn extract_function_body(&self, raw: &str) -> String {
+        // Find opening brace and extract body
+        if let Some(start) = raw.find('{') {
+            if let Some(end) = raw.rfind('}') {
+                if start < end {
+                    return raw[start + 1..end].trim().to_string();
+                }
+            }
+        }
+        raw.to_string()
+    }
+
+    /// Flush pending Comment/Code block and return Entry if exists.
+    fn flush_pending_comment_code(&self, pending: &mut Option<PendingBlock>) -> Option<Entry> {
+        pending
+            .take()
+            .map(|block| self.build_entry_from_pending(block))
+    }
 }
 
 impl Default for BashParser {
@@ -93,84 +170,103 @@ impl Parser for BashParser {
     fn parse(&self, content: &str) -> ParseResult {
         let mut result = ParseResult::new();
 
-        // === State tracking variables ===
+        // === Unified pending state ===
 
-        // Function parsing state
-        let mut in_function = false;
-        let mut brace_count = 0;
-        let mut current_func: Option<FunctionBuilder> = None;
+        // For multi-line structures: function, control block, multi-line alias/env
+        let mut active_block: Option<PendingBlock> = None;
 
-        // Control structure state
+        // For Comment/Code merging (separate from active_block)
+        let mut pending_entry: Option<PendingBlock> = None;
+
+        // Track control structure depth (needed for control block detection)
         let mut control_depth: usize = 0;
-        let mut current_code_block: Option<CodeBlockBuilder> = None;
-
-        // Multi-line alias/env state
-        let mut current_alias: Option<QuotedValueBuilder> = None;
-        let mut current_env: Option<QuotedValueBuilder> = None;
-
-        // Pending entry for Comment/Code merging (replaces comment_block + blank_line_start)
-        let mut pending_entry: Option<Entry> = None;
-
-        // Pending comment for association with next structured entry
-        let mut pending_comment: Option<String> = None;
 
         // === Main parsing loop ===
+        // Use split('\n') instead of lines() to preserve trailing empty lines.
+        // lines() treats '\n' as a line terminator, so "a\nb\n" → ["a", "b"]
+        // But for raw_line format (where '\n' is a separator), we need "a\nb\n" → ["a", "b", ""]
+        // However, a file ending with '\n' is just proper file termination, not an extra line.
+        // So we strip the final empty element only if content ends with '\n'.
+        let lines_vec: Vec<&str> = content.split('\n').collect();
+        let lines_to_process: &[&str] = if lines_vec.last() == Some(&"") && content.ends_with('\n')
+        {
+            &lines_vec[..lines_vec.len() - 1]
+        } else {
+            &lines_vec[..]
+        };
 
-        for (line_num, line) in content.lines().enumerate() {
+        for (line_num, line) in lines_to_process.iter().enumerate() {
             let line_number = line_num + 1;
             let trimmed = line.trim();
 
             // ------------------------------------------------------------------
-            // Handle multi-line function body (highest priority)
+            // Handle active multi-line block (function, control, alias, env)
             // ------------------------------------------------------------------
-            if in_function {
-                let (open, close) = count_braces_outside_quotes(trimmed);
-                brace_count += open;
-                brace_count = brace_count.saturating_sub(close);
+            if let Some(ref mut block) = active_block {
+                block.add_line(line, line_number);
 
-                if let Some(ref mut func) = current_func {
-                    func.add_line(line);
-                }
+                match &mut block.boundary {
+                    BoundaryType::BraceCounting {
+                        ref mut brace_count,
+                    } => {
+                        // Function body
+                        let (open, close) = count_braces_outside_quotes(trimmed);
+                        *brace_count += open as i32;
+                        *brace_count = (*brace_count).saturating_sub(close as i32);
 
-                if brace_count == 0 {
-                    in_function = false;
-                    if let Some(func) = current_func.take() {
-                        let mut entry = func.build(EntryType::Function);
-                        if let Some(comment) = pending_comment.take() {
-                            entry = entry.with_comment(comment);
+                        if *brace_count == 0 {
+                            let entry = self.build_entry_from_pending(active_block.take().unwrap());
+                            result.add_entry(entry);
                         }
-                        result.add_entry(entry);
                     }
+                    BoundaryType::QuoteCounting {
+                        ref mut quote_count,
+                    } => {
+                        // Multi-line alias or env
+                        *quote_count += line.matches('\'').count();
+
+                        if *quote_count % 2 == 0 {
+                            let mut completed = active_block.take().unwrap();
+                            // Extract value from complete content
+                            let raw = completed.raw_content();
+                            completed.value = Some(self.extract_quoted_value(&raw));
+                            let entry = self.build_entry_from_pending(completed);
+                            result.add_entry(entry);
+                        }
+                    }
+                    BoundaryType::KeywordTracking { ref mut depth } => {
+                        // Control structure
+                        let end_count = count_control_end(trimmed);
+                        let start_count = count_control_start(trimmed);
+                        *depth = (*depth).saturating_sub(end_count);
+                        *depth += start_count;
+
+                        if *depth == 0 {
+                            // Reset external control_depth to sync state
+                            control_depth = 0;
+
+                            // Make result pending for trailing blank absorption
+                            let completed = active_block.take().unwrap();
+                            pending_entry = Some(PendingBlock {
+                                lines: completed.lines,
+                                start_line: completed.start_line,
+                                end_line: completed.end_line,
+                                boundary: BoundaryType::AdjacentMerging {
+                                    merge_type: MergeType::CodeWithBlanks,
+                                },
+                                entry_hint: Some(EntryType::Code),
+                                name: None,
+                                value: None,
+                            });
+                        }
+                    }
+                    _ => {}
                 }
                 continue;
             }
 
             // ------------------------------------------------------------------
-            // Handle multi-line alias (quote counting)
-            // ------------------------------------------------------------------
-            if let Some(ref mut builder) = current_alias {
-                builder.add_line(line);
-                if builder.is_complete() {
-                    let entry = current_alias.take().unwrap().build(EntryType::Alias);
-                    result.add_entry(entry);
-                }
-                continue;
-            }
-
-            // ------------------------------------------------------------------
-            // Handle multi-line env var (quote counting)
-            // ------------------------------------------------------------------
-            if let Some(ref mut builder) = current_env {
-                builder.add_line(line);
-                if builder.is_complete() {
-                    let entry = current_env.take().unwrap().build(EntryType::EnvVar);
-                    result.add_entry(entry);
-                }
-                continue;
-            }
-
-            // ------------------------------------------------------------------
-            // Handle control structure blocks
+            // Check for control structure start/continuation
             // ------------------------------------------------------------------
             let prev_depth = control_depth;
             control_depth = control_depth.saturating_sub(count_control_end(trimmed));
@@ -178,51 +274,37 @@ impl Parser for BashParser {
 
             if control_depth > 0 || (prev_depth > 0 && control_depth == 0) {
                 // Start control block - merge pending Comment/Code if present
-                if current_code_block.is_none() && prev_depth == 0 && control_depth > 0 {
+                if active_block.is_none() && prev_depth == 0 && control_depth > 0 {
                     if let Some(pending) = pending_entry.take() {
-                        if matches!(pending.entry_type, EntryType::Comment | EntryType::Code) {
-                            // Seed block with pending content (includes any absorbed blank lines)
-                            let start_line = pending.line_number.unwrap_or(line_number);
-                            let mut block = CodeBlockBuilder::new(start_line);
-                            // Add lines from pending entry's raw_line
-                            // Note: raw_line uses \n as separator (not terminator), so split directly
-                            if let Some(ref raw) = pending.raw_line {
-                                for l in raw.split('\n') {
-                                    block.add_line(l);
-                                }
-                            } else {
-                                block.add_line(&pending.value);
-                            }
-                            block.add_line(line);
-                            current_code_block = Some(block);
+                        if matches!(
+                            pending.entry_hint,
+                            Some(EntryType::Comment) | Some(EntryType::Code)
+                        ) {
+                            // Seed block with pending content
+                            let mut lines = pending.lines;
+                            lines.push(line.to_string());
+                            active_block = Some(PendingBlock {
+                                lines,
+                                start_line: pending.start_line,
+                                end_line: line_number,
+                                boundary: BoundaryType::KeywordTracking {
+                                    depth: control_depth,
+                                },
+                                entry_hint: Some(EntryType::Code),
+                                name: None,
+                                value: None,
+                            });
                         } else {
-                            // Not mergeable, flush normally and start new block
-                            result.add_entry(pending);
-                            current_code_block = Some(CodeBlockBuilder::new(line_number));
-                            if let Some(ref mut block) = current_code_block {
-                                block.add_line(line);
-                            }
+                            // Flush non-mergeable pending
+                            result.add_entry(self.build_entry_from_pending(pending));
+                            active_block =
+                                Some(PendingBlock::control(line_number, line, control_depth));
                         }
                     } else {
-                        // No pending entry, start fresh block
-                        current_code_block = Some(CodeBlockBuilder::new(line_number));
-                        if let Some(ref mut block) = current_code_block {
-                            block.add_line(line);
-                        }
-                    }
-                } else if let Some(ref mut block) = current_code_block {
-                    // Continue existing control block
-                    block.add_line(line);
-                }
-
-                // Close control block - make result pending for trailing blank absorption
-                if prev_depth > 0 && control_depth == 0 {
-                    if let Some(block) = current_code_block.take() {
-                        pending_entry = Some(block.build());
+                        active_block =
+                            Some(PendingBlock::control(line_number, line, control_depth));
                     }
                 }
-
-                pending_comment = None;
                 continue;
             }
 
@@ -230,38 +312,24 @@ impl Parser for BashParser {
             // Handle empty lines (part of pending entry state machine)
             // ------------------------------------------------------------------
             if trimmed.is_empty() {
-                let blank_entry =
-                    Entry::new(EntryType::Code, format!("L{}", line_number), String::new())
-                        .with_line_number(line_number)
-                        .with_end_line(line_number) // Single blank line has same end_line
-                        .with_raw_line(line.to_string());
+                let blank = PendingBlock::blank_lines(line_number, line);
 
                 match &mut pending_entry {
-                    Some(pending) if pending.entry_type == EntryType::Comment => {
-                        // Comment absorbs blank line
-                        pending.merge_trailing(blank_entry);
-                    }
-                    Some(pending) if pending.is_blank() => {
-                        // Blank Code absorbs blank line
-                        pending.merge_trailing(blank_entry);
-                    }
-                    Some(pending) if pending.entry_type == EntryType::Code => {
-                        // Non-blank Code absorbs trailing blank line
-                        pending.merge_trailing(blank_entry);
+                    Some(pending) if pending.can_absorb_blank() => {
+                        // Comment, BlankLines, or CodeWithBlanks absorbs blank
+                        pending.add_line(line, line_number);
                     }
                     Some(_) => {
                         // Other pending types: flush and start new blank
-                        if let Some(entry) = pending_entry.take() {
+                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
                             result.add_entry(entry);
                         }
-                        pending_entry = Some(blank_entry);
+                        pending_entry = Some(blank);
                     }
                     None => {
-                        // Start new blank entry
-                        pending_entry = Some(blank_entry);
+                        pending_entry = Some(blank);
                     }
                 }
-                pending_comment = None;
                 continue;
             }
 
@@ -269,38 +337,20 @@ impl Parser for BashParser {
             // Handle comment lines (part of pending entry state machine)
             // ------------------------------------------------------------------
             if CommentBlockBuilder::is_standalone_comment(trimmed) {
-                // value keeps full raw line (including leading whitespace and # prefix)
-                let comment_entry = Entry::new(
-                    EntryType::Comment,
-                    format!("#L{}", line_number),
-                    line.to_string(), // Keep full raw line for value
-                )
-                .with_line_number(line_number)
-                .with_end_line(line_number) // Single-line comment has same end_line
-                .with_raw_line(line.to_string());
-
-                // Extract comment text for pending_comment (for association with next entry)
-                let comment_text = trimmed.strip_prefix('#').unwrap_or("").trim();
-
                 match &mut pending_entry {
-                    Some(pending) if pending.entry_type == EntryType::Comment => {
+                    Some(pending) if pending.can_absorb_comment() => {
                         // Comment merges with Comment
-                        pending.merge_trailing(comment_entry);
-                        // Update pending_comment to last comment text
-                        pending_comment = Some(comment_text.to_string());
+                        pending.add_line(line, line_number);
                     }
                     Some(_) => {
                         // Non-Comment pending: flush and start new comment
-                        if let Some(entry) = pending_entry.take() {
+                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
                             result.add_entry(entry);
                         }
-                        pending_entry = Some(comment_entry);
-                        pending_comment = Some(comment_text.to_string());
+                        pending_entry = Some(PendingBlock::comment(line_number, line));
                     }
                     None => {
-                        // Start new comment entry
-                        pending_entry = Some(comment_entry);
-                        pending_comment = Some(comment_text.to_string());
+                        pending_entry = Some(PendingBlock::comment(line_number, line));
                     }
                 }
                 continue;
@@ -312,23 +362,37 @@ impl Parser for BashParser {
 
             // Try alias
             match try_parse_alias(trimmed, line_number) {
-                AliasParseResult::SingleLine(mut entry) => {
+                AliasParseResult::SingleLine(entry) => {
                     // Flush pending entry
-                    if let Some(pending) = pending_entry.take() {
-                        result.add_entry(pending);
-                    }
-                    if let Some(comment) = pending_comment.take() {
-                        entry = entry.with_comment(comment);
+                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                        result.add_entry(e);
                     }
                     result.add_entry(entry);
                     continue;
                 }
                 AliasParseResult::MultiLineStart { builder } => {
                     // Flush pending entry
-                    if let Some(pending) = pending_entry.take() {
-                        result.add_entry(pending);
+                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                        result.add_entry(e);
                     }
-                    current_alias = Some(builder);
+                    // Convert QuotedValueBuilder to PendingBlock
+                    // Calculate quote count from the first line
+                    let initial_quote_count: usize = builder
+                        .lines
+                        .iter()
+                        .map(|l| QuotedValueBuilder::count_single_quotes(l))
+                        .sum();
+                    active_block = Some(PendingBlock {
+                        lines: builder.lines.clone(),
+                        start_line: builder.start_line,
+                        end_line: builder.start_line,
+                        boundary: BoundaryType::QuoteCounting {
+                            quote_count: initial_quote_count,
+                        },
+                        entry_hint: Some(EntryType::Alias),
+                        name: Some(builder.name.clone()),
+                        value: None,
+                    });
                     continue;
                 }
                 AliasParseResult::NotAlias => {}
@@ -336,36 +400,47 @@ impl Parser for BashParser {
 
             // Try export
             match try_parse_export(trimmed, line_number) {
-                ExportParseResult::SingleLine(mut entry) => {
+                ExportParseResult::SingleLine(entry) => {
                     // Flush pending entry
-                    if let Some(pending) = pending_entry.take() {
-                        result.add_entry(pending);
-                    }
-                    if let Some(comment) = pending_comment.take() {
-                        entry = entry.with_comment(comment);
+                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                        result.add_entry(e);
                     }
                     result.add_entry(entry);
                     continue;
                 }
                 ExportParseResult::MultiLineStart { builder } => {
                     // Flush pending entry
-                    if let Some(pending) = pending_entry.take() {
-                        result.add_entry(pending);
+                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                        result.add_entry(e);
                     }
-                    current_env = Some(builder);
+                    // Convert QuotedValueBuilder to PendingBlock
+                    // Calculate quote count from the first line
+                    let initial_quote_count: usize = builder
+                        .lines
+                        .iter()
+                        .map(|l| QuotedValueBuilder::count_single_quotes(l))
+                        .sum();
+                    active_block = Some(PendingBlock {
+                        lines: builder.lines.clone(),
+                        start_line: builder.start_line,
+                        end_line: builder.start_line,
+                        boundary: BoundaryType::QuoteCounting {
+                            quote_count: initial_quote_count,
+                        },
+                        entry_hint: Some(EntryType::EnvVar),
+                        name: Some(builder.name.clone()),
+                        value: None,
+                    });
                     continue;
                 }
                 ExportParseResult::NotExport => {}
             }
 
             // Try source
-            if let Some(mut entry) = try_parse_source(trimmed, line_number) {
+            if let Some(entry) = try_parse_source(trimmed, line_number) {
                 // Flush pending entry
-                if let Some(pending) = pending_entry.take() {
-                    result.add_entry(pending);
-                }
-                if let Some(comment) = pending_comment.take() {
-                    entry = entry.with_comment(comment);
+                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                    result.add_entry(e);
                 }
                 result.add_entry(entry);
                 continue;
@@ -374,29 +449,22 @@ impl Parser for BashParser {
             // Try function
             if let Some(func_name) = detect_function_start(trimmed) {
                 // Flush pending entry
-                if let Some(pending) = pending_entry.take() {
-                    result.add_entry(pending);
+                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                    result.add_entry(e);
                 }
 
-                in_function = true;
                 let (open, close) = count_braces_outside_quotes(trimmed);
-                brace_count = open.saturating_sub(close);
+                let brace_count = (open as i32).saturating_sub(close as i32);
 
-                current_func = Some(FunctionBuilder::new(func_name, line_number));
-                if let Some(ref mut func) = current_func {
-                    func.add_line(line);
-                }
+                let func_block =
+                    PendingBlock::function(func_name.clone(), line_number, line, brace_count);
 
-                // Single-line function
+                // Single-line function check
                 if brace_count == 0 && trimmed.contains('}') {
-                    in_function = false;
-                    if let Some(func) = current_func.take() {
-                        let mut entry = func.build(EntryType::Function);
-                        if let Some(comment) = pending_comment.take() {
-                            entry = entry.with_comment(comment);
-                        }
-                        result.add_entry(entry);
-                    }
+                    let entry = self.build_entry_from_pending(func_block);
+                    result.add_entry(entry);
+                } else {
+                    active_block = Some(func_block);
                 }
                 continue;
             }
@@ -404,77 +472,48 @@ impl Parser for BashParser {
             // ------------------------------------------------------------------
             // Fallback: capture as non-blank Code
             // ------------------------------------------------------------------
-            let code_entry = Entry::new(
-                EntryType::Code,
-                format!("L{}", line_number),
-                line.to_string(), // Keep full raw line for value
-            )
-            .with_line_number(line_number)
-            .with_end_line(line_number) // Single line Code has same end_line
-            .with_raw_line(line.to_string());
-
             match &mut pending_entry {
-                Some(pending) if pending.entry_type == EntryType::Comment => {
+                Some(pending) if pending.entry_hint == Some(EntryType::Comment) => {
                     // Comment + non-blank Code → merge and upgrade to Code
-                    // Keep in pending to allow absorbing trailing blank lines
-                    pending.merge_trailing(code_entry);
-                    // Don't take() here - let it stay pending so it can absorb blanks
-                    // via the Code branch below on subsequent iterations
+                    pending.add_line(line, line_number);
+                    pending.upgrade_to_code();
                 }
-                Some(pending) if pending.entry_type == EntryType::Code => {
+                Some(pending) if pending.entry_hint == Some(EntryType::Code) => {
                     // Non-blank Code pending + new non-blank Code → flush pending, new pending
-                    if let Some(entry) = pending_entry.take() {
+                    if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
                         result.add_entry(entry);
                     }
-                    pending_entry = Some(code_entry);
+                    pending_entry = Some(PendingBlock::code(line_number, line));
                 }
                 Some(_) => {
                     // Flush pending, start new pending Code
-                    if let Some(entry) = pending_entry.take() {
+                    if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
                         result.add_entry(entry);
                     }
-                    pending_entry = Some(code_entry);
+                    pending_entry = Some(PendingBlock::code(line_number, line));
                 }
                 None => {
-                    // No pending, start new pending Code
-                    pending_entry = Some(code_entry);
+                    pending_entry = Some(PendingBlock::code(line_number, line));
                 }
             }
-            pending_comment = None;
         }
 
         // === Flush remaining state ===
 
         // Flush remaining pending entry
-        if let Some(entry) = pending_entry.take() {
+        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
             result.add_entry(entry);
         }
 
-        // Warn about unclosed function
-        if in_function {
-            result.add_warning(crate::model::ParseWarning::new(
-                current_func.as_ref().map(|f| f.start_line).unwrap_or(0),
-                "Unclosed function definition at end of file",
-                "",
-            ));
-        }
-
-        // Warn about unclosed multi-line alias
-        if let Some(builder) = current_alias {
-            result.add_warning(crate::model::ParseWarning::new(
-                builder.start_line,
-                "Unclosed multi-line alias at end of file",
-                "",
-            ));
-        }
-
-        // Warn about unclosed multi-line env
-        if let Some(builder) = current_env {
-            result.add_warning(crate::model::ParseWarning::new(
-                builder.start_line,
-                "Unclosed multi-line export at end of file",
-                "",
-            ));
+        // Warn about unclosed active block
+        if let Some(block) = active_block {
+            let msg = match block.entry_hint {
+                Some(EntryType::Function) => "Unclosed function definition at end of file",
+                Some(EntryType::Alias) => "Unclosed multi-line alias at end of file",
+                Some(EntryType::EnvVar) => "Unclosed multi-line export at end of file",
+                _ => "Unclosed block at end of file",
+            };
+            result.add_warning(crate::model::ParseWarning::new(block.start_line, msg, ""));
         }
 
         result
@@ -482,6 +521,29 @@ impl Parser for BashParser {
 
     fn shell_type(&self) -> ShellType {
         ShellType::Bash
+    }
+}
+
+impl BashParser {
+    /// Extract quoted value from raw multi-line content.
+    fn extract_quoted_value(&self, raw: &str) -> String {
+        // Find the first quote and extract value
+        if let Some(start) = raw.find('\'') {
+            if let Some(end) = raw.rfind('\'') {
+                if start < end {
+                    return raw[start + 1..end].to_string();
+                }
+            }
+        }
+        // Fallback: try double quotes
+        if let Some(start) = raw.find('"') {
+            if let Some(end) = raw.rfind('"') {
+                if start < end {
+                    return raw[start + 1..end].to_string();
+                }
+            }
+        }
+        raw.to_string()
     }
 }
 
@@ -698,21 +760,6 @@ mod tests {
         assert_eq!(aliases[1].name, "~");
     }
 
-    #[test]
-    fn test_comment_association() {
-        let parser = BashParser::new();
-        let content = "# List files\nalias ll='ls -la'";
-        let result = parser.parse(content);
-
-        let alias = result
-            .entries
-            .iter()
-            .find(|e| e.entry_type == EntryType::Alias)
-            .unwrap();
-
-        assert_eq!(alias.comment, Some("List files".to_string()));
-    }
-
     // === New tests for Comment/Code merging logic ===
 
     #[test]
@@ -826,7 +873,7 @@ mod tests {
     fn test_comment_then_alias_not_merged() {
         // # Section header
         // alias ll='ls -la'
-        // → Comment L1 flushed, Alias L2 with comment association
+        // → Comment L1 flushed, Alias L2
         let parser = BashParser::new();
         let content = "# Section header\nalias ll='ls -la'";
         let result = parser.parse(content);
@@ -840,7 +887,6 @@ mod tests {
         let alias = &result.entries[1];
         assert_eq!(alias.entry_type, EntryType::Alias);
         assert_eq!(alias.name, "ll");
-        assert_eq!(alias.comment, Some("Section header".to_string()));
     }
 
     #[test]
@@ -864,8 +910,6 @@ mod tests {
         let alias = &result.entries[1];
         assert_eq!(alias.entry_type, EntryType::Alias);
         assert_eq!(alias.line_number, Some(4));
-        // No comment association because blank line broke the adjacency for pending_comment
-        assert_eq!(alias.comment, None);
     }
 
     #[test]
@@ -911,5 +955,61 @@ mod tests {
         assert_eq!(second.entry_type, EntryType::Code);
         assert_eq!(second.value, "echo second");
         assert_eq!(second.line_number, Some(3));
+    }
+
+    #[test]
+    fn test_trailing_blank_lines_preserved_in_raw_line() {
+        // Test that trailing blank lines are preserved in raw_line
+        // "#\n\n" should be 3 lines (comment, blank, blank), not 2
+        let parser = BashParser::new();
+
+        // Case 1: Comment with trailing blank lines (no file terminator)
+        let content = "# comment\n\n";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        let entry = &result.entries[0];
+        assert_eq!(entry.entry_type, EntryType::Comment);
+        assert_eq!(entry.line_number, Some(1));
+        assert_eq!(entry.end_line, Some(2)); // Comment absorbs the blank line
+                                             // raw_line should contain "# comment\n" (2 lines: comment + blank)
+        assert_eq!(entry.raw_line, Some("# comment\n".to_string()));
+    }
+
+    #[test]
+    fn test_multiple_trailing_blanks_preserved() {
+        // "# comment\n\n\n" (with file terminator) should be 3 lines
+        let parser = BashParser::new();
+
+        // Multiple trailing blank lines
+        let content = "# comment\n\n\n";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        let entry = &result.entries[0];
+        assert_eq!(entry.entry_type, EntryType::Comment);
+        assert_eq!(entry.line_number, Some(1));
+        assert_eq!(entry.end_line, Some(3)); // Comment absorbs 2 blank lines
+                                             // raw_line should contain all 3 lines
+        assert_eq!(entry.raw_line, Some("# comment\n\n".to_string()));
+    }
+
+    #[test]
+    fn test_trailing_blank_not_confused_with_file_terminator() {
+        // Important: "# comment\n" is 1 line with file terminator
+        // "# comment\n\n" is 2 lines: comment + blank (with file terminator)
+        let parser = BashParser::new();
+
+        // Single line with proper file terminator
+        let content1 = "# comment\n";
+        let result1 = parser.parse(content1);
+        assert_eq!(result1.entries.len(), 1);
+        assert_eq!(result1.entries[0].end_line, Some(1)); // Just 1 line
+
+        // Comment + blank line (with file terminator)
+        let content2 = "# comment\n\n";
+        let result2 = parser.parse(content2);
+        assert_eq!(result2.entries.len(), 1);
+        assert_eq!(result2.entries[0].end_line, Some(2)); // 2 lines: comment + blank
     }
 }

@@ -50,7 +50,6 @@ pub struct Entry {
     pub value: String,
     pub line_number: Option<usize>,
     pub end_line: Option<usize>, // For multi-line code blocks
-    pub comment: Option<String>,
     pub raw_line: Option<String>,
 }
 
@@ -62,7 +61,6 @@ impl Entry {
             value,
             line_number: None,
             end_line: None,
-            comment: None,
             raw_line: None,
         }
     }
@@ -74,11 +72,6 @@ impl Entry {
 
     pub fn with_end_line(mut self, end_line: usize) -> Self {
         self.end_line = Some(end_line);
-        self
-    }
-
-    pub fn with_comment(mut self, comment: String) -> Self {
-        self.comment = Some(comment);
         self
     }
 
@@ -219,14 +212,11 @@ mod tests {
 
     #[test]
     fn test_entry_creation() {
-        let entry = Entry::new(EntryType::Alias, "ll".into(), "ls -la".into())
-            .with_line_number(10)
-            .with_comment("List files".into());
+        let entry = Entry::new(EntryType::Alias, "ll".into(), "ls -la".into()).with_line_number(10);
 
         assert_eq!(entry.name, "ll");
         assert_eq!(entry.value, "ls -la");
         assert_eq!(entry.line_number, Some(10));
-        assert_eq!(entry.comment, Some("List files".into()));
     }
 
     #[test]
