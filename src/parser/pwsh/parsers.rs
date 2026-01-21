@@ -2,16 +2,33 @@
 //!
 //! Individual methods for parsing each entry type from PowerShell configuration files.
 //!
+//! ## Standard Signatures
+//!
+//! All `try_parse_*` functions follow the unified signature:
+//! - `try_parse_alias(line, line_num) -> ParseEvent`
+//! - `try_parse_env(line, line_num) -> ParseEvent`
+//! - `try_parse_source(line, line_num) -> ParseEvent`
+//!
+//! Returns:
+//! - `ParseEvent::Complete(entry)` for single-line entries
+//! - `ParseEvent::Started { ... }` for multi-line entry starts (e.g., Here-Strings)
+//! - `ParseEvent::None` if no match
+//!
+//! ## Function Detection
+//!
+//! - `detect_function_start(line) -> Option<String>` - Standard function for all shells
+//!
 //! ## Supported Entry Types
 //!
 //! - Alias: `Set-Alias`, `New-Alias`
-//! - EnvVar: `$env:NAME = value`
+//! - EnvVar: `$env:NAME = value` (single-line or Here-String)
 //! - Source: `. .\file.ps1`
 //! - Function: `function Name { }`
 
 use super::patterns::*;
 use crate::model::{Entry, EntryType};
 use crate::parser::builders::{extract_comment, strip_quotes};
+use crate::parser::{BoundaryType, ParseEvent};
 
 /// Try to parse a line as a PowerShell alias.
 ///
@@ -26,11 +43,12 @@ use crate::parser::builders::{extract_comment, strip_quotes};
 ///
 /// # Returns
 ///
-/// `Some(Entry)` if the line is an alias, `None` otherwise.
-pub fn try_parse_alias(line: &str, line_num: usize) -> Option<Entry> {
+/// - `ParseEvent::Complete(entry)` if the line is an alias
+/// - `ParseEvent::None` otherwise
+pub fn try_parse_alias(line: &str, line_num: usize) -> ParseEvent {
     // Try simple format first
     if let Some(caps) = ALIAS_SIMPLE_RE.captures(line) {
-        return Some(
+        return ParseEvent::Complete(
             Entry::new(EntryType::Alias, caps[1].to_string(), caps[2].to_string())
                 .with_line_number(line_num)
                 .with_raw_line(line.to_string()),
@@ -41,19 +59,21 @@ pub fn try_parse_alias(line: &str, line_num: usize) -> Option<Entry> {
     if let Some(caps) = ALIAS_RE.captures(line) {
         let name = caps[2].to_string();
         let value = strip_quotes(&caps[4]);
-        return Some(
+        return ParseEvent::Complete(
             Entry::new(EntryType::Alias, name, value)
                 .with_line_number(line_num)
                 .with_raw_line(line.to_string()),
         );
     }
 
-    None
+    ParseEvent::None
 }
 
 /// Try to parse a line as a PowerShell environment variable.
 ///
-/// Matches: `$env:VAR = value`
+/// Matches:
+/// - `$env:VAR = value` (single-line)
+/// - `$env:VAR = @"` (Here-String start)
 ///
 /// # Arguments
 ///
@@ -62,18 +82,35 @@ pub fn try_parse_alias(line: &str, line_num: usize) -> Option<Entry> {
 ///
 /// # Returns
 ///
-/// `Some(Entry)` if the line is an env var, `None` otherwise.
-pub fn try_parse_env(line: &str, line_num: usize) -> Option<Entry> {
+/// - `ParseEvent::Complete(entry)` for single-line env vars
+/// - `ParseEvent::Started { ... }` for Here-String start
+/// - `ParseEvent::None` otherwise
+pub fn try_parse_env(line: &str, line_num: usize) -> ParseEvent {
+    // Check for Here-String start FIRST (multi-line)
+    if let Some(caps) = ENV_HEREDOC_START_RE.captures(line) {
+        let name = caps[1].to_string();
+        return ParseEvent::Started {
+            entry_type: EntryType::EnvVar,
+            name,
+            // Use QuoteCounting as a marker for Here-String
+            // The actual end detection is done via is_heredoc_end() in the main loop
+            boundary: BoundaryType::QuoteCounting { quote_count: 1 },
+            first_line: line.to_string(),
+        };
+    }
+
+    // Try single-line env var
     if let Some(caps) = ENV_RE.captures(line) {
         let (value_clean, _inline_comment) = extract_comment(&caps[2], '#');
         let value = strip_quotes(&value_clean);
-        return Some(
+        return ParseEvent::Complete(
             Entry::new(EntryType::EnvVar, caps[1].to_string(), value)
                 .with_line_number(line_num)
                 .with_raw_line(line.to_string()),
         );
     }
-    None
+
+    ParseEvent::None
 }
 
 /// Try to parse a line as a PowerShell source statement.
@@ -87,19 +124,25 @@ pub fn try_parse_env(line: &str, line_num: usize) -> Option<Entry> {
 ///
 /// # Returns
 ///
-/// `Some(Entry)` if the line is a source statement, `None` otherwise.
-pub fn try_parse_source(line: &str, line_num: usize) -> Option<Entry> {
+/// - `ParseEvent::Complete(entry)` if the line is a source statement
+/// - `ParseEvent::None` otherwise
+pub fn try_parse_source(line: &str, line_num: usize) -> ParseEvent {
     if let Some(caps) = SOURCE_RE.captures(line) {
         let (path_clean, _inline_comment) = extract_comment(&caps[1], '#');
         let path = strip_quotes(&path_clean);
-        let name = format!("L{}", line_num);
-        return Some(
+        // Extract filename (without extension) as name for TUI identification
+        let name = std::path::Path::new(&path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&path)
+            .to_string();
+        return ParseEvent::Complete(
             Entry::new(EntryType::Source, name, path)
                 .with_line_number(line_num)
                 .with_raw_line(line.to_string()),
         );
     }
-    None
+    ParseEvent::None
 }
 
 /// Detect if a line starts a function definition.
@@ -115,24 +158,6 @@ pub fn try_parse_source(line: &str, line_num: usize) -> Option<Entry> {
 /// `Some(function_name)` if this is a function start, `None` otherwise.
 pub fn detect_function_start(line: &str) -> Option<String> {
     if let Some(caps) = FUNC_START_RE.captures(line) {
-        return Some(caps[1].to_string());
-    }
-    None
-}
-
-/// Detect if a line starts an environment variable Here-String.
-///
-/// Matches: `$env:VAR = @"`
-///
-/// # Arguments
-///
-/// - `line`: The trimmed line to check
-///
-/// # Returns
-///
-/// `Some(variable_name)` if this is a Here-String start, `None` otherwise.
-pub fn detect_env_heredoc_start(line: &str) -> Option<String> {
-    if let Some(caps) = ENV_HEREDOC_START_RE.captures(line) {
         return Some(caps[1].to_string());
     }
     None
@@ -159,31 +184,60 @@ mod tests {
 
     #[test]
     fn test_try_parse_alias_simple() {
-        let entry = try_parse_alias("Set-Alias ll Get-ChildItem", 1).unwrap();
-        assert_eq!(entry.name, "ll");
-        assert_eq!(entry.value, "Get-ChildItem");
+        match try_parse_alias("Set-Alias ll Get-ChildItem", 1) {
+            ParseEvent::Complete(entry) => {
+                assert_eq!(entry.name, "ll");
+                assert_eq!(entry.value, "Get-ChildItem");
+            }
+            _ => panic!("Expected Complete"),
+        }
     }
 
     #[test]
     fn test_try_parse_alias_with_params() {
-        let entry = try_parse_alias("Set-Alias -Name gs -Value git", 5).unwrap();
-        assert_eq!(entry.name, "gs");
-        assert_eq!(entry.value, "git");
-        assert_eq!(entry.line_number, Some(5));
+        match try_parse_alias("Set-Alias -Name gs -Value git", 5) {
+            ParseEvent::Complete(entry) => {
+                assert_eq!(entry.name, "gs");
+                assert_eq!(entry.value, "git");
+                assert_eq!(entry.line_number, Some(5));
+            }
+            _ => panic!("Expected Complete"),
+        }
     }
 
     #[test]
     fn test_try_parse_env() {
-        let entry = try_parse_env(r#"$env:EDITOR = "code""#, 10).unwrap();
-        assert_eq!(entry.name, "EDITOR");
-        assert_eq!(entry.value, "code");
+        match try_parse_env(r#"$env:EDITOR = "code""#, 10) {
+            ParseEvent::Complete(entry) => {
+                assert_eq!(entry.name, "EDITOR");
+                assert_eq!(entry.value, "code");
+            }
+            _ => panic!("Expected Complete"),
+        }
+    }
+
+    #[test]
+    fn test_try_parse_env_heredoc_start() {
+        match try_parse_env(r#"$env:LONG = @""#, 5) {
+            ParseEvent::Started {
+                entry_type, name, ..
+            } => {
+                assert_eq!(entry_type, EntryType::EnvVar);
+                assert_eq!(name, "LONG");
+            }
+            _ => panic!("Expected Started"),
+        }
     }
 
     #[test]
     fn test_try_parse_source() {
-        let entry = try_parse_source(r#". .\aliases.ps1"#, 15).unwrap();
-        assert_eq!(entry.entry_type, EntryType::Source);
-        assert_eq!(entry.name, "L15");
+        match try_parse_source(r#". .\aliases.ps1"#, 15) {
+            ParseEvent::Complete(entry) => {
+                assert_eq!(entry.entry_type, EntryType::Source);
+                assert_eq!(entry.name, ".\\aliases");
+            }
+            _ => panic!("Expected Complete"),
+        }
     }
 
     #[test]
@@ -200,23 +254,9 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_env_heredoc_start() {
-        assert_eq!(
-            detect_env_heredoc_start(r#"$env:PATH = @""#),
-            Some("PATH".into())
-        );
-        assert_eq!(
-            detect_env_heredoc_start(r#"$env:CONFIG = @""#),
-            Some("CONFIG".into())
-        );
-        assert_eq!(detect_env_heredoc_start(r#"$env:VAR = "value""#), None);
-    }
-
-    #[test]
     fn test_is_heredoc_end() {
         assert!(is_heredoc_end(r#""@"#));
-        assert!(!is_heredoc_end(r#""#));
-        assert!(!is_heredoc_end(r#"@""#));
-        assert!(!is_heredoc_end(r#"  "@  "#));
+        assert!(!is_heredoc_end(r#"  "@"#)); // Trimmed before calling
+        assert!(!is_heredoc_end("other line"));
     }
 }

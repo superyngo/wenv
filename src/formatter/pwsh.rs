@@ -15,7 +15,7 @@ impl PowerShellFormatter {
     }
 
     fn format_alias(&self, entry: &Entry) -> String {
-        format!("Set-Alias {} {}", entry.name, entry.value)
+        format!("Set-Alias {} '{}'", entry.name, entry.value)
     }
 
     fn format_env(&self, entry: &Entry) -> String {
@@ -231,7 +231,10 @@ mod tests {
     fn test_format_alias() {
         let formatter = PowerShellFormatter::new();
         let entry = Entry::new(EntryType::Alias, "ll".into(), "Get-ChildItem".into());
-        assert_eq!(formatter.format_entry(&entry), "Set-Alias ll Get-ChildItem");
+        assert_eq!(
+            formatter.format_entry(&entry),
+            "Set-Alias ll 'Get-ChildItem'"
+        );
     }
 
     #[test]
@@ -253,11 +256,16 @@ mod tests {
     #[test]
     fn test_format_source() {
         let formatter = PowerShellFormatter::new();
-        let entry = Entry::new(
-            EntryType::Source,
-            ".\\aliases.ps1".into(),
-            ".\\aliases.ps1".into(),
-        );
+        // Source with line number pattern as name (should not append comment)
+        let entry = Entry::new(EntryType::Source, "L10".into(), ".\\aliases.ps1".into());
+        assert_eq!(formatter.format_entry(&entry), ". .\\aliases.ps1");
+    }
+
+    #[test]
+    fn test_format_source_with_name() {
+        let formatter = PowerShellFormatter::new();
+        // Source with custom name (name is for TUI identification only, not in output)
+        let entry = Entry::new(EntryType::Source, "aliases".into(), ".\\aliases.ps1".into());
         assert_eq!(formatter.format_entry(&entry), ". .\\aliases.ps1");
     }
 }

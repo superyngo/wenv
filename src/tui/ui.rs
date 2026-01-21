@@ -11,6 +11,9 @@ use ratatui::{
 use super::app::{AppMode, EditField, TuiApp};
 use crate::model::EntryType;
 
+/// Header row count in the entry list (header + separator)
+const LIST_HEADER_OFFSET: usize = 2;
+
 /// Draw the main UI
 pub fn draw(f: &mut Frame, app: &mut TuiApp) {
     let chunks = Layout::default()
@@ -83,14 +86,14 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
     // Create header line
     let header_line = Line::from(vec![
         Span::styled(
-            format!("{:<10}", msg.header_type),
+            format!("{:<20}", msg.header_name),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
         Span::styled(
-            format!("{:<20}", msg.header_name),
+            format!("{:<10}", msg.header_type),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -135,8 +138,8 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
             };
 
             // Truncate long values
-            let value = if entry.value.len() > 40 {
-                format!("{}...", &entry.value.chars().take(37).collect::<String>())
+            let value = if entry.value.len() > 100 {
+                format!("{}...", &entry.value.chars().take(97).collect::<String>())
             } else {
                 entry.value.clone()
             };
@@ -147,13 +150,13 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
 
             let line = Line::from(vec![
                 Span::styled(
-                    format!("{:<10}", format!("{}", entry.entry_type)),
-                    Style::default().fg(type_color).add_modifier(Modifier::BOLD),
+                    format!("{:<20}", entry.name),
+                    Style::default().fg(Color::White),
                 ),
                 Span::raw(" "),
                 Span::styled(
-                    format!("{:<20}", entry.name),
-                    Style::default().fg(Color::White),
+                    format!("{:<10}", format!("{}", entry.entry_type)),
+                    Style::default().fg(type_color).add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" "),
                 Span::styled(
@@ -165,11 +168,8 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
             ]);
 
             // Offset by 2 for header and separator
-            // Check if this item is in multi-select range
-            let is_in_range = app
-                .selected_range
-                .map(|(min, max)| i >= min && i <= max)
-                .unwrap_or(false);
+            // Check if this item is in the selected indices set
+            let is_selected = app.selected_indices.contains(&i);
 
             // Check if this item is a search match
             let is_search_match = app.search_active && app.search_matches.contains(&i);
@@ -179,7 +179,8 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
                     .bg(Color::Blue)
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD)
-            } else if is_in_range {
+            } else if is_selected {
+                // Multi-selection (both continuous and non-contiguous)
                 Style::default()
                     .bg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD)
@@ -213,8 +214,8 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
     use ratatui::widgets::ListState;
     let mut state = ListState::default();
 
-    // The list items are: header(0), separator(1), then entries starting at index 2
-    // We want to select the entry at app.selected_index, which is at list index (selected_index + 2)
+    // The list items are: header(0), separator(1), then entries starting at LIST_HEADER_OFFSET
+    // We want to select the entry at app.selected_index, which is at list index (selected_index + LIST_HEADER_OFFSET)
     // But we also need to scroll the list so that the header stays visible when at top,
     // and entries scroll when we go down
 
@@ -222,7 +223,7 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
     // When scrolling is needed, offset should skip entries but always show header+separator
 
     // The actual item index in the list for the selected entry
-    let selected_list_index = app.selected_index + 2; // +2 for header and separator
+    let selected_list_index = app.selected_index + LIST_HEADER_OFFSET;
 
     // Set the selected index
     state.select(Some(selected_list_index));
@@ -693,11 +694,11 @@ fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
         // Header for the list: TYPE NAME LINE VALUE (matches main list format)
         lines.push(Line::from(vec![
             Span::styled(
-                format!("{:<10}", msg.header_type),
+                format!("{:<20}", msg.header_name),
                 Style::default().fg(Color::Cyan),
             ),
             Span::styled(
-                format!("{:<20}", msg.header_name),
+                format!("{:<10}", msg.header_type),
                 Style::default().fg(Color::Cyan),
             ),
             Span::styled(
@@ -735,8 +736,8 @@ fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
             };
 
             lines.push(Line::from(vec![
-                Span::raw(format!("{:<10}", type_str)),
                 Span::raw(format!("{:<20}", name_display)),
+                Span::raw(format!("{:<10}", type_str)),
                 Span::styled(
                     format!("{:<8}", line_info),
                     Style::default().fg(Color::DarkGray),

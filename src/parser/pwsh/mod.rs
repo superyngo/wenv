@@ -36,9 +36,10 @@ use crate::parser::Parser;
 
 use control::{count_control_end, count_control_start};
 use parsers::{
-    detect_env_heredoc_start, detect_function_start, is_heredoc_end, try_parse_alias,
-    try_parse_env, try_parse_source,
+    detect_function_start, is_heredoc_end, try_parse_alias, try_parse_env, try_parse_source,
 };
+
+use crate::parser::ParseEvent;
 
 /// PowerShell configuration file parser.
 ///
@@ -140,9 +141,19 @@ impl Parser for PowerShellParser {
                             // Reset external control_depth to sync state
                             control_depth = 0;
 
-                            // Emit code block directly (PowerShell doesn't merge like Bash)
-                            let entry = self.build_entry_from_pending(active_block.take().unwrap());
-                            result.add_entry(entry);
+                            // Make result pending for trailing blank absorption
+                            let completed = active_block.take().unwrap();
+                            pending_entry = Some(PendingBlock {
+                                lines: completed.lines,
+                                start_line: completed.start_line,
+                                end_line: completed.end_line,
+                                boundary: BoundaryType::AdjacentMerging {
+                                    merge_type: crate::parser::pending::MergeType::CodeWithBlanks,
+                                },
+                                entry_hint: Some(EntryType::Code),
+                                name: None,
+                                value: None,
+                            });
                         }
                     }
                     _ => {}
@@ -158,22 +169,38 @@ impl Parser for PowerShellParser {
             control_depth += count_control_start(trimmed);
 
             if control_depth > 0 || (prev_depth > 0 && control_depth == 0) {
-                // Flush pending items before starting control block
-                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                    result.add_entry(e);
+                // Start control block - merge pending Comment/Code if present
+                if active_block.is_none() && prev_depth == 0 && control_depth > 0 {
+                    if let Some(pending) = pending_entry.take() {
+                        if matches!(
+                            pending.entry_hint,
+                            Some(EntryType::Comment) | Some(EntryType::Code)
+                        ) {
+                            // Seed block with pending content
+                            let mut lines = pending.lines;
+                            lines.push(line.to_string());
+                            active_block = Some(PendingBlock {
+                                lines,
+                                start_line: pending.start_line,
+                                end_line: line_number,
+                                boundary: BoundaryType::KeywordTracking {
+                                    depth: control_depth,
+                                },
+                                entry_hint: Some(EntryType::Code),
+                                name: None,
+                                value: None,
+                            });
+                        } else {
+                            // Flush non-mergeable pending
+                            result.add_entry(self.build_entry_from_pending(pending));
+                            active_block =
+                                Some(PendingBlock::control(line_number, line, control_depth));
+                        }
+                    } else {
+                        active_block =
+                            Some(PendingBlock::control(line_number, line, control_depth));
+                    }
                 }
-
-                // Start control block
-                if prev_depth == 0 && control_depth > 0 {
-                    active_block = Some(PendingBlock::control(line_number, line, control_depth));
-                }
-
-                // Handle final line of control structure
-                if prev_depth > 0 && control_depth == 0 {
-                    // This shouldn't normally happen since we process inside active_block
-                    // But handle it defensively
-                }
-
                 continue;
             }
 
@@ -230,52 +257,72 @@ impl Parser for PowerShellParser {
             // ------------------------------------------------------------------
 
             // Try alias
-            if let Some(entry) = try_parse_alias(trimmed, line_number) {
-                // Flush pending entry
-                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                    result.add_entry(e);
+            match try_parse_alias(trimmed, line_number) {
+                ParseEvent::Complete(entry) => {
+                    // Flush pending entry
+                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                        result.add_entry(e);
+                    }
+                    result.add_entry(entry);
+                    continue;
                 }
-                result.add_entry(entry);
-                continue;
+                ParseEvent::Started { .. } => {
+                    // PowerShell aliases are currently single-line only
+                    unreachable!("PowerShell aliases should not return Started");
+                }
+                ParseEvent::None => {}
             }
 
-            // Try Here-String env var (only outside control structures)
-            if let Some(var_name) = detect_env_heredoc_start(trimmed) {
-                // Flush pending entry
-                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                    result.add_entry(e);
+            // Try env var (handles both single-line and Here-String start)
+            match try_parse_env(trimmed, line_number) {
+                ParseEvent::Complete(entry) => {
+                    // Flush pending entry
+                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                        result.add_entry(e);
+                    }
+                    result.add_entry(entry);
+                    continue;
                 }
-                // Start Here-String block
-                active_block = Some(PendingBlock {
-                    lines: vec![line.to_string()],
-                    start_line: line_number,
-                    end_line: line_number,
-                    boundary: BoundaryType::QuoteCounting { quote_count: 1 }, // Use odd count to indicate incomplete
-                    entry_hint: Some(EntryType::EnvVar),
-                    name: Some(var_name),
-                    value: None,
-                });
-                continue;
-            }
-
-            // Try regular env var
-            if let Some(entry) = try_parse_env(trimmed, line_number) {
-                // Flush pending entry
-                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                    result.add_entry(e);
+                ParseEvent::Started {
+                    entry_type,
+                    name,
+                    boundary,
+                    first_line,
+                } => {
+                    // Flush pending entry
+                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                        result.add_entry(e);
+                    }
+                    // Start Here-String block
+                    active_block = Some(PendingBlock {
+                        lines: vec![first_line],
+                        start_line: line_number,
+                        end_line: line_number,
+                        boundary,
+                        entry_hint: Some(entry_type),
+                        name: Some(name),
+                        value: None,
+                    });
+                    continue;
                 }
-                result.add_entry(entry);
-                continue;
+                ParseEvent::None => {}
             }
 
             // Try source
-            if let Some(entry) = try_parse_source(trimmed, line_number) {
-                // Flush pending entry
-                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                    result.add_entry(e);
+            match try_parse_source(trimmed, line_number) {
+                ParseEvent::Complete(entry) => {
+                    // Flush pending entry
+                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                        result.add_entry(e);
+                    }
+                    result.add_entry(entry);
+                    continue;
                 }
-                result.add_entry(entry);
-                continue;
+                ParseEvent::Started { .. } => {
+                    // Source statements are currently single-line only
+                    unreachable!("Source statements should not return Started");
+                }
+                ParseEvent::None => {}
             }
 
             // Try function
@@ -302,21 +349,32 @@ impl Parser for PowerShellParser {
             }
 
             // ------------------------------------------------------------------
-            // Fallback: capture as Code
+            // Fallback: capture as non-blank Code
             // ------------------------------------------------------------------
-            // Flush pending and create new Code entry
-            if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
-                result.add_entry(entry);
+            match &mut pending_entry {
+                Some(pending) if pending.entry_hint == Some(EntryType::Comment) => {
+                    // Comment + non-blank Code → merge and upgrade to Code
+                    pending.add_line(line, line_number);
+                    pending.upgrade_to_code();
+                }
+                Some(pending) if pending.entry_hint == Some(EntryType::Code) => {
+                    // Non-blank Code pending + new non-blank Code → flush pending, new pending
+                    if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
+                        result.add_entry(entry);
+                    }
+                    pending_entry = Some(PendingBlock::code(line_number, line));
+                }
+                Some(_) => {
+                    // Flush pending, start new pending Code
+                    if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
+                        result.add_entry(entry);
+                    }
+                    pending_entry = Some(PendingBlock::code(line_number, line));
+                }
+                None => {
+                    pending_entry = Some(PendingBlock::code(line_number, line));
+                }
             }
-
-            let entry = Entry::new(
-                EntryType::Code,
-                format!("L{}", line_number),
-                trimmed.to_string(),
-            )
-            .with_line_number(line_number)
-            .with_raw_line(line.to_string());
-            result.add_entry(entry);
         }
 
         // === Flush remaining state ===
@@ -758,5 +816,202 @@ C:\bin
             .as_ref()
             .map(|r| r.contains("$env:PATH"))
             .unwrap_or(false)));
+    }
+
+    // === Tests for Comment/Code merging logic ===
+
+    #[test]
+    fn test_comment_absorbs_blank() {
+        let parser = PowerShellParser::new();
+        let content = "# Header\n";
+        let result = parser.parse(content);
+
+        let comments: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Comment)
+            .collect();
+
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].line_number, Some(1));
+        assert_eq!(comments[0].end_line, Some(1));
+    }
+
+    #[test]
+    fn test_comment_plus_code_becomes_code() {
+        let parser = PowerShellParser::new();
+        let content = "# Note\nWrite-Host 'hello'";
+        let result = parser.parse(content);
+
+        // Should be merged into a single Code entry
+        assert_eq!(result.entries.len(), 1);
+
+        let code = &result.entries[0];
+        assert_eq!(code.entry_type, EntryType::Code);
+        assert_eq!(code.line_number, Some(1));
+        assert_eq!(code.end_line, Some(2));
+        // value preserves Comment's first line for list display
+        assert_eq!(code.value, "# Note");
+        // raw_line contains complete content (comment + code)
+        assert_eq!(
+            code.raw_line,
+            Some("# Note\nWrite-Host 'hello'".to_string())
+        );
+    }
+
+    #[test]
+    fn test_comment_blank_code_all_merge() {
+        let parser = PowerShellParser::new();
+        let content = "# Header\n\nWrite-Host 'hi'";
+        let result = parser.parse(content);
+
+        // Should be merged into a single Code entry
+        assert_eq!(result.entries.len(), 1);
+
+        let code = &result.entries[0];
+        assert_eq!(code.entry_type, EntryType::Code);
+        assert_eq!(code.line_number, Some(1));
+        assert_eq!(code.end_line, Some(3));
+        assert_eq!(code.value, "# Header");
+        assert_eq!(
+            code.raw_line,
+            Some("# Header\n\nWrite-Host 'hi'".to_string())
+        );
+    }
+
+    #[test]
+    fn test_blank_does_not_absorb_code() {
+        let parser = PowerShellParser::new();
+        let content = "\nWrite-Host 'hi'";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+
+        let blank = &result.entries[0];
+        assert_eq!(blank.entry_type, EntryType::Code);
+        assert_eq!(blank.is_blank(), true);
+        assert_eq!(blank.line_number, Some(1));
+
+        let code = &result.entries[1];
+        assert_eq!(code.entry_type, EntryType::Code);
+        assert_eq!(code.value, "Write-Host 'hi'");
+        assert_eq!(code.line_number, Some(2));
+    }
+
+    #[test]
+    fn test_nonblank_code_absorbs_trailing_blanks() {
+        let parser = PowerShellParser::new();
+        let content = "Write-Host 'hi'\n\n\n";
+        let result = parser.parse(content);
+
+        // Non-blank code absorbs trailing blank lines
+        assert_eq!(result.entries.len(), 1);
+
+        let code = &result.entries[0];
+        assert_eq!(code.entry_type, EntryType::Code);
+        assert_eq!(code.value, "Write-Host 'hi'");
+        assert_eq!(code.line_number, Some(1));
+        assert_eq!(code.end_line, Some(3));
+    }
+
+    #[test]
+    fn test_nonblank_code_blank_then_another_code() {
+        let parser = PowerShellParser::new();
+        let content = "Write-Host 'first'\n\nWrite-Host 'second'";
+        let result = parser.parse(content);
+
+        // When second code comes, first code (with absorbed blank) is flushed
+        assert_eq!(result.entries.len(), 2);
+
+        let first = &result.entries[0];
+        assert_eq!(first.entry_type, EntryType::Code);
+        assert_eq!(first.value, "Write-Host 'first'");
+        assert_eq!(first.line_number, Some(1));
+        assert_eq!(first.end_line, Some(2)); // Absorbed one blank line
+
+        let second = &result.entries[1];
+        assert_eq!(second.entry_type, EntryType::Code);
+        assert_eq!(second.value, "Write-Host 'second'");
+        assert_eq!(second.line_number, Some(3));
+    }
+
+    #[test]
+    fn test_comment_then_alias_not_merged() {
+        let parser = PowerShellParser::new();
+        let content = "# Section header\nSet-Alias ll Get-ChildItem";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+
+        let comment = &result.entries[0];
+        assert_eq!(comment.entry_type, EntryType::Comment);
+        assert_eq!(comment.line_number, Some(1));
+
+        let alias = &result.entries[1];
+        assert_eq!(alias.entry_type, EntryType::Alias);
+        assert_eq!(alias.name, "ll");
+    }
+
+    #[test]
+    fn test_comment_blank_alias_scenario() {
+        let parser = PowerShellParser::new();
+        let content = "# Section header\n# with description\n\nSet-Alias ll Get-ChildItem";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+
+        let comment = &result.entries[0];
+        assert_eq!(comment.entry_type, EntryType::Comment);
+        assert_eq!(comment.line_number, Some(1));
+        assert_eq!(comment.end_line, Some(3)); // Absorbed blank line
+
+        let alias = &result.entries[1];
+        assert_eq!(alias.entry_type, EntryType::Alias);
+        assert_eq!(alias.line_number, Some(4));
+    }
+
+    #[test]
+    fn test_control_structure_absorbs_trailing_blanks() {
+        let parser = PowerShellParser::new();
+        let content = "if ($true) {\n    Write-Host 'yes'\n}\n\n";
+        let result = parser.parse(content);
+
+        let code_blocks: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Code)
+            .collect();
+
+        assert_eq!(code_blocks.len(), 1);
+        assert_eq!(code_blocks[0].line_number, Some(1));
+        assert_eq!(code_blocks[0].end_line, Some(4)); // Absorbed trailing blank
+    }
+
+    #[test]
+    fn test_comment_merges_into_control_structure() {
+        let parser = PowerShellParser::new();
+        let content = "# This is a conditional\nif ($true) {\n    Write-Host 'yes'\n}";
+        let result = parser.parse(content);
+
+        let code_blocks: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Code)
+            .collect();
+
+        assert_eq!(code_blocks.len(), 1);
+        assert_eq!(code_blocks[0].line_number, Some(1)); // Starts from comment
+        assert_eq!(code_blocks[0].end_line, Some(4));
+        // raw_line should contain comment + control structure
+        assert!(code_blocks[0]
+            .raw_line
+            .as_ref()
+            .unwrap()
+            .contains("# This is a conditional"));
+        assert!(code_blocks[0]
+            .raw_line
+            .as_ref()
+            .unwrap()
+            .contains("if ($true)"));
     }
 }

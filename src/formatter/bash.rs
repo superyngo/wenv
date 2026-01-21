@@ -73,7 +73,10 @@ impl BashFormatter {
         }
 
         // Single-line values
-        if value.contains(' ') || value.contains('$') {
+        if value.is_empty() {
+            // Empty value: use single quotes for clarity
+            format!("export {}=''", entry.name)
+        } else if value.contains(' ') || value.contains('$') {
             format!("export {}=\"{}\"", entry.name, value)
         } else {
             format!("export {}={}", entry.name, value)
@@ -81,7 +84,6 @@ impl BashFormatter {
     }
 
     fn format_source(&self, entry: &Entry) -> String {
-        // Value contains the path (name is now line number based like "L10")
         format!("source {}", entry.value)
     }
 
@@ -340,10 +342,25 @@ mod tests {
     }
 
     #[test]
+    fn test_format_export_empty() {
+        let formatter = BashFormatter::new();
+        let entry = Entry::new(EntryType::EnvVar, "EMPTY".into(), "".into());
+        assert_eq!(formatter.format_entry(&entry), "export EMPTY=''");
+    }
+
+    #[test]
     fn test_format_source() {
         let formatter = BashFormatter::new();
-        // Source now uses line number as name, path as value
+        // Source with line number pattern as name (should not append comment)
         let entry = Entry::new(EntryType::Source, "L10".into(), "~/.aliases".into());
+        assert_eq!(formatter.format_entry(&entry), "source ~/.aliases");
+    }
+
+    #[test]
+    fn test_format_source_with_name() {
+        let formatter = BashFormatter::new();
+        // Source with custom name (name is for TUI identification only, not in output)
+        let entry = Entry::new(EntryType::Source, "aliases".into(), "~/.aliases".into());
         assert_eq!(formatter.format_entry(&entry), "source ~/.aliases");
     }
 

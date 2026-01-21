@@ -42,16 +42,14 @@ pub mod parsers;
 pub mod patterns;
 
 use crate::model::{Entry, EntryType, ParseResult, ShellType};
-use crate::parser::builders::QuotedValueBuilder;
 use crate::parser::builders::{count_braces_outside_quotes, CommentBlockBuilder};
 use crate::parser::pending::{BoundaryType, MergeType, PendingBlock};
 use crate::parser::Parser;
 
 use control::{count_control_end, count_control_start};
-use parsers::{
-    detect_function_start, try_parse_alias, try_parse_export, try_parse_source, AliasParseResult,
-    ExportParseResult,
-};
+use parsers::{detect_function_start, try_parse_alias, try_parse_env, try_parse_source};
+
+use crate::parser::ParseEvent;
 
 /// Bash configuration file parser.
 ///
@@ -362,7 +360,7 @@ impl Parser for BashParser {
 
             // Try alias
             match try_parse_alias(trimmed, line_number) {
-                AliasParseResult::SingleLine(entry) => {
+                ParseEvent::Complete(entry) => {
                     // Flush pending entry
                     if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
                         result.add_entry(e);
@@ -370,37 +368,34 @@ impl Parser for BashParser {
                     result.add_entry(entry);
                     continue;
                 }
-                AliasParseResult::MultiLineStart { builder } => {
+                ParseEvent::Started {
+                    entry_type,
+                    name,
+                    boundary,
+                    first_line,
+                } => {
                     // Flush pending entry
                     if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
                         result.add_entry(e);
                     }
-                    // Convert QuotedValueBuilder to PendingBlock
-                    // Calculate quote count from the first line
-                    let initial_quote_count: usize = builder
-                        .lines
-                        .iter()
-                        .map(|l| QuotedValueBuilder::count_single_quotes(l))
-                        .sum();
+                    // Create PendingBlock directly from ParseEvent
                     active_block = Some(PendingBlock {
-                        lines: builder.lines.clone(),
-                        start_line: builder.start_line,
-                        end_line: builder.start_line,
-                        boundary: BoundaryType::QuoteCounting {
-                            quote_count: initial_quote_count,
-                        },
-                        entry_hint: Some(EntryType::Alias),
-                        name: Some(builder.name.clone()),
+                        lines: vec![first_line],
+                        start_line: line_number,
+                        end_line: line_number,
+                        boundary,
+                        entry_hint: Some(entry_type),
+                        name: Some(name),
                         value: None,
                     });
                     continue;
                 }
-                AliasParseResult::NotAlias => {}
+                ParseEvent::None => {}
             }
 
-            // Try export
-            match try_parse_export(trimmed, line_number) {
-                ExportParseResult::SingleLine(entry) => {
+            // Try export (environment variable)
+            match try_parse_env(trimmed, line_number) {
+                ParseEvent::Complete(entry) => {
                     // Flush pending entry
                     if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
                         result.add_entry(e);
@@ -408,42 +403,47 @@ impl Parser for BashParser {
                     result.add_entry(entry);
                     continue;
                 }
-                ExportParseResult::MultiLineStart { builder } => {
+                ParseEvent::Started {
+                    entry_type,
+                    name,
+                    boundary,
+                    first_line,
+                } => {
                     // Flush pending entry
                     if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
                         result.add_entry(e);
                     }
-                    // Convert QuotedValueBuilder to PendingBlock
-                    // Calculate quote count from the first line
-                    let initial_quote_count: usize = builder
-                        .lines
-                        .iter()
-                        .map(|l| QuotedValueBuilder::count_single_quotes(l))
-                        .sum();
+                    // Create PendingBlock directly from ParseEvent
                     active_block = Some(PendingBlock {
-                        lines: builder.lines.clone(),
-                        start_line: builder.start_line,
-                        end_line: builder.start_line,
-                        boundary: BoundaryType::QuoteCounting {
-                            quote_count: initial_quote_count,
-                        },
-                        entry_hint: Some(EntryType::EnvVar),
-                        name: Some(builder.name.clone()),
+                        lines: vec![first_line],
+                        start_line: line_number,
+                        end_line: line_number,
+                        boundary,
+                        entry_hint: Some(entry_type),
+                        name: Some(name),
                         value: None,
                     });
                     continue;
                 }
-                ExportParseResult::NotExport => {}
+                ParseEvent::None => {}
             }
 
             // Try source
-            if let Some(entry) = try_parse_source(trimmed, line_number) {
-                // Flush pending entry
-                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                    result.add_entry(e);
+            match try_parse_source(trimmed, line_number) {
+                ParseEvent::Complete(entry) => {
+                    // Flush pending entry
+                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
+                        result.add_entry(e);
+                    }
+                    result.add_entry(entry);
+                    continue;
                 }
-                result.add_entry(entry);
-                continue;
+                ParseEvent::Started { .. } => {
+                    // Source statements are currently single-line only,
+                    // but we handle this case for API consistency
+                    unreachable!("Source statements should not return Started");
+                }
+                ParseEvent::None => {}
             }
 
             // Try function
@@ -633,7 +633,7 @@ mod tests {
 
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].entry_type, EntryType::Source);
-        assert_eq!(result.entries[0].name, "L1");
+        assert_eq!(result.entries[0].name, ".aliases");
         assert_eq!(result.entries[0].value, "~/.aliases");
     }
 

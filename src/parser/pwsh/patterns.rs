@@ -72,12 +72,12 @@ lazy_static! {
     // Source Patterns
     // =========================================================================
 
-    /// Matches dot-sourcing: `. .\file.ps1` or `. C:\path\file.ps1`
+    /// Matches dot-sourcing: `. .\file.ps1` or `. C:\path\file.ps1` or any file path
     ///
     /// Captures:
-    /// - Group 1: file path (must end with `.ps1`)
+    /// - Group 1: file path (any non-empty path)
     pub static ref SOURCE_RE: Regex = Regex::new(
-        r#"^\.\s+(.+\.ps1)$"#
+        r#"^\.\s+(.+)$"#
     ).unwrap();
 
     // =========================================================================
@@ -135,8 +135,17 @@ mod tests {
 
     #[test]
     fn test_source_re() {
+        // Test with .ps1 extension
         let caps = SOURCE_RE.captures(r#". .\aliases.ps1"#).unwrap();
         assert_eq!(&caps[1], r#".\aliases.ps1"#);
+
+        // Test without .ps1 extension
+        let caps2 = SOURCE_RE.captures(r#". .\config"#).unwrap();
+        assert_eq!(&caps2[1], r#".\config"#);
+
+        // Test with full path
+        let caps3 = SOURCE_RE.captures(r#". C:\Users\config.sh"#).unwrap();
+        assert_eq!(&caps3[1], r#"C:\Users\config.sh"#);
     }
 
     #[test]

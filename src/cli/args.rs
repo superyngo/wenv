@@ -13,7 +13,7 @@ pub struct Cli {
     pub file: Option<PathBuf>,
 
     /// Specify shell type
-    #[arg(short = 'S', long)]
+    #[arg(short, long)]
     pub shell: Option<ShellArg>,
 
     /// Conflict handling strategy (for import)
@@ -29,7 +29,7 @@ pub struct Cli {
     pub export: Option<PathBuf>,
 
     /// Open source file in $EDITOR
-    #[arg(short, long, group = "action")]
+    #[arg(long, group = "action")]
     pub source: bool,
 
     /// Skip confirmation prompts (for import)

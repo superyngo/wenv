@@ -79,7 +79,72 @@ mod pwsh;
 pub use bash::BashParser;
 pub use pwsh::PowerShellParser;
 
-use crate::model::{ParseResult, ShellType};
+use crate::model::{Entry, EntryType, ParseResult, ShellType};
+pub use pending::BoundaryType;
+
+/// Unified parse event result for all shell parsers.
+///
+/// This enum standardizes the return type for all `try_parse_*` functions
+/// across different shell parsers (Bash, PowerShell, etc.).
+///
+/// ## Design Rationale
+///
+/// Previously, each parser had its own custom enums (`AliasParseResult`,
+/// `ExportParseResult`, etc.). This made adding new shell parsers difficult
+/// as there was no clear pattern to follow.
+///
+/// `ParseEvent` provides a single contract:
+/// - `Complete(Entry)` - Found a complete single-line entry
+/// - `Started { ... }` - Found the start of a multi-line entry
+/// - `None` - No match, try next parser
+///
+/// ## Usage Pattern
+///
+/// ```rust,ignore
+/// // In bash/parsers.rs or pwsh/parsers.rs
+/// pub fn try_parse_alias(line: &str, line_num: usize) -> ParseEvent {
+///     if let Some(caps) = ALIAS_RE.captures(line) {
+///         return ParseEvent::Complete(
+///             Entry::new(EntryType::Alias, caps[1], caps[2])
+///                 .with_line_number(line_num)
+///         );
+///     }
+///
+///     if has_unclosed_quote(line) {
+///         return ParseEvent::Started {
+///             entry_type: EntryType::Alias,
+///             name: extract_name(line),
+///             boundary: BoundaryType::QuoteCounting { quote_count: 1 },
+///             first_line: line.to_string(),
+///         };
+///     }
+///
+///     ParseEvent::None
+/// }
+/// ```
+#[derive(Debug)]
+pub enum ParseEvent {
+    /// Found a complete single-line entry (ready to add to results).
+    Complete(Entry),
+
+    /// Found the start of a multi-line entry (needs continuation).
+    Started {
+        /// The type of entry being started (Alias, Function, EnvVar, etc.)
+        entry_type: EntryType,
+
+        /// The name/identifier for this entry (e.g., function name, alias name).
+        name: String,
+
+        /// The boundary detection strategy to use (brace counting, quote counting, etc.)
+        boundary: BoundaryType,
+
+        /// The first line that started this entry (preserved for raw_line).
+        first_line: String,
+    },
+
+    /// No match found, continue trying other parsers.
+    None,
+}
 
 /// Trait for shell configuration parsers.
 ///

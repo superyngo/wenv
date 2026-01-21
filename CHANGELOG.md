@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Bash EnvVar Empty Value Formatting**: Fixed empty environment variables to use quoted format `export VAR=''` instead of `export VAR=` (2026-01-21)
+- **TUI Editing Stability**: Fixed potential crashes when editing Function/EnvVar entries to empty values (2026-01-21)
+  - Use `split_lines_preserve_trailing()` to correctly handle line counts
+  - Add safety check to prevent empty formatter output
+- **TUI Source NAME Auto-Extraction**: Fixed formatter to write name as comment suffix when saving Source entries (2026-01-21)
+  - Source entries with custom names are now saved as `source path # name`
+  - Applies to both Bash (`source path # name`) and PowerShell (`. path # name`)
+  - Line number pattern names (e.g., "L10") are ignored and not written as comments
+- **TUI External Editor Dirty Flag**: Fixed ESC confirmation popup not appearing after editing with 'o' key (2026-01-21)
+  - `dirty` flag is now set when external editor modifies the temp file
+  - ESC now correctly prompts for save confirmation after external edits
+- **TUI Multi-Select Move**: Fixed entries disappearing when moving multiple selected entries (2026-01-21)
+  - `confirm_move` now regenerates file from current entry order using formatter
+  - Avoids issues with outdated line numbers by rebuilding entire file content
+
+### Added
+- **TUI Source Path Validation**: Validate Source entry paths for empty and invalid characters (2026-01-21)
+- **TUI Source NAME Auto-Extraction**: Automatically extract filename as NAME from Source path when NAME is empty (2026-01-21)
+- **TUI PowerShell Alias Value Validation**: Validate that PowerShell alias values are not empty (2026-01-21)
+- **TUI Non-Contiguous Selection Mode**: Press 's' to enter selection mode and toggle individual entries (2026-01-21)
+  - 's' key toggles non-contiguous selection mode and toggles current entry in/out of selection
+  - Navigate with arrow keys without clearing selections
+  - Delete/move operations work on all selected entries
+  - Escape key exits non-contiguous mode
+  - Switching to search mode ('f') automatically clears non-contiguous selections
+- **TUI Open Temp File**: Press 'o' to open the complete temp file in $EDITOR (2026-01-21)
+  - Opens full temp file (not limited to specific entry)
+  - TUI suspends during editing and resumes after editor exits
+  - Changes are automatically reloaded into TUI
+- **TUI Non-Contiguous Move Consolidation**: When moving multiple non-contiguous entries, they are automatically consolidated into a continuous block (2026-01-21)
+  - All selected entries move to follow the first selected entry
+  - Entries become continuous and can be moved as a block
+  - ESC key uses undo stack to restore original positions
+
+### Changed
+- **TUI List Value Display Length**: Increased value display length from 40 to 100 characters (2026-01-21)
+- **PowerShell Alias Format**: Wrap alias values with single quotes for consistent quoting (2026-01-21)
+  - `Set-Alias ll Get-ChildItem` → `Set-Alias ll 'Get-ChildItem'`
+- **TUI List Rendering**: Refactored header offset to use `LIST_HEADER_OFFSET` constant (2026-01-21)
+- **CLI Short Flag for --shell**: Changed from `-S` to `-s` (BREAKING) (2026-01-21)
+  - `-s` now maps to `--shell` instead of `--source`
+  - To open editor, use `--source` (full flag) or `wenv .` (positional argument)
+- **TUI Save Keybinding**: Changed from 's' to 'w' (2026-01-21)
+  - 'w' now saves to original file
+  - Ctrl+S still works as alternative
+  - 's' key freed for non-contiguous selection mode
+- **TUI Column Order**: Reordered columns from TYPE→NAME→LINE→VALUE to NAME→TYPE→LINE→VALUE (2026-01-21)
+  - Applies to main list view and delete confirmation popup
+  - NAME column now appears first for better readability
+- **Parser Signature Standardization**: Unified parse method signatures across all shell parsers (2026-01-21)
+  - Introduced `ParseEvent` enum as standardized return type for all `try_parse_*` functions
+  - ParseEvent variants: `Complete(Entry)`, `Started { entry_type, name, boundary, first_line }`, `None`
+  - Renamed Bash `try_parse_export` → `try_parse_env` for consistency with PowerShell
+  - Removed custom result enums (`AliasParseResult`, `ExportParseResult`) in favor of unified `ParseEvent`
+  - PowerShell `try_parse_env` now returns `ParseEvent::Started` for Here-String detection (previously separate `detect_env_heredoc_start`)
+  - All parsers now follow standard signatures: `try_parse_alias/env/source(line, line_num) -> ParseEvent`
+  - Benefits: Easier to add new shell parsers (e.g., ZshParser, FishParser) with clear contract
+  - Internal change only - no user-facing API modifications
+- **TUI Selection Unification**: Unified selection mechanism to use only `selected_indices` for both continuous and non-contiguous selections (2026-01-21)
+  - Removed `selected_range` field in favor of single `selected_indices` HashSet
+  - Shift+Up/Down now populates `selected_indices` instead of maintaining separate range
+  - Simplified selection logic and eliminated inconsistencies between selection modes
+
+### Fixed
+- **PowerShell Source Detection**: Allow any file path for dot-sourcing, not just `.ps1` files (2026-01-21)
+  - `. .\config` is now correctly recognized as Source entry
+- **TUI Screen Tearing on Shell Validation Failure**: Fixed screen corruption when shell validation command fails (2026-01-21)
+  - Root cause: `eprintln!()` output to stderr during TUI mode corrupts display
+  - Fix: Return error through UI message popup instead of printing to stderr
+- **PowerShell Parser Comment/Code Merge**: Fixed missing Comment/Code merging and upgrade logic in PowerShell parser (2026-01-21)
+  - PowerShell parser now correctly merges Comment + non-blank Code → Code (type upgrade)
+  - Non-blank Code entries now absorb trailing blank lines
+  - Control structures now absorb trailing blank lines
+  - Comments can merge into control structures (seed block with pending content)
+  - Aligned PowerShell parser behavior with Bash parser for consistent Comment/Code handling
+- **TUI Screen Artifacts After External Editor**: Fixed black borders and artifacts after returning from external editor ('o' key) (2026-01-21)
+  - Added full terminal redraw after resuming from editor
+  - Ensures clean screen without leftover UI artifacts
+
+### Improved
+- **TUI Temp File Change Detection**: External editor changes are now detected before reloading (2026-01-21)
+  - Compares file modification time before and after editor invocation
+  - Only reloads if file was actually modified
+  - Shows appropriate status message ("No changes detected" vs "Temp file reloaded after editing")
+
 ## [0.6.2] - 2026-01-20
 
 ### Changed

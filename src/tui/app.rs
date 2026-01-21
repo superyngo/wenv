@@ -154,7 +154,10 @@ pub struct TuiApp {
 
     // Multi-selection state
     pub selection_anchor: Option<usize>,
-    pub selected_range: Option<(usize, usize)>, // (min, max) inclusive
+
+    // Non-contiguous selection state (also used for contiguous selection)
+    pub non_contiguous_mode: bool,
+    pub selected_indices: std::collections::HashSet<usize>,
 
     // Clipboard state (internal buffer, not system clipboard)
     pub clipboard_buffer: Option<String>,
@@ -173,6 +176,9 @@ pub struct TuiApp {
     pub search_active: bool,        // Search mode active
     pub search_matches: Vec<usize>, // Matched entry indices
     pub search_cursor: usize,       // Cursor position in search input
+
+    // Full redraw flag (set after external editor to clear artifacts)
+    pub needs_full_redraw: bool,
 }
 
 impl TuiApp {
@@ -218,7 +224,8 @@ impl TuiApp {
             dirty: false,
             temp_file_path,
             selection_anchor: None,
-            selected_range: None,
+            non_contiguous_mode: false,
+            selected_indices: std::collections::HashSet::new(),
             clipboard_buffer: None,
             validation_errors: None,
             validation_scroll_offset: 0,
@@ -229,6 +236,7 @@ impl TuiApp {
             search_active: false,
             search_matches: Vec::new(),
             search_cursor: 0,
+            needs_full_redraw: false,
         })
     }
 
@@ -255,6 +263,12 @@ impl TuiApp {
     /// Main event loop
     fn run_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         loop {
+            // Force full redraw if flag is set (e.g., after external editor)
+            if self.needs_full_redraw {
+                terminal.clear()?;
+                self.needs_full_redraw = false;
+            }
+
             terminal.draw(|f| crate::tui::ui::draw(f, self))?;
 
             match event::read()? {
@@ -382,11 +396,11 @@ impl TuiApp {
         let has_alt = key.modifiers.contains(KeyModifiers::ALT);
 
         match key.code {
-            // Ctrl+S or s: Save to original file
+            // Ctrl+S or w: Save to original file
             KeyCode::Char('s') if has_ctrl => {
                 self.save_to_original_file()?;
             }
-            KeyCode::Char('s') if !has_ctrl && !has_shift && !has_alt => {
+            KeyCode::Char('w') if !has_ctrl && !has_shift && !has_alt => {
                 self.save_to_original_file()?;
             }
             // Ctrl+C or Alt+C: Copy selected entries
@@ -411,6 +425,22 @@ impl TuiApp {
             KeyCode::Char('y') if has_ctrl => {
                 self.redo()?;
             }
+            // s: Toggle non-contiguous selection mode
+            KeyCode::Char('s') if !has_ctrl && !has_shift && !has_alt => {
+                if !self.non_contiguous_mode {
+                    // Entering non-contiguous mode
+                    self.non_contiguous_mode = true;
+                    self.selected_indices.clear();
+                    self.selected_indices.insert(self.selected_index);
+                } else {
+                    // Toggle current index in/out of selection
+                    if self.selected_indices.contains(&self.selected_index) {
+                        self.selected_indices.remove(&self.selected_index);
+                    } else {
+                        self.selected_indices.insert(self.selected_index);
+                    }
+                }
+            }
             // Quit
             KeyCode::Char('q') => {
                 if self.dirty {
@@ -426,6 +456,10 @@ impl TuiApp {
                     self.search_query.clear();
                     self.search_matches.clear();
                     self.search_cursor = 0;
+                } else if self.non_contiguous_mode {
+                    // Exit non-contiguous mode
+                    self.non_contiguous_mode = false;
+                    self.selected_indices.clear();
                 } else {
                     // When not in search mode, behave same as 'q'
                     if self.dirty {
@@ -443,7 +477,10 @@ impl TuiApp {
                 if has_shift {
                     self.extend_selection_up();
                 } else {
-                    self.clear_selection();
+                    // Only clear contiguous selection if NOT in non-contiguous mode
+                    if !self.non_contiguous_mode {
+                        self.clear_selection();
+                    }
                     self.move_up();
                 }
             }
@@ -451,7 +488,10 @@ impl TuiApp {
                 if has_shift {
                     self.extend_selection_down();
                 } else {
-                    self.clear_selection();
+                    // Only clear contiguous selection if NOT in non-contiguous mode
+                    if !self.non_contiguous_mode {
+                        self.clear_selection();
+                    }
                     self.move_down();
                 }
             }
@@ -488,6 +528,8 @@ impl TuiApp {
                 }
             }
             KeyCode::Char('f') => {
+                self.non_contiguous_mode = false;
+                self.selected_indices.clear();
                 self.clear_selection();
                 self.start_search();
             }
@@ -508,6 +550,9 @@ impl TuiApp {
             }
             KeyCode::Char('t') => {
                 self.toggle_comment()?;
+            }
+            KeyCode::Char('o') => {
+                self.open_temp_file_in_editor()?;
             }
             _ => {}
         }
@@ -1181,11 +1226,11 @@ impl TuiApp {
                 self.confirm_move()?;
             }
             KeyCode::Esc | KeyCode::Char('q') => {
-                // Cancel move - reload from temp file to discard buffer changes
-                self.reload_from_temp()?;
+                // Cancel move - undo to restore original positions
+                self.undo()?;
                 self.mode = AppMode::Normal;
                 self.clear_selection();
-                self.message = None;
+                self.message = Some("Move cancelled".to_string());
             }
             _ => {}
         }
@@ -1194,10 +1239,11 @@ impl TuiApp {
 
     /// Get sorted indices of selected entries (or current index if no selection)
     fn get_selected_indices_sorted(&self) -> Vec<usize> {
-        if self.selected_range.is_some() {
-            // Multi-selection: get range
-            let (min, max) = self.selected_range.unwrap();
-            (min..=max).collect()
+        if !self.selected_indices.is_empty() {
+            // Multi-selection: get sorted indices
+            let mut indices: Vec<_> = self.selected_indices.iter().copied().collect();
+            indices.sort_unstable();
+            indices
         } else {
             // Single selection: just current index
             vec![self.selected_index]
@@ -1228,9 +1274,14 @@ impl TuiApp {
             self.entries.insert(insert_pos + offset, entry);
         }
 
-        // Update selection range
-        if let Some((min, max)) = self.selected_range {
-            self.selected_range = Some((min - 1, max - 1));
+        // Update selected indices (shift all indices up by 1)
+        if !self.selected_indices.is_empty() {
+            let new_indices: std::collections::HashSet<usize> = self
+                .selected_indices
+                .iter()
+                .map(|&i| i.saturating_sub(1))
+                .collect();
+            self.selected_indices = new_indices;
             self.selection_anchor = self.selection_anchor.map(|a| a.saturating_sub(1));
         }
 
@@ -1266,9 +1317,11 @@ impl TuiApp {
             self.entries.insert(insert_pos + offset, entry);
         }
 
-        // Update selection range
-        if let Some((min, max)) = self.selected_range {
-            self.selected_range = Some((min + 1, max + 1));
+        // Update selected indices (shift all indices down by 1)
+        if !self.selected_indices.is_empty() {
+            let new_indices: std::collections::HashSet<usize> =
+                self.selected_indices.iter().map(|&i| i + 1).collect();
+            self.selected_indices = new_indices;
             self.selection_anchor = self.selection_anchor.map(|a| a + 1);
         }
 
@@ -1280,8 +1333,8 @@ impl TuiApp {
         self.adjust_scroll_for_selection();
     }
 
-    /// Confirm move: write changes to temp file using marker-based cut-paste
-    /// Uses a unique marker to avoid line number invalidation issues
+    /// Confirm move: regenerate file from current entry order using formatter
+    /// This avoids issues with outdated line numbers by rebuilding the entire file
     fn confirm_move(&mut self) -> Result<()> {
         let indices = self.get_selected_indices_sorted();
         if indices.is_empty() {
@@ -1289,69 +1342,18 @@ impl TuiApp {
             return Ok(());
         }
 
-        // Get selected entries
-        let selected_entries: Vec<&Entry> = indices.iter().map(|&i| &self.entries[i]).collect();
+        // Get formatter for current shell type
+        let formatter = crate::formatter::get_formatter(self.shell_type);
 
-        // Extract file line range for the selected block
-        let start_line = selected_entries
-            .iter()
-            .filter_map(|e| e.line_number)
-            .min()
-            .ok_or_else(|| anyhow::anyhow!("Selected entries have no line numbers"))?;
-
-        let end_line = selected_entries
-            .iter()
-            .filter_map(|e| e.end_line.or(e.line_number))
-            .max()
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine end line"))?;
-
-        // Read all lines from temp file or original file
-        let content = self.read_current_content()?;
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Calculate target position based on buffer position
-        let new_first_index = indices[0];
-        let marker = "__WENV_MOVE_MARKER__";
-
-        // Step 1: Insert marker at target position, then extract and remove source lines
+        // Rebuild file content from current entries order
         let mut new_lines: Vec<String> = Vec::new();
-        let mut extracted: Vec<String> = Vec::new();
-
-        if new_first_index == 0 {
-            // Insert marker at file beginning
-            new_lines.push(marker.to_string());
+        for entry in &self.entries {
+            let formatted = formatter.format_entry(entry);
+            new_lines.push(formatted);
         }
 
-        for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1;
-
-            // Extract lines in the selected range
-            if line_num >= start_line && line_num <= end_line {
-                extracted.push(line.to_string());
-            } else {
-                new_lines.push(line.to_string());
-            }
-
-            // Insert marker after the previous entry's end_line (for non-zero index)
-            if new_first_index > 0 {
-                let prev_entry = &self.entries[new_first_index - 1];
-                let insert_after_line = prev_entry
-                    .end_line
-                    .unwrap_or(prev_entry.line_number.unwrap_or(1));
-                if line_num == insert_after_line {
-                    new_lines.push(marker.to_string());
-                }
-            }
-        }
-
-        // Step 2: Replace marker with extracted content
-        let extracted_content = extracted.join("\n");
-        let temp_content = new_lines.join("\n");
-        let new_content = temp_content.replace(marker, &extracted_content) + "\n";
-
+        let new_content = new_lines.join("\n") + "\n";
         self.write_temp_with_undo(&new_content)?;
-
-        // Reload from temp file to sync state
         self.reload_from_temp()?;
 
         self.mode = AppMode::Normal;
@@ -1447,9 +1449,13 @@ impl TuiApp {
 
     /// Get all selected indices (for multi-select operations)
     fn get_selected_indices(&self) -> Vec<usize> {
-        if let Some((min, max)) = self.selected_range {
-            (min..=max).collect()
+        if !self.selected_indices.is_empty() {
+            // Multi-selection (continuous or non-contiguous)
+            let mut indices: Vec<usize> = self.selected_indices.iter().copied().collect();
+            indices.sort_unstable();
+            indices
         } else {
+            // Single selection
             vec![self.selected_index]
         }
     }
@@ -1783,8 +1789,23 @@ impl TuiApp {
         if !self.entries.is_empty() {
             // Don't clear selection - support multi-select moving
             // If no selection exists, auto-select current entry
-            if self.selected_range.is_none() {
-                self.selected_range = Some((self.selected_index, self.selected_index));
+            if self.selected_indices.is_empty() {
+                self.selected_indices.insert(self.selected_index);
+            }
+
+            // Always save state for undo before any move operation
+            if let Ok(content) = self.read_current_content() {
+                let _ = self.write_temp_with_undo(&content);
+            }
+
+            // If multiple entries are selected, consolidate them first
+            let indices = self.get_selected_indices_sorted();
+            if indices.len() > 1 {
+                // Consolidate selected entries
+                if let Err(e) = self.consolidate_selected_entries(&indices) {
+                    self.message = Some(format!("Failed to consolidate entries: {}", e));
+                    return;
+                }
             }
 
             self.mode = AppMode::Moving;
@@ -1808,6 +1829,96 @@ impl TuiApp {
         self.message = None;
     }
 
+    /// Consolidate non-contiguous selected entries into a continuous block
+    /// Moves all selected entries to follow the first selected entry
+    fn consolidate_selected_entries(&mut self, sorted_indices: &[usize]) -> Result<()> {
+        if sorted_indices.is_empty() {
+            return Ok(());
+        }
+
+        // Read current file content
+        let content = self.read_current_content()?;
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Extract entry blocks and mark their positions for removal
+        let mut entry_blocks: Vec<(usize, String)> = Vec::new(); // (original_index, content)
+
+        for &idx in sorted_indices {
+            if let Some(entry) = self.entries.get(idx) {
+                let start = entry.line_number.unwrap_or(1).saturating_sub(1);
+                let end = entry.end_line.unwrap_or(start + 1).saturating_sub(1);
+
+                if end < lines.len() {
+                    let block = lines[start..=end].join("\n");
+                    entry_blocks.push((start, block));
+                }
+            }
+        }
+
+        // Build new content: remove selected entries, then insert consolidated block at first entry position
+        let first_entry = &self.entries[sorted_indices[0]];
+        let insert_before_line = first_entry.line_number.unwrap_or(1).saturating_sub(1); // 0-indexed
+
+        let mut new_lines: Vec<String> = Vec::new();
+        let mut removed_line_indices: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+
+        // Mark all lines in selected entries for removal
+        for &idx in sorted_indices {
+            if let Some(entry) = self.entries.get(idx) {
+                let start = entry.line_number.unwrap_or(1).saturating_sub(1);
+                let end = entry.end_line.unwrap_or(start + 1).saturating_sub(1);
+                for line_idx in start..=end {
+                    removed_line_indices.insert(line_idx);
+                }
+            }
+        }
+
+        // Build new content
+        let mut inserted = false;
+        for (i, line) in lines.iter().enumerate() {
+            // Insert consolidated blocks at the first entry's position
+            if !inserted && i == insert_before_line {
+                for (_, block) in &entry_blocks {
+                    new_lines.push(block.clone());
+                }
+                inserted = true;
+            }
+
+            // Skip lines that are part of selected entries
+            if removed_line_indices.contains(&i) {
+                continue;
+            }
+
+            new_lines.push(line.to_string());
+        }
+
+        // If insert position was at the end, append blocks
+        if !inserted {
+            for (_, block) in &entry_blocks {
+                new_lines.push(block.clone());
+            }
+        }
+
+        let new_content = new_lines.join("\n") + "\n";
+        std::fs::write(&self.temp_file_path, &new_content)?;
+        self.reload_from_temp()?;
+
+        // Update cursor to first entry position
+        self.selected_index = sorted_indices[0].min(self.entries.len().saturating_sub(1));
+
+        // Update selection to be continuous from first entry
+        self.selected_indices.clear();
+        for i in 0..sorted_indices.len() {
+            let idx = self.selected_index + i;
+            if idx < self.entries.len() {
+                self.selected_indices.insert(idx);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Submit editing (save changes)
     /// Directly writes to temp file, then reloads
     fn submit_editing(&mut self) -> Result<()> {
@@ -1824,6 +1935,40 @@ impl TuiApp {
             self.edit_state = Some(state);
             self.message = Some("Name cannot be empty".to_string());
             return Ok(());
+        }
+
+        // Validate Source path format
+        if state.entry_type == EntryType::Source {
+            let path = state.value_buffer.trim();
+            if path.is_empty() {
+                self.edit_state = Some(state);
+                self.message = Some("Source path cannot be empty".to_string());
+                return Ok(());
+            }
+            if !is_valid_path_format(path) {
+                self.edit_state = Some(state);
+                self.message = Some("Invalid file path format".to_string());
+                return Ok(());
+            }
+        }
+
+        // PowerShell alias value non-empty validation
+        if state.entry_type == EntryType::Alias
+            && self.shell_type == ShellType::PowerShell
+            && state.value_buffer.trim().is_empty()
+        {
+            self.edit_state = Some(state);
+            self.message = Some("Alias value cannot be empty".to_string());
+            return Ok(());
+        }
+
+        // Auto-extract filename from Source path as NAME if name is empty
+        let mut state = state;
+        if state.entry_type == EntryType::Source && state.name_buffer.trim().is_empty() {
+            let path = std::path::Path::new(state.value_buffer.trim());
+            if let Some(stem) = path.file_stem() {
+                state.name_buffer = stem.to_string_lossy().to_string();
+            }
         }
 
         // Read current content
@@ -1889,7 +2034,16 @@ impl TuiApp {
 
                     // Format the updated entry
                     let new_text = self.format_new_entry(&state);
-                    let new_lines: Vec<&str> = new_text.lines().collect();
+
+                    // Safety check: ensure formatter didn't return completely empty content
+                    if new_text.trim().is_empty() {
+                        self.edit_state = Some(state);
+                        self.message = Some("Formatter returned empty content".to_string());
+                        self.mode = AppMode::Normal;
+                        return Ok(());
+                    }
+
+                    let new_lines: Vec<&str> = split_lines_preserve_trailing(&new_text);
 
                     // Remove old lines
                     let remove_count = (end - start + 1).min(lines.len() - start);
@@ -2192,7 +2346,8 @@ impl TuiApp {
     /// Clear multi-selection
     fn clear_selection(&mut self) {
         self.selection_anchor = None;
-        self.selected_range = None;
+        self.non_contiguous_mode = false;
+        self.selected_indices.clear();
     }
 
     /// Extend selection upward (Shift+Up)
@@ -2204,6 +2359,8 @@ impl TuiApp {
         // Initialize anchor if not set
         if self.selection_anchor.is_none() {
             self.selection_anchor = Some(self.selected_index);
+            self.selected_indices.clear();
+            self.selected_indices.insert(self.selected_index);
         }
 
         // Move up
@@ -2211,11 +2368,15 @@ impl TuiApp {
             self.selected_index -= 1;
         }
 
-        // Update selection range
-        let anchor = self.selection_anchor.unwrap();
-        let min = self.selected_index.min(anchor);
-        let max = self.selected_index.max(anchor);
-        self.selected_range = Some((min, max));
+        // Rebuild selected_indices from anchor to current
+        if let Some(anchor) = self.selection_anchor {
+            let min = self.selected_index.min(anchor);
+            let max = self.selected_index.max(anchor);
+            self.selected_indices.clear();
+            for i in min..=max {
+                self.selected_indices.insert(i);
+            }
+        }
 
         self.adjust_scroll_for_selection();
     }
@@ -2229,6 +2390,8 @@ impl TuiApp {
         // Initialize anchor if not set
         if self.selection_anchor.is_none() {
             self.selection_anchor = Some(self.selected_index);
+            self.selected_indices.clear();
+            self.selected_indices.insert(self.selected_index);
         }
 
         // Move down
@@ -2236,11 +2399,15 @@ impl TuiApp {
             self.selected_index += 1;
         }
 
-        // Update selection range
-        let anchor = self.selection_anchor.unwrap();
-        let min = self.selected_index.min(anchor);
-        let max = self.selected_index.max(anchor);
-        self.selected_range = Some((min, max));
+        // Rebuild selected_indices from anchor to current
+        if let Some(anchor) = self.selection_anchor {
+            let min = self.selected_index.min(anchor);
+            let max = self.selected_index.max(anchor);
+            self.selected_indices.clear();
+            for i in min..=max {
+                self.selected_indices.insert(i);
+            }
+        }
 
         self.adjust_scroll_for_selection();
     }
@@ -2249,6 +2416,51 @@ impl TuiApp {
     #[allow(dead_code)]
     fn save_to_file(&mut self) -> Result<()> {
         self.save_to_temp()
+    }
+
+    /// Open temp file in external editor
+    fn open_temp_file_in_editor(&mut self) -> Result<()> {
+        use std::process::Command;
+
+        // Get editor from environment (fallback to vi)
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+
+        // Get modification time before editing
+        let metadata_before = std::fs::metadata(&self.temp_file_path).ok();
+        let mtime_before = metadata_before.and_then(|m| m.modified().ok());
+
+        // Suspend TUI
+        disable_raw_mode()?;
+        execute!(io::stdout(), LeaveAlternateScreen)?;
+
+        // Open editor (no line number targeting - open full file)
+        let status = Command::new(&editor).arg(&self.temp_file_path).status()?;
+
+        // Resume TUI
+        execute!(io::stdout(), EnterAlternateScreen)?;
+        enable_raw_mode()?;
+
+        // Set flag to force full redraw (clears artifacts after editor)
+        self.needs_full_redraw = true;
+
+        if status.success() {
+            // Check if file was actually modified
+            let metadata_after = std::fs::metadata(&self.temp_file_path).ok();
+            let mtime_after = metadata_after.and_then(|m| m.modified().ok());
+
+            if mtime_after != mtime_before {
+                // Reload temp file to reflect manual edits
+                self.reload_from_temp()?;
+                self.dirty = true;
+                self.message = Some("Temp file reloaded after editing".to_string());
+            } else {
+                self.message = Some("No changes detected".to_string());
+            }
+        } else {
+            self.message = Some("Editor exited with error".to_string());
+        }
+
+        Ok(())
     }
 
     /// Toggle the selected entry between Comment and its original type
@@ -2446,9 +2658,8 @@ impl TuiApp {
                 }
             }
             Err(e) => {
-                // Shell command not available, skip validation
-                eprintln!("Warning: Shell validation failed: {}", e);
-                Ok(None)
+                // Return the error through the UI instead of printing to stderr
+                Ok(Some(format!("Shell validation command failed: {}", e)))
             }
         }
     }
@@ -2615,4 +2826,17 @@ fn next_char_boundary(s: &str, pos: usize) -> usize {
         p += 1;
     }
     p
+}
+
+/// Check if path format is valid (does not check file existence)
+/// Rejects paths with invalid characters that would be problematic on most systems
+fn is_valid_path_format(path: &str) -> bool {
+    // Cannot be empty or pure whitespace
+    if path.trim().is_empty() {
+        return false;
+    }
+    // Reject paths with characters that are invalid across platforms
+    // Note: We allow ':' for Windows drive letters and '?' for shell expansion
+    let invalid_chars = ['<', '>', '|', '\0'];
+    !path.chars().any(|c| invalid_chars.contains(&c))
 }

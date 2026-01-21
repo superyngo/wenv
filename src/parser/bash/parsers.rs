@@ -2,43 +2,32 @@
 //!
 //! Individual methods for parsing each entry type from Bash configuration files.
 //!
-//! ## Method Naming Convention
+//! ## Standard Signatures
 //!
-//! - `try_parse_*` - Returns `Option<Entry>`, non-consuming
-//! - `parse_*_start` - Detects the start of a multi-line construct
+//! All `try_parse_*` functions follow the unified signature:
+//! - `try_parse_alias(line, line_num) -> ParseEvent`
+//! - `try_parse_env(line, line_num) -> ParseEvent`
+//! - `try_parse_source(line, line_num) -> ParseEvent`
+//!
+//! Returns:
+//! - `ParseEvent::Complete(entry)` for single-line entries
+//! - `ParseEvent::Started { ... }` for multi-line entry starts
+//! - `ParseEvent::None` if no match
+//!
+//! ## Function Detection
+//!
+//! - `detect_function_start(line) -> Option<String>` - Standard function for all shells
 //!
 //! ## Adding New Entry Types
 //!
 //! 1. Add regex pattern in `patterns.rs`
-//! 2. Add `try_parse_*` method here
+//! 2. Add `try_parse_*` method here returning `ParseEvent`
 //! 3. Call from main loop in `mod.rs`
-//!
-//! ## Multi-line Handling
-//!
-//! Some entry types support multi-line values:
-//! - Alias: Single-quote boundary detection
-//! - EnvVar: Single-quote boundary detection
-//! - Function: Brace counting (handled in mod.rs)
 
 use super::patterns::*;
 use crate::model::{Entry, EntryType};
 use crate::parser::builders::{extract_comment, strip_quotes, QuotedValueBuilder};
-
-/// Result of attempting to parse an alias line.
-///
-/// This enum handles both single-line aliases and the start of multi-line aliases.
-#[derive(Debug)]
-pub enum AliasParseResult {
-    /// Single-line alias parsed successfully
-    SingleLine(Entry),
-    /// Multi-line alias detected, builder started
-    MultiLineStart {
-        /// Builder accumulating the multi-line content
-        builder: QuotedValueBuilder,
-    },
-    /// Line is not an alias
-    NotAlias,
-}
+use crate::parser::{BoundaryType, ParseEvent};
 
 /// Try to parse a line as an alias.
 ///
@@ -54,13 +43,13 @@ pub enum AliasParseResult {
 ///
 /// # Returns
 ///
-/// - `AliasParseResult::SingleLine(entry)` for complete aliases
-/// - `AliasParseResult::MultiLineStart { builder }` for multi-line start
-/// - `AliasParseResult::NotAlias` if line is not an alias
-pub fn try_parse_alias(line: &str, line_num: usize) -> AliasParseResult {
+/// - `ParseEvent::Complete(entry)` for complete aliases
+/// - `ParseEvent::Started { ... }` for multi-line alias start
+/// - `ParseEvent::None` if line is not an alias
+pub fn try_parse_alias(line: &str, line_num: usize) -> ParseEvent {
     // Try complete single-quoted alias first
     if let Some(caps) = ALIAS_SINGLE_RE.captures(line) {
-        return AliasParseResult::SingleLine(
+        return ParseEvent::Complete(
             Entry::new(EntryType::Alias, caps[1].to_string(), caps[2].to_string())
                 .with_line_number(line_num)
                 .with_raw_line(line.to_string()),
@@ -69,7 +58,7 @@ pub fn try_parse_alias(line: &str, line_num: usize) -> AliasParseResult {
 
     // Try complete double-quoted alias
     if let Some(caps) = ALIAS_DOUBLE_RE.captures(line) {
-        return AliasParseResult::SingleLine(
+        return ParseEvent::Complete(
             Entry::new(EntryType::Alias, caps[1].to_string(), caps[2].to_string())
                 .with_line_number(line_num)
                 .with_raw_line(line.to_string()),
@@ -83,35 +72,26 @@ pub fn try_parse_alias(line: &str, line_num: usize) -> AliasParseResult {
         // Verify it has an unclosed single quote
         if QuotedValueBuilder::has_unclosed_single_quote(line) {
             let name = caps[1].to_string();
-            let builder = QuotedValueBuilder::new(name, line_num, line);
-            return AliasParseResult::MultiLineStart { builder };
+            let quote_count = line.chars().filter(|&c| c == '\'').count();
+            return ParseEvent::Started {
+                entry_type: EntryType::Alias,
+                name,
+                boundary: BoundaryType::QuoteCounting { quote_count },
+                first_line: line.to_string(),
+            };
         }
     }
 
     // Try unquoted alias (LAST - after all quoted/multi-line checks)
     if let Some(caps) = ALIAS_NOQUOTE_RE.captures(line) {
-        return AliasParseResult::SingleLine(
+        return ParseEvent::Complete(
             Entry::new(EntryType::Alias, caps[1].to_string(), caps[2].to_string())
                 .with_line_number(line_num)
                 .with_raw_line(line.to_string()),
         );
     }
 
-    AliasParseResult::NotAlias
-}
-
-/// Result of attempting to parse an export line.
-#[derive(Debug)]
-pub enum ExportParseResult {
-    /// Single-line export parsed successfully
-    SingleLine(Entry),
-    /// Multi-line export detected, builder started
-    MultiLineStart {
-        /// Builder accumulating the multi-line content
-        builder: QuotedValueBuilder,
-    },
-    /// Line is not an export
-    NotExport,
+    ParseEvent::None
 }
 
 /// Try to parse a line as an environment variable export.
@@ -127,17 +107,22 @@ pub enum ExportParseResult {
 ///
 /// # Returns
 ///
-/// - `ExportParseResult::SingleLine(entry)` for complete exports
-/// - `ExportParseResult::MultiLineStart { builder }` for multi-line start
-/// - `ExportParseResult::NotExport` if line is not an export
-pub fn try_parse_export(line: &str, line_num: usize) -> ExportParseResult {
+/// - `ParseEvent::Complete(entry)` for complete exports
+/// - `ParseEvent::Started { ... }` for multi-line export start
+/// - `ParseEvent::None` if line is not an export
+pub fn try_parse_env(line: &str, line_num: usize) -> ParseEvent {
     // Check for multi-line export start FIRST
     // (before the general EXPORT_RE which would match but not handle multi-line)
     if let Some(caps) = EXPORT_MULTILINE_START_RE.captures(line) {
         if QuotedValueBuilder::has_unclosed_single_quote(line) {
             let name = caps[1].to_string();
-            let builder = QuotedValueBuilder::new(name, line_num, line);
-            return ExportParseResult::MultiLineStart { builder };
+            let quote_count = line.chars().filter(|&c| c == '\'').count();
+            return ParseEvent::Started {
+                entry_type: EntryType::EnvVar,
+                name,
+                boundary: BoundaryType::QuoteCounting { quote_count },
+                first_line: line.to_string(),
+            };
         }
     }
 
@@ -145,14 +130,14 @@ pub fn try_parse_export(line: &str, line_num: usize) -> ExportParseResult {
     if let Some(caps) = EXPORT_RE.captures(line) {
         let (value_clean, _inline_comment) = extract_comment(&caps[2], '#');
         let value = strip_quotes(&value_clean);
-        return ExportParseResult::SingleLine(
+        return ParseEvent::Complete(
             Entry::new(EntryType::EnvVar, caps[1].to_string(), value)
                 .with_line_number(line_num)
                 .with_raw_line(line.to_string()),
         );
     }
 
-    ExportParseResult::NotExport
+    ParseEvent::None
 }
 
 /// Try to parse a line as a source statement.
@@ -168,20 +153,25 @@ pub fn try_parse_export(line: &str, line_num: usize) -> ExportParseResult {
 ///
 /// # Returns
 ///
-/// `Some(Entry)` if the line is a source statement, `None` otherwise.
-pub fn try_parse_source(line: &str, line_num: usize) -> Option<Entry> {
+/// - `ParseEvent::Complete(entry)` if the line is a source statement
+/// - `ParseEvent::None` otherwise
+pub fn try_parse_source(line: &str, line_num: usize) -> ParseEvent {
     if let Some(caps) = SOURCE_RE.captures(line) {
         let (path_clean, _inline_comment) = extract_comment(&caps[1], '#');
         let path = strip_quotes(&path_clean);
-        // Use line number as name for consistent identification
-        let name = format!("L{}", line_num);
-        return Some(
+        // Extract filename (without extension) as name for TUI identification
+        let name = std::path::Path::new(&path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&path)
+            .to_string();
+        return ParseEvent::Complete(
             Entry::new(EntryType::Source, name, path)
                 .with_line_number(line_num)
                 .with_raw_line(line.to_string()),
         );
     }
-    None
+    ParseEvent::None
 }
 
 /// Detect if a line starts a function definition.
@@ -215,34 +205,42 @@ mod tests {
     #[test]
     fn test_try_parse_alias_single() {
         match try_parse_alias("alias ll='ls -la'", 1) {
-            AliasParseResult::SingleLine(entry) => {
+            ParseEvent::Complete(entry) => {
                 assert_eq!(entry.name, "ll");
                 assert_eq!(entry.value, "ls -la");
             }
-            _ => panic!("Expected SingleLine"),
+            _ => panic!("Expected Complete"),
         }
     }
 
     #[test]
     fn test_try_parse_alias_double() {
         match try_parse_alias(r#"alias gs="git status""#, 1) {
-            AliasParseResult::SingleLine(entry) => {
+            ParseEvent::Complete(entry) => {
                 assert_eq!(entry.name, "gs");
                 assert_eq!(entry.value, "git status");
             }
-            _ => panic!("Expected SingleLine"),
+            _ => panic!("Expected Complete"),
         }
     }
 
     #[test]
     fn test_try_parse_alias_multiline_start() {
         match try_parse_alias("alias complex='echo line1", 5) {
-            AliasParseResult::MultiLineStart { builder } => {
-                assert_eq!(builder.name, "complex");
-                assert_eq!(builder.start_line, 5);
-                assert!(!builder.is_complete());
+            ParseEvent::Started {
+                entry_type,
+                name,
+                boundary,
+                ..
+            } => {
+                assert_eq!(entry_type, EntryType::Alias);
+                assert_eq!(name, "complex");
+                assert!(matches!(
+                    boundary,
+                    BoundaryType::QuoteCounting { quote_count: 1 }
+                ));
             }
-            _ => panic!("Expected MultiLineStart"),
+            _ => panic!("Expected Started"),
         }
     }
 
@@ -252,66 +250,76 @@ mod tests {
         // Before the fix, `alias test1='123` would be incorrectly matched by ALIAS_NOQUOTE_RE
         // as a complete alias with value `'123`
         match try_parse_alias("alias test1='123", 1) {
-            AliasParseResult::MultiLineStart { builder } => {
-                assert_eq!(builder.name, "test1");
+            ParseEvent::Started { name, .. } => {
+                assert_eq!(name, "test1");
             }
-            other => panic!("Expected MultiLineStart, got {:?}", other),
+            other => panic!("Expected Started, got {:?}", other),
         }
     }
 
     #[test]
     fn test_try_parse_alias_not_alias() {
         match try_parse_alias("export VAR=value", 1) {
-            AliasParseResult::NotAlias => {}
-            _ => panic!("Expected NotAlias"),
+            ParseEvent::None => {}
+            _ => panic!("Expected None"),
         }
     }
 
     #[test]
-    fn test_try_parse_export_single() {
-        match try_parse_export("export EDITOR=nvim", 1) {
-            ExportParseResult::SingleLine(entry) => {
+    fn test_try_parse_env_single() {
+        match try_parse_env("export EDITOR=nvim", 1) {
+            ParseEvent::Complete(entry) => {
                 assert_eq!(entry.name, "EDITOR");
                 assert_eq!(entry.value, "nvim");
             }
-            _ => panic!("Expected SingleLine"),
+            _ => panic!("Expected Complete"),
         }
     }
 
     #[test]
-    fn test_try_parse_export_quoted() {
-        match try_parse_export(r#"export PATH="$HOME/bin:$PATH""#, 1) {
-            ExportParseResult::SingleLine(entry) => {
+    fn test_try_parse_env_quoted() {
+        match try_parse_env(r#"export PATH="$HOME/bin:$PATH""#, 1) {
+            ParseEvent::Complete(entry) => {
                 assert_eq!(entry.name, "PATH");
                 assert_eq!(entry.value, "$HOME/bin:$PATH");
             }
-            _ => panic!("Expected SingleLine"),
+            _ => panic!("Expected Complete"),
         }
     }
 
     #[test]
-    fn test_try_parse_export_multiline_start() {
-        match try_parse_export("export LONG='first line", 10) {
-            ExportParseResult::MultiLineStart { builder } => {
-                assert_eq!(builder.name, "LONG");
-                assert_eq!(builder.start_line, 10);
+    fn test_try_parse_env_multiline_start() {
+        match try_parse_env("export LONG='first line", 10) {
+            ParseEvent::Started {
+                entry_type, name, ..
+            } => {
+                assert_eq!(entry_type, EntryType::EnvVar);
+                assert_eq!(name, "LONG");
             }
-            _ => panic!("Expected MultiLineStart"),
+            _ => panic!("Expected Started"),
         }
     }
 
     #[test]
     fn test_try_parse_source() {
-        let entry = try_parse_source("source ~/.bashrc", 5).unwrap();
-        assert_eq!(entry.entry_type, EntryType::Source);
-        assert_eq!(entry.name, "L5");
-        assert_eq!(entry.value, "~/.bashrc");
+        match try_parse_source("source ~/.bashrc", 5) {
+            ParseEvent::Complete(entry) => {
+                assert_eq!(entry.entry_type, EntryType::Source);
+                assert_eq!(entry.name, ".bashrc");
+                assert_eq!(entry.value, "~/.bashrc");
+            }
+            _ => panic!("Expected Complete"),
+        }
     }
 
     #[test]
     fn test_try_parse_source_dot() {
-        let entry = try_parse_source(". ~/.profile", 10).unwrap();
-        assert_eq!(entry.value, "~/.profile");
+        match try_parse_source(". ~/.profile", 10) {
+            ParseEvent::Complete(entry) => {
+                assert_eq!(entry.value, "~/.profile");
+            }
+            _ => panic!("Expected Complete"),
+        }
     }
 
     #[test]
