@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-01-21
+
 ### Fixed
 - **Bash EnvVar Empty Value Formatting**: Fixed empty environment variables to use quoted format `export VAR=''` instead of `export VAR=` (2026-01-21)
 - **TUI Editing Stability**: Fixed potential crashes when editing Function/EnvVar entries to empty values (2026-01-21)
