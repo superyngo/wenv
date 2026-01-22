@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **TUI Unified Selection Mode**: Simplified selection system with single unified mode (2026-01-22)
+  - 's' key and Shift+arrow both enter selection mode
+  - Arrow keys move cursor without clearing selection in selection mode
+  - ESC is the only way to exit selection mode and clear selections
+  - Shift+arrow now extends selection without clearing existing non-contiguous selections
+  - Releasing Shift and pressing again from new position establishes new anchor
+  - Removed distinction between "contiguous" and "non-contiguous" selection modes
+
+### Fixed
+- **TUI Move Mode Selection State**: Fixed selection state tracking when cancelling move operation (2026-01-22)
+  - ESC in move mode now correctly restores selection to original entries instead of moved positions
+  - Example: Selecting entries 1,3,5 → moving to position 8 → ESC now keeps 1,3,5 selected (not 8,9,10)
+  - Move confirmation now properly clears saved state to prevent memory leaks
+
 ## [0.7.0] - 2026-01-21
 
 ### Fixed

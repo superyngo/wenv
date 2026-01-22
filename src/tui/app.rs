@@ -159,6 +159,10 @@ pub struct TuiApp {
     pub non_contiguous_mode: bool,
     pub selected_indices: std::collections::HashSet<usize>,
 
+    // Move mode state - save original selection for cancel
+    pub pre_move_selected_indices: Option<std::collections::HashSet<usize>>,
+    pub pre_move_selection_anchor: Option<Option<usize>>,
+
     // Clipboard state (internal buffer, not system clipboard)
     pub clipboard_buffer: Option<String>,
 
@@ -226,6 +230,8 @@ impl TuiApp {
             selection_anchor: None,
             non_contiguous_mode: false,
             selected_indices: std::collections::HashSet::new(),
+            pre_move_selected_indices: None,
+            pre_move_selection_anchor: None,
             clipboard_buffer: None,
             validation_errors: None,
             validation_scroll_offset: 0,
@@ -425,20 +431,16 @@ impl TuiApp {
             KeyCode::Char('y') if has_ctrl => {
                 self.redo()?;
             }
-            // s: Toggle non-contiguous selection mode
+            // s: Enter selection mode and toggle current item
             KeyCode::Char('s') if !has_ctrl && !has_shift && !has_alt => {
-                if !self.non_contiguous_mode {
-                    // Entering non-contiguous mode
-                    self.non_contiguous_mode = true;
-                    self.selected_indices.clear();
-                    self.selected_indices.insert(self.selected_index);
+                // Enter selection mode (if not already in)
+                self.non_contiguous_mode = true;
+
+                // Toggle current item in/out of selection
+                if self.selected_indices.contains(&self.selected_index) {
+                    self.selected_indices.remove(&self.selected_index);
                 } else {
-                    // Toggle current index in/out of selection
-                    if self.selected_indices.contains(&self.selected_index) {
-                        self.selected_indices.remove(&self.selected_index);
-                    } else {
-                        self.selected_indices.insert(self.selected_index);
-                    }
+                    self.selected_indices.insert(self.selected_index);
                 }
             }
             // Quit
@@ -456,12 +458,12 @@ impl TuiApp {
                     self.search_query.clear();
                     self.search_matches.clear();
                     self.search_cursor = 0;
-                } else if self.non_contiguous_mode {
-                    // Exit non-contiguous mode
-                    self.non_contiguous_mode = false;
-                    self.selected_indices.clear();
+                } else if self.non_contiguous_mode || !self.selected_indices.is_empty() {
+                    // Exit selection mode and clear all selections
+                    self.clear_selection();
+                    self.message = Some("Selection cleared".to_string());
                 } else {
-                    // When not in search mode, behave same as 'q'
+                    // When not in selection mode, behave same as 'q'
                     if self.dirty {
                         self.mode = AppMode::ConfirmQuit;
                     } else {
@@ -475,23 +477,21 @@ impl TuiApp {
             // Navigation with Shift for multi-select
             KeyCode::Up | KeyCode::Char('k') => {
                 if has_shift {
+                    // Enter selection mode and extend selection
+                    self.non_contiguous_mode = true;
                     self.extend_selection_up();
                 } else {
-                    // Only clear contiguous selection if NOT in non-contiguous mode
-                    if !self.non_contiguous_mode {
-                        self.clear_selection();
-                    }
+                    // Move cursor without clearing selection (unified selection mode)
                     self.move_up();
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 if has_shift {
+                    // Enter selection mode and extend selection
+                    self.non_contiguous_mode = true;
                     self.extend_selection_down();
                 } else {
-                    // Only clear contiguous selection if NOT in non-contiguous mode
-                    if !self.non_contiguous_mode {
-                        self.clear_selection();
-                    }
+                    // Move cursor without clearing selection (unified selection mode)
                     self.move_down();
                 }
             }
@@ -1228,9 +1228,18 @@ impl TuiApp {
             KeyCode::Esc | KeyCode::Char('q') => {
                 // Cancel move - undo to restore original positions
                 self.undo()?;
+
+                // Restore original selection state
+                if let Some(indices) = self.pre_move_selected_indices.take() {
+                    self.selected_indices = indices;
+                }
+                if let Some(anchor) = self.pre_move_selection_anchor.take() {
+                    self.selection_anchor = anchor;
+                }
+
                 self.mode = AppMode::Normal;
-                self.clear_selection();
-                self.message = Some("Move cancelled".to_string());
+                self.message =
+                    Some("Move cancelled (selection kept - press Esc again to clear)".to_string());
             }
             _ => {}
         }
@@ -1357,6 +1366,11 @@ impl TuiApp {
         self.reload_from_temp()?;
 
         self.mode = AppMode::Normal;
+
+        // Clear saved selection state (move confirmed, don't need to restore)
+        self.pre_move_selected_indices = None;
+        self.pre_move_selection_anchor = None;
+
         self.clear_selection();
         self.message = Some(format!("Moved {} entries", indices.len()));
 
@@ -1792,6 +1806,10 @@ impl TuiApp {
             if self.selected_indices.is_empty() {
                 self.selected_indices.insert(self.selected_index);
             }
+
+            // Save selection state for cancel restoration
+            self.pre_move_selected_indices = Some(self.selected_indices.clone());
+            self.pre_move_selection_anchor = Some(self.selection_anchor);
 
             // Always save state for undo before any move operation
             if let Ok(content) = self.read_current_content() {
@@ -2351,28 +2369,47 @@ impl TuiApp {
     }
 
     /// Extend selection upward (Shift+Up)
+    /// Merges with existing non-contiguous selections instead of replacing
     fn extend_selection_up(&mut self) {
         if self.entries.is_empty() {
             return;
         }
 
-        // Initialize anchor if not set
-        if self.selection_anchor.is_none() {
+        // Reset anchor if cursor moved outside current selection (new Shift sequence)
+        // or initialize anchor if not set
+        if self.selection_anchor.is_none() || !self.selected_indices.contains(&self.selected_index)
+        {
             self.selection_anchor = Some(self.selected_index);
-            self.selected_indices.clear();
             self.selected_indices.insert(self.selected_index);
         }
+
+        // Record old range for shrinking detection
+        let old_range = self.selection_anchor.map(|anchor| {
+            let min = self.selected_index.min(anchor);
+            let max = self.selected_index.max(anchor);
+            (min, max)
+        });
 
         // Move up
         if self.selected_index > 0 {
             self.selected_index -= 1;
         }
 
-        // Rebuild selected_indices from anchor to current
+        // Update selection range (merge, not replace)
         if let Some(anchor) = self.selection_anchor {
             let min = self.selected_index.min(anchor);
             let max = self.selected_index.max(anchor);
-            self.selected_indices.clear();
+
+            // Remove items from old range that are no longer in new range (handle shrinking)
+            if let Some((old_min, old_max)) = old_range {
+                for i in old_min..=old_max {
+                    if i < min || i > max {
+                        self.selected_indices.remove(&i);
+                    }
+                }
+            }
+
+            // Add items in new range
             for i in min..=max {
                 self.selected_indices.insert(i);
             }
@@ -2382,28 +2419,47 @@ impl TuiApp {
     }
 
     /// Extend selection downward (Shift+Down)
+    /// Merges with existing non-contiguous selections instead of replacing
     fn extend_selection_down(&mut self) {
         if self.entries.is_empty() {
             return;
         }
 
-        // Initialize anchor if not set
-        if self.selection_anchor.is_none() {
+        // Reset anchor if cursor moved outside current selection (new Shift sequence)
+        // or initialize anchor if not set
+        if self.selection_anchor.is_none() || !self.selected_indices.contains(&self.selected_index)
+        {
             self.selection_anchor = Some(self.selected_index);
-            self.selected_indices.clear();
             self.selected_indices.insert(self.selected_index);
         }
+
+        // Record old range for shrinking detection
+        let old_range = self.selection_anchor.map(|anchor| {
+            let min = self.selected_index.min(anchor);
+            let max = self.selected_index.max(anchor);
+            (min, max)
+        });
 
         // Move down
         if self.selected_index < self.entries.len() - 1 {
             self.selected_index += 1;
         }
 
-        // Rebuild selected_indices from anchor to current
+        // Update selection range (merge, not replace)
         if let Some(anchor) = self.selection_anchor {
             let min = self.selected_index.min(anchor);
             let max = self.selected_index.max(anchor);
-            self.selected_indices.clear();
+
+            // Remove items from old range that are no longer in new range (handle shrinking)
+            if let Some((old_min, old_max)) = old_range {
+                for i in old_min..=old_max {
+                    if i < min || i > max {
+                        self.selected_indices.remove(&i);
+                    }
+                }
+            }
+
+            // Add items in new range
             for i in min..=max {
                 self.selected_indices.insert(i);
             }
