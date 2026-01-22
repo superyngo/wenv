@@ -14,9 +14,7 @@ pub fn fetch_url(url_str: &str) -> Result<String> {
     }
 
     // Create a request with timeout
-    let response = ureq::get(url_str)
-        .timeout(Duration::from_secs(30))
-        .call()?;
+    let response = ureq::get(url_str).timeout(Duration::from_secs(30)).call()?;
 
     if response.status() < 200 || response.status() >= 300 {
         anyhow::bail!("HTTP request failed with status: {}", response.status());

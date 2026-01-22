@@ -19,8 +19,7 @@ impl PathCache {
             .context("Cannot determine config directory")?;
 
         let wenv_dir = config_dir.join("wenv");
-        fs::create_dir_all(&wenv_dir)
-            .context("Failed to create wenv config directory")?;
+        fs::create_dir_all(&wenv_dir).context("Failed to create wenv config directory")?;
 
         Ok(wenv_dir.join(".path_cache.toml"))
     }
@@ -36,29 +35,24 @@ impl PathCache {
             });
         }
 
-        let content = fs::read_to_string(&cache_path)
-            .context("Failed to read cache file")?;
+        let content = fs::read_to_string(&cache_path).context("Failed to read cache file")?;
 
-        toml::from_str(&content)
-            .context("Failed to parse cache file")
+        toml::from_str(&content).context("Failed to parse cache file")
     }
 
     /// Save cache to disk
     pub fn save(&self) -> Result<()> {
         let cache_path = Self::cache_file_path()?;
-        let content = toml::to_string_pretty(self)
-            .context("Failed to serialize cache")?;
+        let content = toml::to_string_pretty(self).context("Failed to serialize cache")?;
 
-        fs::write(&cache_path, content)
-            .context("Failed to write cache file")
+        fs::write(&cache_path, content).context("Failed to write cache file")
     }
 
     /// Clear the cache file
     pub fn clear() -> Result<()> {
         let cache_path = Self::cache_file_path()?;
         if cache_path.exists() {
-            fs::remove_file(&cache_path)
-                .context("Failed to remove cache file")?;
+            fs::remove_file(&cache_path).context("Failed to remove cache file")?;
         }
         Ok(())
     }
