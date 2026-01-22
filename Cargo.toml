@@ -1,6 +1,6 @@
 [package]
 name = "wenv"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 authors = ["wen"]
 description = "Shell configuration file manager - Cross-platform Shell RC file management tool"

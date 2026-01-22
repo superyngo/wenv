@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-01-23
+
 ### Changed
 - **Performance: Binary Size Reduction**: Optimized release build configuration and replaced heavy dependencies (2026-01-23)
   - Binary size reduced from 9.5MB to 4.1MB (56.8% reduction)
