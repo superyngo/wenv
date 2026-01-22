@@ -1,8 +1,8 @@
 //! Backup management module
 
 use anyhow::Result;
-use chrono::Local;
 use std::path::{Path, PathBuf};
+use time::OffsetDateTime;
 
 use crate::model::{Config, ShellType};
 
@@ -20,6 +20,8 @@ pub struct BackupEntry {
 pub struct BackupManager {
     backup_dir: PathBuf,
     max_count: usize,
+    cleanup_counter: std::cell::Cell<u32>,
+    last_cleanup_time: std::cell::Cell<Option<time::OffsetDateTime>>,
 }
 
 impl BackupManager {
@@ -28,6 +30,8 @@ impl BackupManager {
         Self {
             backup_dir,
             max_count: config.backup.max_count,
+            cleanup_counter: std::cell::Cell::new(0),
+            last_cleanup_time: std::cell::Cell::new(None),
         }
     }
 
@@ -41,7 +45,17 @@ impl BackupManager {
     pub fn create_backup(&self, source_file: &Path) -> Result<PathBuf> {
         self.ensure_dir()?;
 
-        let timestamp = Local::now().format("%Y-%m-%d_%H%M%S");
+        let now = OffsetDateTime::now_utc();
+        let timestamp = format!(
+            "{:04}-{:02}-{:02}_{:02}{:02}{:02}",
+            now.year(),
+            now.month() as u8,
+            now.day(),
+            now.hour(),
+            now.minute(),
+            now.second()
+        );
+
         let filename = source_file
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -52,8 +66,26 @@ impl BackupManager {
 
         std::fs::copy(source_file, &backup_path)?;
 
-        // Auto-cleanup old backups
-        self.cleanup_old_backups()?;
+        // Auto-cleanup old backups (with frequency control)
+        // Only cleanup every 10 backups or after 1 hour
+        let counter = self.cleanup_counter.get();
+        let should_cleanup = if counter >= 10 {
+            true
+        } else if let Some(last_cleanup) = self.last_cleanup_time.get() {
+            let now = OffsetDateTime::now_utc();
+            let duration = now - last_cleanup;
+            duration.whole_hours() >= 1
+        } else {
+            true // First backup, always cleanup
+        };
+
+        if should_cleanup {
+            self.cleanup_old_backups()?;
+            self.cleanup_counter.set(0);
+            self.last_cleanup_time.set(Some(OffsetDateTime::now_utc()));
+        } else {
+            self.cleanup_counter.set(counter + 1);
+        }
 
         Ok(backup_path)
     }
@@ -163,6 +195,8 @@ mod tests {
         let manager = BackupManager {
             backup_dir: temp_dir.path().join("backups"),
             max_count: config.backup.max_count,
+            cleanup_counter: std::cell::Cell::new(0),
+            last_cleanup_time: std::cell::Cell::new(None),
         };
 
         let backup_path = manager.create_backup(&source_file).unwrap();

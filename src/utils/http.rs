@@ -13,19 +13,16 @@ pub fn fetch_url(url_str: &str) -> Result<String> {
         anyhow::bail!("Only HTTP/HTTPS URLs are supported");
     }
 
-    // Create a client with timeout
-    let client = reqwest::blocking::Client::builder()
+    // Create a request with timeout
+    let response = ureq::get(url_str)
         .timeout(Duration::from_secs(30))
-        .build()?;
+        .call()?;
 
-    // Perform the request
-    let response = client.get(url_str).send()?;
-
-    if !response.status().is_success() {
+    if response.status() < 200 || response.status() >= 300 {
         anyhow::bail!("HTTP request failed with status: {}", response.status());
     }
 
-    let content = response.text()?;
+    let content = response.into_string()?;
     Ok(content)
 }
 

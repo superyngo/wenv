@@ -36,6 +36,10 @@ pub struct Cli {
     #[arg(short, long)]
     pub yes: bool,
 
+    /// Clear cached shell paths
+    #[arg(long, group = "action")]
+    pub clear_cache: bool,
+
     /// Filter by entry type (for export)
     #[arg(short, long)]
     pub r#type: Option<EntryTypeArg>,

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Performance: Binary Size Reduction**: Optimized release build configuration and replaced heavy dependencies (2026-01-23)
+  - Binary size reduced from 9.5MB to 4.1MB (56.8% reduction)
+  - Replaced `reqwest` with `ureq` for lighter HTTP handling
+  - Replaced `chrono` with `time` crate for smaller footprint
+  - Added release profile with `opt-level='z'`, `lto=true`, `strip=true`
+
+### Added
+- **Performance: PowerShell Path Caching**: Cache PowerShell profile paths to avoid slow shell startup on Windows (2026-01-23)
+  - First run queries PowerShell for $PROFILE path and caches result in `~/.config/wenv/.path_cache.toml`
+  - Subsequent runs read from cache (expected ~10x speedup on Windows)
+  - Cache validates path existence and re-queries if invalid
+  - New `--clear-cache` flag to force cache refresh
+- **Performance: Backup Cleanup Frequency Control**: Reduce backup cleanup overhead (2026-01-23)
+  - Cleanup now runs every 10 backups or after 1 hour (whichever comes first)
+  - Previously ran on every backup operation
+
 ## [0.7.1] - 2026-01-22
 
 ### Changed

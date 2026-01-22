@@ -13,6 +13,7 @@
 //! - Automatic backups
 
 pub mod backup;
+pub mod cache;
 pub mod checker;
 pub mod cli;
 pub mod config;

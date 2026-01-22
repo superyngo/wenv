@@ -1,5 +1,6 @@
 //! Shell type detection and configuration paths
 
+use crate::cache::PathCache;
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
@@ -69,8 +70,19 @@ impl ShellType {
                     return PathBuf::from(profile_path);
                 }
 
-                // Try to query the shell directly for the profile path
-                let get_profile = |cmd: &str| -> Option<PathBuf> {
+                // Try to load from cache
+                if let Ok(cache) = PathCache::load() {
+                    // Try pwsh first, then powershell
+                    if let Some(path) = cache.get_pwsh_profile() {
+                        return path;
+                    }
+                    if let Some(path) = cache.get_powershell_profile() {
+                        return path;
+                    }
+                }
+
+                // Cache miss or invalid - query the shell and update cache
+                let query_and_cache = |cmd: &str, cache_field: &str| -> Option<PathBuf> {
                     Command::new(cmd)
                         .args(["-NoProfile", "-Command", "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output $PROFILE"])
                         .output()
@@ -79,7 +91,17 @@ impl ShellType {
                             if output.status.success() {
                                 let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
                                 if !s.is_empty() {
-                                    return Some(PathBuf::from(s));
+                                    let path = PathBuf::from(s);
+                                    // Update cache
+                                    if let Ok(mut cache) = PathCache::load() {
+                                        match cache_field {
+                                            "pwsh" => cache.set_pwsh_profile(path.clone()),
+                                            "powershell" => cache.set_powershell_profile(path.clone()),
+                                            _ => {}
+                                        }
+                                        let _ = cache.save();
+                                    }
+                                    return Some(path);
                                 }
                             }
                             None
@@ -87,7 +109,9 @@ impl ShellType {
                 };
 
                 // Try pwsh (PowerShell Core) first, then powershell (Windows PowerShell)
-                if let Some(path) = get_profile("pwsh").or_else(|| get_profile("powershell")) {
+                if let Some(path) = query_and_cache("pwsh", "pwsh")
+                    .or_else(|| query_and_cache("powershell", "powershell"))
+                {
                     return path;
                 }
 

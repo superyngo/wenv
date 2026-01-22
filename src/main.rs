@@ -9,6 +9,14 @@ use wenv::tui::TuiApp;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Handle --clear-cache early (doesn't require config file)
+    if cli.clear_cache {
+        wenv::cache::PathCache::clear()?;
+        println!("Cache cleared successfully.");
+        return Ok(());
+    }
+
     let ctx = Context::from_cli(&cli)?;
 
     // Check if config file exists, prompt to create if missing
