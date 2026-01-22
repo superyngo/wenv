@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-01-22
+
 ### Changed
 - **TUI Unified Selection Mode**: Simplified selection system with single unified mode (2026-01-22)
   - 's' key and Shift+arrow both enter selection mode
