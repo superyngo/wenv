@@ -5,7 +5,7 @@ use colored::Colorize;
 use std::path::PathBuf;
 
 use crate::cli::args::{Cli, ConflictStrategy};
-use crate::i18n::{init_messages, Language, Messages};
+use crate::i18n::{init_messages, Messages};
 use crate::model::{Config, ShellType};
 use crate::utils::shell_detect::get_shell_type;
 
@@ -21,8 +21,7 @@ pub struct Context {
 impl Context {
     pub fn from_cli(cli: &Cli) -> Result<Self> {
         let config = crate::config::load_or_create_config()?;
-        let lang: Language = config.ui.language.parse().unwrap_or_default();
-        let messages = init_messages(lang);
+        let messages = init_messages(&config.ui.language);
 
         // Get path from -f option or positional argument (except ".")
         let provided_path: Option<PathBuf> = cli.file.clone().or_else(|| {

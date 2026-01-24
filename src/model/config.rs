@@ -17,7 +17,6 @@ pub struct Config {
 /// UI configuration options
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UiConfig {
-    /// Display language: "en", "zh-TW", or "zh-CN"
     #[serde(default = "default_language")]
     pub language: String,
 }
@@ -83,8 +82,8 @@ impl Default for BackupConfig {
 }
 
 impl Config {
-    /// Get the configuration file path
-    pub fn config_path() -> PathBuf {
+    /// Get the wenv configuration directory path
+    pub fn config_dir() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| {
                 dirs::home_dir()
@@ -92,19 +91,16 @@ impl Config {
                     .join(".config")
             })
             .join("wenv")
-            .join("config.toml")
+    }
+
+    /// Get the configuration file path
+    pub fn config_path() -> PathBuf {
+        Self::config_dir().join("config.toml")
     }
 
     /// Get the backups directory path
     pub fn backups_dir() -> PathBuf {
-        dirs::config_dir()
-            .unwrap_or_else(|| {
-                dirs::home_dir()
-                    .unwrap_or_else(|| PathBuf::from("~"))
-                    .join(".config")
-            })
-            .join("wenv")
-            .join("backups")
+        Self::config_dir().join("backups")
     }
 
     /// Load configuration from file, or return default if file doesn't exist

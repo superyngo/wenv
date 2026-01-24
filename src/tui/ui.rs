@@ -100,7 +100,7 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
         ),
         Span::raw(" "),
         Span::styled(
-            format!("{:<10}", "LINE"),
+            format!("{:<10}", msg.header_line_num),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -253,18 +253,19 @@ fn draw_content(f: &mut Frame, app: &mut TuiApp, area: Rect) {
 
 /// Draw the status bar
 fn draw_status_bar(f: &mut Frame, app: &TuiApp, area: Rect) {
+    let msg = &app.messages;
     let help_text = match app.mode {
-        AppMode::Normal => "[↑/↓]Navigate [Shift+↑/↓]Select [i]Info [a]Add [e]Edit [m]Move [d]Del [t]Toggle [s]Save [?]Help [q]Quit",
-        AppMode::Searching => "[Type]Search [Enter]Confirm [Esc]Exit [PgUp/PgDn]Jump",
-        AppMode::ShowingDetail => "[↑/↓/Scroll/PgUp/PgDn]Scroll [e]Edit [Esc]Close",
-        AppMode::ShowingHelp => "[q/Esc]Close",
-        AppMode::ConfirmDelete => "[↑/↓/PgUp/PgDn]Scroll [y/Enter]Yes [n/Esc]No",
-        AppMode::ConfirmQuit => "[y]Save & Quit [n]Discard [Esc]Cancel",
-        AppMode::ConfirmFormat => "[y/Enter]Apply [n/Esc]Cancel [↑↓]Scroll",
-        AppMode::ConfirmSaveWithErrors => "[y/Enter]Save Anyway [n/Esc]Cancel [↑↓]Scroll",
-        AppMode::SelectingType => "[↑/↓]Select [Enter]Confirm [Esc]Cancel",
-        AppMode::Editing => "[Tab]Next [↑/↓/Scroll/PgUp/PgDn]Navigate [Enter]Submit/Newline [Esc]Cancel",
-        AppMode::Moving => "[↑/↓/Scroll]Move [Enter]Confirm [Esc]Cancel",
+        AppMode::Normal => msg.tui_status_normal,
+        AppMode::Searching => msg.tui_status_searching,
+        AppMode::ShowingDetail => msg.tui_status_detail_extended,
+        AppMode::ShowingHelp => msg.tui_status_help,
+        AppMode::ConfirmDelete => msg.tui_status_confirm_delete_extended,
+        AppMode::ConfirmQuit => msg.tui_status_confirm_quit,
+        AppMode::ConfirmFormat => msg.tui_status_confirm_format,
+        AppMode::ConfirmSaveWithErrors => msg.tui_status_confirm_save_errors,
+        AppMode::SelectingType => msg.tui_status_selecting_type,
+        AppMode::Editing => msg.tui_status_editing,
+        AppMode::Moving => msg.tui_status_moving,
     };
 
     // Build status text with dirty indicator
@@ -321,23 +322,25 @@ fn draw_search_popup(f: &mut Frame, app: &TuiApp) {
     };
 
     let match_count = app.search_matches.len();
+    let msg = &app.messages;
     let match_info = if match_count > 0 {
-        format!("({} matches)", match_count)
+        msg.tui_search_matches
+            .replace("{}", &match_count.to_string())
     } else {
-        "(no matches)".to_string()
+        msg.tui_search_no_matches.to_string()
     };
 
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            "Search",
+            msg.tui_search_title.trim(),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Query: ", Style::default().fg(Color::Yellow)),
+            Span::styled(msg.tui_search_query, Style::default().fg(Color::Yellow)),
             Span::styled(&search_display, Style::default().fg(Color::White)),
         ]),
         Line::from(""),
@@ -347,7 +350,7 @@ fn draw_search_popup(f: &mut Frame, app: &TuiApp) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "[Enter] Confirm  [Esc] Exit  [PgUp/PgDn] Jump",
+            msg.tui_search_hint,
             Style::default().fg(Color::DarkGray),
         )),
     ];
@@ -355,7 +358,7 @@ fn draw_search_popup(f: &mut Frame, app: &TuiApp) {
     let paragraph = Paragraph::new(lines)
         .block(
             Block::default()
-                .title(" Search Entries ")
+                .title(msg.tui_search_title)
                 .borders(Borders::ALL)
                 .style(Style::default().bg(Color::Black)),
         )
@@ -402,9 +405,10 @@ fn draw_detail_popup(f: &mut Frame, app: &mut TuiApp) {
     };
 
     // Create detail text - new order: Type, Line(s), blank, Name, Value
+    let msg = &app.messages;
     let mut lines = vec![
         Line::from(vec![
-            Span::styled("Type: ", Style::default().fg(Color::Cyan)),
+            Span::styled(msg.label_type, Style::default().fg(Color::Cyan)),
             Span::raw(format!("{}", entry.entry_type)),
         ]),
         Line::from(vec![
@@ -413,11 +417,11 @@ fn draw_detail_popup(f: &mut Frame, app: &mut TuiApp) {
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Name: ", Style::default().fg(Color::Cyan)),
+            Span::styled(msg.label_name, Style::default().fg(Color::Cyan)),
             Span::raw(&entry.name),
         ]),
         Line::from(vec![Span::styled(
-            "Value:",
+            msg.label_value,
             Style::default().fg(Color::Cyan),
         )]),
     ];
@@ -473,7 +477,7 @@ fn draw_detail_popup(f: &mut Frame, app: &mut TuiApp) {
     let footer_lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            "[e] Edit  [↑/↓] Scroll  [Esc] Close",
+            msg.tui_detail_hint,
             Style::default().fg(Color::DarkGray),
         )),
     ];
@@ -495,45 +499,45 @@ fn draw_help_popup(f: &mut Frame, app: &TuiApp) {
 
     let help_text = vec![
         Line::from(Span::styled(
-            "Keyboard Shortcuts",
+            msg.tui_help_keyboard_shortcuts,
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(vec![
             Span::styled("↑/↓, k/j  ", Style::default().fg(Color::Yellow)),
-            Span::raw("Navigate entries"),
+            Span::raw(msg.tui_help_nav_updown),
         ]),
         Line::from(vec![
             Span::styled("Scroll    ", Style::default().fg(Color::Yellow)),
-            Span::raw("Mouse scroll up/down"),
+            Span::raw(msg.tui_help_nav_scroll),
         ]),
         Line::from(vec![
             Span::styled("i, Enter  ", Style::default().fg(Color::Yellow)),
-            Span::raw("Show entry details"),
+            Span::raw(msg.tui_help_info_detail),
         ]),
         Line::from(vec![
             Span::styled("a         ", Style::default().fg(Color::Yellow)),
-            Span::raw("Add new entry"),
+            Span::raw(msg.tui_help_add),
         ]),
         Line::from(vec![
             Span::styled("e         ", Style::default().fg(Color::Yellow)),
-            Span::raw("Edit entry"),
+            Span::raw(msg.tui_help_edit_entry),
         ]),
         Line::from(vec![
             Span::styled("m         ", Style::default().fg(Color::Yellow)),
-            Span::raw("Move entry up/down"),
+            Span::raw(msg.tui_help_move),
         ]),
         Line::from(vec![
             Span::styled("d, Del    ", Style::default().fg(Color::Yellow)),
-            Span::raw("Delete entry"),
+            Span::raw(msg.tui_help_delete),
         ]),
         Line::from(vec![
             Span::styled("t         ", Style::default().fg(Color::Yellow)),
-            Span::raw("Toggle comment (comment/uncomment)"),
+            Span::raw(msg.tui_help_toggle_select),
         ]),
         Line::from(vec![
             Span::styled("f         ", Style::default().fg(Color::Yellow)),
-            Span::raw("Search entries (Name and Value)"),
+            Span::raw(msg.tui_help_search),
         ]),
         Line::from(vec![
             Span::styled("c         ", Style::default().fg(Color::Yellow)),
@@ -541,27 +545,27 @@ fn draw_help_popup(f: &mut Frame, app: &TuiApp) {
         ]),
         Line::from(vec![
             Span::styled("r         ", Style::default().fg(Color::Yellow)),
-            Span::raw(msg.tui_help_format),
+            Span::raw(msg.tui_help_format_file),
         ]),
         Line::from(vec![
             Span::styled("s, Ctrl+S ", Style::default().fg(Color::Yellow)),
-            Span::raw("Save to file"),
+            Span::raw(msg.tui_help_save),
         ]),
         Line::from(vec![
             Span::styled("Ctrl/Alt+C", Style::default().fg(Color::Yellow)),
-            Span::raw("Copy entries"),
+            Span::raw(msg.tui_help_copy),
         ]),
         Line::from(vec![
             Span::styled("Ctrl/Alt+V", Style::default().fg(Color::Yellow)),
-            Span::raw("Paste entries"),
+            Span::raw(msg.tui_help_paste),
         ]),
         Line::from(vec![
             Span::styled("Shift+↑/↓ ", Style::default().fg(Color::Yellow)),
-            Span::raw("Multi-select entries"),
+            Span::raw(msg.tui_help_select_range),
         ]),
         Line::from(vec![
             Span::styled("?         ", Style::default().fg(Color::Yellow)),
-            Span::raw(msg.tui_help_help),
+            Span::raw(msg.tui_help_help_key),
         ]),
         Line::from(vec![
             Span::styled("q, Esc    ", Style::default().fg(Color::Yellow)),
@@ -569,24 +573,24 @@ fn draw_help_popup(f: &mut Frame, app: &TuiApp) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "In Edit Mode:",
+            msg.tui_help_edit_mode,
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(vec![
             Span::styled("Tab       ", Style::default().fg(Color::Yellow)),
-            Span::raw("Next field"),
+            Span::raw(msg.tui_help_next_field),
         ]),
         Line::from(vec![
             Span::styled("Shift+Tab ", Style::default().fg(Color::Yellow)),
-            Span::raw("Previous field"),
+            Span::raw(msg.tui_help_prev_field),
         ]),
         Line::from(vec![
             Span::styled("Enter     ", Style::default().fg(Color::Yellow)),
-            Span::raw("Submit (on Submit button)"),
+            Span::raw(msg.tui_help_submit_on_button),
         ]),
         Line::from(vec![
             Span::styled("Esc       ", Style::default().fg(Color::Yellow)),
-            Span::raw("Cancel"),
+            Span::raw(msg.tui_help_cancel),
         ]),
     ];
 
@@ -653,7 +657,7 @@ fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
         )));
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
-            Span::styled("Type: ", Style::default().fg(Color::Cyan)),
+            Span::styled(msg.label_type, Style::default().fg(Color::Cyan)),
             Span::raw(format!("{}", entry.entry_type)),
         ]));
         lines.push(Line::from(vec![
@@ -662,11 +666,11 @@ fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
         ]));
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
-            Span::styled("Name: ", Style::default().fg(Color::Cyan)),
+            Span::styled(msg.label_name, Style::default().fg(Color::Cyan)),
             Span::raw(&entry.name),
         ]));
         lines.push(Line::from(vec![Span::styled(
-            "Value:",
+            msg.label_value,
             Style::default().fg(Color::Cyan),
         )]));
 
@@ -686,7 +690,8 @@ fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
     } else {
         // Multi-select: show summary list
         lines.push(Line::from(Span::styled(
-            format!("Delete {} selected entries?", count),
+            msg.tui_delete_multi_prompt
+                .replace("{}", &count.to_string()),
             Style::default().add_modifier(Modifier::BOLD).fg(Color::Red),
         )));
         lines.push(Line::from(""));
@@ -787,7 +792,7 @@ fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
     let footer_lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            "[y/Enter] Yes  [n/Esc] No  [↑/↓] Scroll",
+            msg.tui_confirm_delete_hint,
             Style::default().fg(Color::Yellow),
         )),
     ];
@@ -803,22 +808,23 @@ fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
 }
 
 /// Draw confirm quit popup (unsaved changes)
-fn draw_confirm_quit_popup(f: &mut Frame, _app: &TuiApp) {
+fn draw_confirm_quit_popup(f: &mut Frame, app: &TuiApp) {
     let area = centered_rect(50, 20, f.size());
 
+    let msg = &app.messages;
     let text = vec![
         Line::from(""),
         Line::from(Span::styled(
-            "You have unsaved changes!",
+            msg.tui_confirm_quit_msg,
             Style::default()
                 .add_modifier(Modifier::BOLD)
                 .fg(Color::Yellow),
         )),
         Line::from(""),
-        Line::from("Save changes before quitting?"),
+        Line::from(msg.tui_confirm_quit_question),
         Line::from(""),
         Line::from(Span::styled(
-            "[y] Save & Quit  [n] Discard & Quit  [Esc] Cancel",
+            msg.tui_confirm_quit_hint,
             Style::default().fg(Color::Cyan),
         )),
     ];
@@ -826,7 +832,7 @@ fn draw_confirm_quit_popup(f: &mut Frame, _app: &TuiApp) {
     let paragraph = Paragraph::new(text)
         .block(
             Block::default()
-                .title(" Unsaved Changes ")
+                .title(msg.tui_confirm_quit_title)
                 .borders(Borders::ALL)
                 .style(Style::default().bg(Color::Black).fg(Color::Yellow)),
         )
@@ -871,7 +877,7 @@ fn draw_format_preview_popup(f: &mut Frame, app: &TuiApp) {
         let paragraph = Paragraph::new(lines)
             .block(
                 Block::default()
-                    .title(" Format Preview ")
+                    .title(app.messages.tui_format_preview_title)
                     .borders(Borders::ALL)
                     .style(Style::default().bg(Color::Black).fg(Color::White)),
             )
@@ -920,14 +926,14 @@ fn draw_validation_error_popup(f: &mut Frame, app: &TuiApp) {
         // Add footer with instructions
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "[y/Enter] Save Anyway  [n/Esc] Cancel  [↑/↓] Scroll",
+            app.messages.tui_validation_error_hint,
             Style::default().fg(Color::Yellow),
         )));
 
         let paragraph = Paragraph::new(lines)
             .block(
                 Block::default()
-                    .title(" Shell Validation Failed ")
+                    .title(app.messages.tui_validation_error_title)
                     .title_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
                     .borders(Borders::ALL)
                     .style(Style::default().bg(Color::Black).fg(Color::Red)),
@@ -943,12 +949,13 @@ fn draw_validation_error_popup(f: &mut Frame, app: &TuiApp) {
 fn draw_type_selection_popup(f: &mut Frame, app: &mut TuiApp) {
     let area = centered_rect(40, 40, f.size());
 
+    let msg = &app.messages;
     let types = [
-        ("1", "Alias", "Shell alias"),
-        ("2", "Function", "Shell function"),
-        ("3", "EnvVar", "Environment variable"),
-        ("4", "Source", "Source statement"),
-        ("5", "Code/Comment", "Raw code or comment"),
+        ("1", "Alias", msg.tui_type_alias_desc),
+        ("2", "Function", msg.tui_type_func_desc),
+        ("3", "EnvVar", msg.tui_type_env_desc),
+        ("4", "Source", msg.tui_type_source_desc),
+        ("5", "Code/Comment", msg.tui_type_code_desc),
     ];
 
     // Calculate available height for type list
@@ -968,7 +975,7 @@ fn draw_type_selection_popup(f: &mut Frame, app: &mut TuiApp) {
     // Build header
     let mut lines = vec![
         Line::from(Span::styled(
-            "Select Entry Type",
+            msg.tui_add_entry_title.trim(),
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
@@ -1020,13 +1027,13 @@ fn draw_type_selection_popup(f: &mut Frame, app: &mut TuiApp) {
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "[Enter] Select  [Esc] Cancel",
+        msg.tui_type_select_hint,
         Style::default().fg(Color::DarkGray),
     )));
 
     let paragraph = Paragraph::new(lines).block(
         Block::default()
-            .title(" Add Entry ")
+            .title(msg.tui_add_entry_title)
             .borders(Borders::ALL)
             .style(Style::default().bg(Color::Black)),
     );
@@ -1044,10 +1051,11 @@ fn draw_edit_popup(f: &mut Frame, app: &mut TuiApp) {
 
     let area = centered_rect(70, 60, f.size());
 
+    let msg = &app.messages;
     let title = if state.is_new {
-        " Add Entry "
+        msg.tui_add_entry_title
     } else {
-        " Edit Entry "
+        msg.tui_edit_value_title
     };
 
     // Check if we should skip the Name field for Source/Code/Comment
@@ -1110,7 +1118,7 @@ fn draw_edit_popup(f: &mut Frame, app: &mut TuiApp) {
     // Build content lines (Type, Name, Value header)
     let mut lines = vec![
         Line::from(vec![
-            Span::styled("Type: ", label_style),
+            Span::styled(msg.label_type, label_style),
             Span::raw(format!("{}", state.entry_type)),
         ]),
         Line::from(""),
@@ -1118,7 +1126,7 @@ fn draw_edit_popup(f: &mut Frame, app: &mut TuiApp) {
 
     // Only show Name field for types that need it (Alias, Function, EnvVar)
     if !skip_name {
-        lines.push(Line::from(vec![Span::styled("Name: ", label_style)]));
+        lines.push(Line::from(vec![Span::styled(msg.label_name, label_style)]));
         lines.push(Line::from(vec![
             Span::styled(
                 if state.field == EditField::Name {
@@ -1141,7 +1149,7 @@ fn draw_edit_popup(f: &mut Frame, app: &mut TuiApp) {
     let value_label = if state.entry_type == EntryType::Source {
         "Value: (single-line, Enter to submit)"
     } else {
-        "Value:"
+        msg.label_value
     };
     lines.push(Line::from(vec![Span::styled(value_label, label_style)]));
 
@@ -1244,16 +1252,16 @@ fn draw_edit_popup(f: &mut Frame, app: &mut TuiApp) {
 
     // Draw fixed footer with Submit button and hints
     let submit_text = if state.field == EditField::Submit {
-        "[ ▸ Submit ◂ ]"
+        msg.tui_submit_button_focused
     } else {
-        "[   Submit   ]"
+        msg.tui_submit_button
     };
 
     // Different hint for Source type
     let hint_text = if state.entry_type == EntryType::Source {
-        "[Tab] Next  [Enter] Submit  [Esc] Cancel"
+        msg.tui_edit_hint_source
     } else {
-        "[Tab] Next  [↑/↓] Navigate  [Enter] Submit/Newline  [Esc] Cancel"
+        msg.tui_edit_hint
     };
 
     let footer_lines = vec![

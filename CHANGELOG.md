@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **I18n: External Language File Support**: Support loading translations from `~/.config/wenv/i18n/{lang}.toml` (2026-01-24)
+  - Binary only embeds English (reduces size, keeps fallback)
+  - Set `language = "zh-TW"` in config to load external zh-TW.toml
+  - Falls back to English if external file missing or invalid
+  - Community can provide translations without recompiling
+  - Add `language` field to `UiConfig` (defaults to "en")
+
+### Added
+- **I18n: Traditional Chinese Translation**: Add complete zh-TW translation file with all 230+ message keys (2026-01-23)
+  - Full UI localization including format preview and toggle comment messages
+  - File location: `~/.config/wenv/i18n/zh-TW.toml` or `assets/i18n/zh-TW.toml`
+- **I18n: Format Preview \u0026 Toggle Comment Messages**: Add i18n support for format preview and toggle comment UI messages (2026-01-23)
+  - Format preview sorting messages (aliases, functions, environment variables, sources)
+  - Grouping entries message
+  - "No changes needed" message
+  - Toggle comment status messages (single/multiple entries)
+- **CLI: Config File Editor**: Add `-c/--config` flag to open wenv config file in $EDITOR (2026-01-23)
+  - Uses $EDITOR environment variable (defaults to vi/notepad)
+  - Quick access to edit language, format, and backup settings
+- **I18n: TOML Language Files**: Refactor i18n from hardcoded Rust to TOML-based language files (2026-01-23)
+  - English messages embedded in binary as fallback (`assets/i18n/en.toml`)
+  - External language files loaded from `~/.config/wenv/i18n/{lang}.toml`
+  - Supports dynamic loading without recompilation
+  - **TUI fully localized**: All UI elements now use i18n
+    - Status bars for all modes (Normal, Searching, Editing, Moving, etc.)
+    - All popups (Search, Detail, Help, Confirm, Type Selection, Edit)
+    - Dynamic status messages (Selection cleared, Moving entries, etc.)
+    - Help popup with complete keyboard shortcuts
+    - Over 60+ new message keys added for comprehensive coverage
+  - Sample Chinese (zh-TW) translation included
+  - Note: CLI command output messages still use hardcoded English
+- **I18n: Popup Translations & Key Consolidation** (2026-01-23)
+  - 彈窗翻譯改善：Add Entry、編輯值、條目詳情的快捷鍵提示完整中文化
+  - 新增多個 i18n 鍵值支援彈窗元素國際化
+  - 合併重複的 i18n 鍵值：
+    - `tui_detail_type/name/value` + `tui_edit_field_type/name/value` → `label_type/name/value`
+    - `tui_entry_added` + `tui_msg_entry_added` → `msg_entry_added`
+    - `file_formatted` + `tui_file_formatted` → `msg_file_formatted`
+
+### Fixed
+- **I18n: TOML Duplicate Keys**: Fix TOML parsing errors caused by duplicate keys (2026-01-23)
+  - Removed duplicate help field definitions from TOML files
+  - Cleaned up old "TUI help text" section that conflicted with new detailed shortcuts
+  - Synchronized Messages/MessagesToml structs with actual TOML file contents
+  - Updated ui.rs to use correct new field names (tui_help_format_file, tui_help_help_key)
+- **Language Config**: Add `cht`/`chs` as recognized language abbreviations (2026-01-23)
+  - `cht` now maps to Traditional Chinese (zh-TW)
+  - `chs` now maps to Simplified Chinese (zh-CN)
+- **Format Order Config**: Fix `format.order.types` config being ignored (2026-01-23)
+  - Format command now respects configured type order (e.g., `["env", "alias", "func", "source"]`)
+  - Previously used file's original order of first occurrence instead of config
+
 ## [0.7.2] - 2026-01-23
 
 ### Changed

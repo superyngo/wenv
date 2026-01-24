@@ -1,0 +1,229 @@
+# === General ===
+no_entries_found = "No entries found."
+total_entries = "Total: {} entries"
+entry_not_found = "Entry not found: {} '{}'"
+entry_added = "Added {} '{}' = '{}'"
+entry_removed = "Removed {} '{}'"
+entry_updated = "Updated {} '{}'"
+skipped = "Skipped."
+cancelled = "Cancelled."
+
+# === Headers ===
+header_type = "TYPE"
+header_name = "NAME"
+header_value = "VALUE"
+header_line_num = "LINE"
+header_line = "Line:"
+header_lines = "Lines:"
+header_comment = "Comment:"
+header_raw = "Raw:"
+
+# === Check Command ===
+no_issues_found = "No issues found!"
+parse_warnings = "Parse Warnings:"
+issues_found = "Issues Found:"
+checked_entries = "Checked {} entries"
+found_errors_warnings = "Found {} error(s), {} warning(s), {} parse warning(s)"
+found_warnings = "Found {} warning(s), {} parse warning(s)"
+
+# === Add/Remove/Edit ===
+already_exists_skip = "{} '{}' already exists, skipping"
+already_exists_value = "{} '{}' already exists with value: {}"
+overwrite_prompt = "Overwrite?"
+remove_prompt = "Remove this entry?"
+invalid_alias_format = "Invalid alias format. Use: NAME=VALUE"
+invalid_env_format = "Invalid env format. Use: NAME=VALUE"
+
+# === Backup ===
+backup_created = "Backup created: {}"
+backup_restored = "Backup restored from: {}"
+no_backups_found = "No backups found."
+backup_list_header = "Available backups:"
+
+# === Format ===
+msg_file_formatted = "File formatted successfully"
+
+# === Import/Export ===
+imported_entries = "Imported {} entries"
+exported_entries = "Exported {} entries to {}"
+
+# === Reload Hint ===
+reload_hint = "Run '{}' to apply changes"
+
+# === TUI ===
+tui_title = "wenv - {}"
+tui_entries = " Entries ({}) "
+tui_help_title = " Help "
+tui_confirm_delete_title = " Confirm Delete "
+tui_delete_prompt = "Delete this entry?"
+tui_yes_no = "[Y]es / [N]o"
+tui_add_entry_title = " Add New Entry "
+tui_edit_name_title = " Edit Name "
+tui_edit_value_title = " Edit Value "
+tui_input_title = " Input "
+tui_enter_submit_esc_cancel = "[Enter] Submit  [Esc] Cancel"
+tui_entry_details_title = " Entry Details "
+
+# TUI prompts
+tui_enter_entry_type = "Enter entry type (alias/func/env/source):"
+tui_enter_name = "Enter name:"
+tui_enter_value = "Enter value:"
+tui_invalid_type = "Invalid type. Try: alias/func/env/source"
+tui_name_value_empty = "Name and value cannot be empty"
+tui_edit_name_for = "Edit name: {}"
+tui_edit_value_for = "Edit value for: {}"
+
+# TUI messages
+tui_entry_deleted = "Entry deleted (not saved yet)"
+msg_entry_added = "Entry added successfully"
+tui_name_updated = "Name updated successfully"
+tui_value_updated = "Value updated successfully"
+tui_no_issues = "No issues found"
+tui_found_issues = "Found {} issue(s)"
+
+# TUI status bar
+tui_status_normal = "[↑/↓]Navigate [Shift+↑/↓]Select [i]Info [a]Add [e]Edit [m]Move [d]Del [t]Toggle [s]Save [?]Help [q]Quit"
+tui_status_detail = "[Enter/i/q/Esc]Close"
+tui_status_help = "[q/Esc]Close"
+tui_status_confirm_delete = "[y]Yes [n]No [Esc]Cancel"
+tui_status_input = "[Enter]Submit [Esc]Cancel [Backspace]Delete"
+tui_status_exiting = "Exiting..."
+
+# TUI new status messages (Phase 3)
+tui_status_searching = "[Type]Search [Enter]Confirm [Esc]Exit [PgUp/PgDn]Jump"
+tui_status_detail_extended = "[↑/↓/Scroll/PgUp/PgDn]Scroll [e]Edit [Esc]Close"
+tui_status_confirm_delete_extended = "[↑/↓/PgUp/PgDn]Scroll [y/Enter]Yes [n/Esc]No"
+tui_status_confirm_quit = "[y]Save & Quit [n]Discard [Esc]Cancel"
+tui_status_confirm_format = "[y/Enter]Apply [n/Esc]Cancel [↑↓]Scroll"
+tui_status_confirm_save_errors = "[y/Enter]Save Anyway [n/Esc]Cancel [↑↓]Scroll"
+tui_status_selecting_type = "[↑/↓]Select [Enter]Confirm [Esc]Cancel"
+tui_status_editing = "[Tab]Next [↑/↓/Scroll/PgUp/PgDn]Navigate [Enter]Submit/Newline [Esc]Cancel"
+tui_status_moving = "[↑/↓/Scroll]Move [Enter]Confirm [Esc]Cancel"
+
+# TUI search popup
+tui_search_title = " Search Entries "
+tui_search_query = "Query:"
+tui_search_matches = "({} matches)"
+tui_search_no_matches = "(no matches)"
+tui_search_hint = "[Enter] Confirm  [Esc] Exit  [PgUp/PgDn] Jump"
+
+# TUI detail/edit labels (shared)
+label_type = "Type:"
+label_name = "Name:"
+label_value = "Value:"
+tui_detail_hint = "[e] Edit  [↑/↓] Scroll  [Esc] Close"
+
+# TUI help popup
+tui_help_keyboard_shortcuts = "Keyboard Shortcuts"
+tui_help_section_navigation = "Navigation"
+tui_help_section_editing = "Editing"
+tui_help_section_other = "Other"
+
+# TUI confirm/edit popup
+tui_confirm_quit_title = " Unsaved Changes "
+tui_confirm_quit_msg = "You have unsaved changes!"
+tui_confirm_quit_question = "Save changes before quitting?"
+tui_type_alias_desc = "Shell alias"
+tui_type_func_desc = "Shell function"
+tui_type_env_desc = "Environment variable"
+tui_type_source_desc = "Source file"
+tui_type_code_desc = "Code block"
+tui_type_comment_desc = "Comment block"
+tui_edit_submit = "Submit"
+
+# TUI dynamic messages
+tui_msg_selection_cleared = "Selection cleared"
+tui_msg_use_arrows_to_move = "Use ↑/↓ to move, Enter to confirm, Esc to cancel"
+tui_msg_moving_entries = "Moving {} entries - Use ↑/↓, Enter to confirm, Esc to cancel"
+tui_msg_move_cancelled = "Move cancelled (selection kept - press Esc again to clear)"
+tui_msg_moved_entries = "Moved {} entries"
+tui_msg_entries_deleted = "{} entry(s) deleted"
+tui_msg_format_cancelled_validation = "Format cancelled due to validation errors"
+tui_msg_save_cancelled_validation = "Save cancelled due to validation errors"
+tui_msg_review_changes = "Review changes and press [y] to confirm or [n] to cancel"
+tui_msg_validation_failed = "Shell validation failed after formatting. Review errors and confirm to apply anyway."
+tui_msg_format_cancelled = "Format cancelled"
+tui_msg_format_bypassed = "File formatted successfully (validation bypassed)"
+tui_msg_select_entry_type = "Select entry type:"
+tui_msg_failed_consolidate = "Failed to consolidate entries: {}"
+tui_msg_name_empty = "Name cannot be empty"
+tui_msg_source_path_empty = "Source path cannot be empty"
+tui_msg_invalid_path_format = "Invalid file path format"
+tui_msg_alias_value_empty = "Alias value cannot be empty"
+tui_msg_formatter_empty = "Formatter returned empty content"
+tui_msg_entry_updated = "Entry updated successfully"
+tui_msg_file_saved = "File saved"
+tui_msg_file_saved_bypassed = "File saved (validation bypassed)"
+tui_msg_undo_successful = "Undo successful"
+tui_msg_nothing_to_undo = "Nothing to undo"
+tui_msg_redo_successful = "Redo successful"
+tui_msg_nothing_to_redo = "Nothing to redo"
+tui_msg_temp_file_reloaded = "Temp file reloaded after editing"
+tui_msg_no_changes_detected = "No changes detected"
+tui_msg_editor_error = "Editor exited with error"
+tui_msg_entries_selected = "{} entries selected"
+tui_msg_entry_selected = "{} entry selected"
+tui_msg_no_entry_to_copy = "No entry selected to copy"
+tui_msg_entries_copied = "{} entries copied"
+tui_msg_entry_copied = "{} entry copied"
+tui_msg_entry_pasted = "Entry pasted"
+tui_msg_clipboard_empty = "Clipboard is empty"
+
+# TUI help shortcuts
+tui_help_nav_updown = "Navigate entries"
+tui_help_nav_scroll = "Mouse scroll up/down"
+tui_help_nav_home_end = "Jump to first/last"
+tui_help_nav_pgup_pgdn = "Page up/down"
+tui_help_search = "Search entries (Name and Value)"
+tui_help_info_detail = "Show entry details"
+tui_help_add = "Add new entry"
+tui_help_edit_entry = "Edit entry"
+tui_help_move = "Move entry up/down"
+tui_help_delete = "Delete entry"
+tui_help_toggle_select = "Toggle comment (comment/uncomment)"
+tui_help_select_range = "Multi-select entries"
+tui_help_check = "Check for issues"
+tui_help_format_file = "Format file"
+tui_help_save = "Save to file"
+tui_help_undo = "Undo last change"
+tui_help_redo = "Redo last change"
+tui_help_copy = "Copy entries"
+tui_help_paste = "Paste entries"
+tui_help_help_key = "Show this help"
+tui_help_quit = "Quit (or clear selection)"
+
+# TUI edit hints
+tui_hint_tab_next = "[Tab] Next"
+tui_hint_arrows_navigate = "[↑/↓] Navigate"
+tui_hint_enter_submit = "[Enter] Submit/Newline"
+tui_hint_esc_cancel = "[Esc] Cancel"
+
+# TUI additional popup elements
+tui_edit_hint = "[Tab] Next  [↑/↓] Navigate  [Enter] Submit/Newline  [Esc] Cancel"
+tui_edit_hint_source = "[Tab] Next  [Enter] Submit  [Esc] Cancel"
+tui_type_select_hint = "[Enter] Select  [Esc] Cancel"
+tui_confirm_delete_hint = "[y/Enter] Yes  [n/Esc] No  [↑/↓] Scroll"
+tui_confirm_quit_hint = "[y] Save & Quit  [n] Discard & Quit  [Esc] Cancel"
+tui_format_preview_title = " Format Preview "
+tui_validation_error_title = " Shell Validation Failed "
+tui_validation_error_hint = "[y/Enter] Save Anyway  [n/Esc] Cancel  [↑/↓] Scroll"
+tui_submit_button = "[   Submit   ]"
+tui_submit_button_focused = "[ ▸ Submit ◂ ]"
+tui_help_edit_mode = "In Edit Mode:"
+tui_help_next_field = "Next field"
+tui_help_prev_field = "Previous field"
+tui_help_submit_on_button = "Submit (on Submit button)"
+tui_help_cancel = "Cancel"
+tui_delete_multi_prompt = "Delete {} selected entries?"
+
+# TUI format preview messages
+tui_fmt_sorting_aliases = "✓ Sorting {} aliases alphabetically"
+tui_fmt_sorting_functions = "✓ Sorting {} functions alphabetically"
+tui_fmt_sorting_envvars = "✓ Sorting {} environment variables by dependency"
+tui_fmt_sorting_sources = "✓ Sorting {} source statements alphabetically"
+tui_fmt_grouping_entries = "✓ Grouping entries by type at first occurrence"
+tui_fmt_no_changes_needed = "No changes needed - file is already formatted."
+
+# TUI toggle comment messages
+tui_msg_entry_toggled = "Entry toggled"
+tui_msg_entries_toggled = "{} entries toggled"

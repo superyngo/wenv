@@ -72,12 +72,14 @@ impl Formatter for PowerShellFormatter {
                 }
             }
         } else {
+            // Group entries by type (for format command with grouping enabled)
+            // Strategy: Output types in configured order, keep Comment/Code in original positions
+
             // Find comments attached to entries
             let attached_comments = find_attached_comments(entries);
 
+            // Group parseable entries by type
             let mut grouped: std::collections::HashMap<EntryType, Vec<&Entry>> =
-                std::collections::HashMap::new();
-            let mut type_first_line: std::collections::HashMap<EntryType, usize> =
                 std::collections::HashMap::new();
 
             for entry in entries {
@@ -87,20 +89,12 @@ impl Formatter for PowerShellFormatter {
                     | EntryType::Source
                     | EntryType::Function => {
                         grouped.entry(entry.entry_type).or_default().push(entry);
-                        let line = entry.line_number.unwrap_or(0);
-                        type_first_line
-                            .entry(entry.entry_type)
-                            .and_modify(|min_line| {
-                                if line < *min_line {
-                                    *min_line = line;
-                                }
-                            })
-                            .or_insert(line);
                     }
                     _ => {}
                 }
             }
 
+            // Sort grouped entries
             for (entry_type, type_entries) in grouped.iter_mut() {
                 if config.format.sort_alphabetically {
                     if *entry_type == EntryType::EnvVar {
@@ -118,66 +112,116 @@ impl Formatter for PowerShellFormatter {
                 }
             }
 
-            let mut sorted_entries: Vec<_> = entries.iter().collect();
-            sorted_entries.sort_by_key(|e| e.line_number.unwrap_or(0));
+            // Build type order from config
+            let type_order: Vec<EntryType> = config
+                .format
+                .order
+                .types
+                .iter()
+                .filter_map(|s| s.parse::<EntryType>().ok())
+                .collect();
 
-            let mut output_types: std::collections::HashSet<EntryType> =
-                std::collections::HashSet::new();
+            // Collect Comment/Code entries for output in original order
+            let mut code_comments: Vec<&Entry> = entries
+                .iter()
+                .filter(|e| e.entry_type == EntryType::Code || e.entry_type == EntryType::Comment)
+                .filter(|e| {
+                    // Skip comments attached to other entries
+                    if e.entry_type == EntryType::Comment {
+                        let entry_line = e.line_number.unwrap_or(0);
+                        !attached_comments.values().any(|comments| {
+                            comments.iter().any(|c| c.line_number == Some(entry_line))
+                        })
+                    } else {
+                        true
+                    }
+                })
+                .collect();
+            code_comments.sort_by_key(|e| e.line_number.unwrap_or(0));
 
-            for entry in sorted_entries {
-                match entry.entry_type {
-                    EntryType::Code | EntryType::Comment => {
-                        // Skip comments that are attached to other entries (they'll be output with those entries)
-                        if entry.entry_type == EntryType::Comment {
-                            let entry_line = entry.line_number.unwrap_or(0);
-                            let is_attached = attached_comments.values().any(|comments| {
-                                comments.iter().any(|c| c.line_number == Some(entry_line))
-                            });
-                            if is_attached {
-                                continue;
-                            }
-                        }
+            // Output Code/Comment entries that appear before any structured entries
+            let first_structured_line = entries
+                .iter()
+                .filter(|e| {
+                    matches!(
+                        e.entry_type,
+                        EntryType::Alias
+                            | EntryType::EnvVar
+                            | EntryType::Source
+                            | EntryType::Function
+                    )
+                })
+                .filter_map(|e| e.line_number)
+                .min()
+                .unwrap_or(usize::MAX);
 
-                        if entry.entry_type == EntryType::Code && entry.value.is_empty() {
-                            if let (Some(start), Some(end)) = (entry.line_number, entry.end_line) {
-                                for _ in 0..(end - start + 1) {
-                                    output.push('\n');
-                                }
-                            } else {
+            for entry in &code_comments {
+                let line = entry.line_number.unwrap_or(0);
+                if line < first_structured_line {
+                    if entry.entry_type == EntryType::Code && entry.value.is_empty() {
+                        if let (Some(start), Some(end)) = (entry.line_number, entry.end_line) {
+                            for _ in 0..(end - start + 1) {
                                 output.push('\n');
                             }
                         } else {
-                            output.push_str(&self.format_entry(entry));
                             output.push('\n');
                         }
+                    } else {
+                        output.push_str(&self.format_entry(entry));
+                        output.push('\n');
                     }
-                    entry_type @ (EntryType::Alias
-                    | EntryType::EnvVar
-                    | EntryType::Source
-                    | EntryType::Function) => {
-                        let current_line = entry.line_number.unwrap_or(0);
-                        let first_line = type_first_line.get(&entry_type).copied().unwrap_or(0);
+                }
+            }
 
-                        if current_line == first_line && !output_types.contains(&entry_type) {
-                            output_types.insert(entry_type);
+            // Output structured entries by configured type order
+            let blank_lines = config.format.blank_lines_between_groups;
+            let mut first_group = true;
 
-                            if let Some(type_entries) = grouped.get(&entry_type) {
-                                for grouped_entry in type_entries {
-                                    // Output attached comments before the entry
-                                    if let Some(comments) = attached_comments
-                                        .get(&grouped_entry.line_number.unwrap_or(0))
-                                    {
-                                        for comment in comments {
-                                            output.push_str(&self.format_entry(comment));
-                                            output.push('\n');
-                                        }
-                                    }
+            for entry_type in &type_order {
+                if let Some(type_entries) = grouped.get(entry_type) {
+                    if !type_entries.is_empty() {
+                        // Add blank lines between groups
+                        if !first_group {
+                            for _ in 0..blank_lines {
+                                output.push('\n');
+                            }
+                        }
+                        first_group = false;
 
-                                    output.push_str(&self.format_entry(grouped_entry));
+                        for grouped_entry in type_entries {
+                            // Output attached comments before the entry
+                            if let Some(comments) =
+                                attached_comments.get(&grouped_entry.line_number.unwrap_or(0))
+                            {
+                                for comment in comments {
+                                    output.push_str(&self.format_entry(comment));
                                     output.push('\n');
                                 }
                             }
+
+                            output.push_str(&self.format_entry(grouped_entry));
+                            output.push('\n');
                         }
+                    }
+                }
+            }
+
+            // Output remaining Code/Comment entries (those not before first structured entry)
+            // These are output after all structured entries have been grouped
+            for entry in &code_comments {
+                let line = entry.line_number.unwrap_or(0);
+                if line >= first_structured_line {
+                    if entry.entry_type == EntryType::Code && entry.value.is_empty() {
+                        if let (Some(start), Some(end)) = (entry.line_number, entry.end_line) {
+                            for _ in 0..(end - start + 1) {
+                                output.push('\n');
+                            }
+                        } else {
+                            output.push('\n');
+                        }
+                    } else {
+                        output.push_str(&self.format_entry(entry));
+                        output.push('\n');
                     }
                 }
             }

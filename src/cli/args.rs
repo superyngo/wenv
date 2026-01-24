@@ -16,19 +16,19 @@ pub struct Cli {
     #[arg(short, long)]
     pub shell: Option<ShellArg>,
 
-    /// Conflict handling strategy (for import)
-    #[arg(long, default_value = "ask")]
-    pub on_conflict: ConflictStrategy,
-
     /// Import entries from file or URL
     #[arg(short, long, value_name = "SOURCE", group = "action")]
     pub import: Option<String>,
+
+    /// Conflict handling strategy (for import)
+    #[arg(long, default_value = "ask")]
+    pub on_conflict: ConflictStrategy,
 
     /// Export entries to file
     #[arg(short, long, value_name = "OUTPUT", group = "action")]
     pub export: Option<PathBuf>,
 
-    /// Open source file in $EDITOR
+    /// Open source file in $EDITOR (same as "wenv .")
     #[arg(long, group = "action")]
     pub source: bool,
 
@@ -39,6 +39,10 @@ pub struct Cli {
     /// Clear cached shell paths
     #[arg(long, group = "action")]
     pub clear_cache: bool,
+
+    /// Open wenv config file in $EDITOR
+    #[arg(short = 'c', long, group = "action")]
+    pub config: bool,
 
     /// Filter by entry type (for export)
     #[arg(short, long)]

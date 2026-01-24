@@ -461,7 +461,7 @@ impl TuiApp {
                 } else if self.non_contiguous_mode || !self.selected_indices.is_empty() {
                     // Exit selection mode and clear all selections
                     self.clear_selection();
-                    self.message = Some("Selection cleared".to_string());
+                    self.message = Some(self.messages.tui_msg_selection_cleared.to_string());
                 } else {
                     // When not in selection mode, behave same as 'q'
                     if self.dirty {
@@ -725,10 +725,15 @@ impl TuiApp {
                 if self.format_preview.is_some() {
                     // Return to format preview mode
                     self.mode = AppMode::ConfirmFormat;
-                    self.message = Some("Format cancelled due to validation errors".to_string());
+                    self.message = Some(
+                        self.messages
+                            .tui_msg_format_cancelled_validation
+                            .to_string(),
+                    );
                 } else {
                     self.mode = AppMode::Normal;
-                    self.message = Some("Save cancelled due to validation errors".to_string());
+                    self.message =
+                        Some(self.messages.tui_msg_save_cancelled_validation.to_string());
                 }
             }
             // Scroll through error message
@@ -1238,8 +1243,7 @@ impl TuiApp {
                 }
 
                 self.mode = AppMode::Normal;
-                self.message =
-                    Some("Move cancelled (selection kept - press Esc again to clear)".to_string());
+                self.message = Some(self.messages.tui_msg_move_cancelled.to_string());
             }
             _ => {}
         }
@@ -1372,7 +1376,11 @@ impl TuiApp {
         self.pre_move_selection_anchor = None;
 
         self.clear_selection();
-        self.message = Some(format!("Moved {} entries", indices.len()));
+        self.message = Some(
+            self.messages
+                .tui_msg_moved_entries
+                .replace("{}", &indices.len().to_string()),
+        );
 
         Ok(())
     }
@@ -1524,7 +1532,11 @@ impl TuiApp {
         // Clear selection
         self.clear_selection();
 
-        self.message = Some(format!("{} entry(s) deleted", count));
+        self.message = Some(
+            self.messages
+                .tui_msg_entries_deleted
+                .replace("{}", &count.to_string()),
+        );
 
         Ok(())
     }
@@ -1642,38 +1654,48 @@ impl TuiApp {
 
         if config.format.sort_alphabetically {
             if alias_count > 0 {
-                summary.push(format!("✓ Sorting {} aliases alphabetically", alias_count));
+                summary.push(
+                    self.messages
+                        .tui_fmt_sorting_aliases
+                        .replace("{}", &alias_count.to_string()),
+                );
             }
             if func_count > 0 {
-                summary.push(format!("✓ Sorting {} functions alphabetically", func_count));
+                summary.push(
+                    self.messages
+                        .tui_fmt_sorting_functions
+                        .replace("{}", &func_count.to_string()),
+                );
             }
             if env_count > 0 {
-                summary.push(format!(
-                    "✓ Sorting {} environment variables by dependency",
-                    env_count
-                ));
+                summary.push(
+                    self.messages
+                        .tui_fmt_sorting_envvars
+                        .replace("{}", &env_count.to_string()),
+                );
             }
             if source_count > 0 {
-                summary.push(format!(
-                    "✓ Sorting {} source statements alphabetically",
-                    source_count
-                ));
+                summary.push(
+                    self.messages
+                        .tui_fmt_sorting_sources
+                        .replace("{}", &source_count.to_string()),
+                );
             }
         }
 
         if config.format.group_by_type {
             summary.push(String::new());
-            summary.push("✓ Grouping entries by type at first occurrence".to_string());
+            summary.push(self.messages.tui_fmt_grouping_entries.to_string());
         }
 
         if summary.is_empty() {
-            summary.push("No changes needed - file is already formatted.".to_string());
+            summary.push(self.messages.tui_fmt_no_changes_needed.to_string());
         }
 
         // Create preview and switch to ConfirmFormat mode
         self.format_preview = Some(FormatPreview::new(summary, formatted));
         self.mode = AppMode::ConfirmFormat;
-        self.message = Some("Review changes and press [y] to confirm or [n] to cancel".to_string());
+        self.message = Some(self.messages.tui_msg_review_changes.to_string());
 
         Ok(())
     }
@@ -1693,7 +1715,7 @@ impl TuiApp {
                     self.validation_errors = Some(error_msg);
                     self.validation_scroll_offset = 0;
                     self.mode = AppMode::ConfirmSaveWithErrors;
-                    self.message = Some("Shell validation failed after formatting. Review errors and confirm to apply anyway.".to_string());
+                    self.message = Some(self.messages.tui_msg_validation_failed.to_string());
                     // Restore preview for potential retry
                     self.format_preview = Some(preview);
                     return Ok(());
@@ -1723,7 +1745,7 @@ impl TuiApp {
     fn cancel_format(&mut self) {
         self.format_preview = None;
         self.mode = AppMode::Normal;
-        self.message = Some("Format cancelled".to_string());
+        self.message = Some(self.messages.tui_msg_format_cancelled.to_string());
     }
 
     /// Force apply format without validation (after user confirmation)
@@ -1741,7 +1763,7 @@ impl TuiApp {
             // Refresh entries
             self.refresh()?;
             self.mode = AppMode::Normal;
-            self.message = Some("File formatted successfully (validation bypassed)".to_string());
+            self.message = Some(self.messages.tui_msg_format_bypassed.to_string());
         }
 
         Ok(())
@@ -1752,7 +1774,7 @@ impl TuiApp {
         self.mode = AppMode::SelectingType;
         self.type_selection_index = 0;
         self.type_list_scroll_offset = 0;
-        self.message = Some("Select entry type:".to_string());
+        self.message = Some(self.messages.tui_msg_select_entry_type.to_string());
     }
 
     /// Start editing the selected entry
@@ -1821,7 +1843,11 @@ impl TuiApp {
             if indices.len() > 1 {
                 // Consolidate selected entries
                 if let Err(e) = self.consolidate_selected_entries(&indices) {
-                    self.message = Some(format!("Failed to consolidate entries: {}", e));
+                    self.message = Some(
+                        self.messages
+                            .tui_msg_failed_consolidate
+                            .replace("{}", &e.to_string()),
+                    );
                     return;
                 }
             }
@@ -1830,12 +1856,13 @@ impl TuiApp {
 
             let count = self.get_selected_indices_sorted().len();
             if count == 1 {
-                self.message = Some("Use ↑/↓ to move, Enter to confirm, Esc to cancel".to_string());
+                self.message = Some(self.messages.tui_msg_use_arrows_to_move.to_string());
             } else {
-                self.message = Some(format!(
-                    "Moving {} entries - Use ↑/↓, Enter to confirm, Esc to cancel",
-                    count
-                ));
+                self.message = Some(
+                    self.messages
+                        .tui_msg_moving_entries
+                        .replace("{}", &count.to_string()),
+                );
             }
         }
     }
@@ -1951,7 +1978,7 @@ impl TuiApp {
         // Validate name for types that need it
         if !skip_name_validation && state.name_buffer.trim().is_empty() {
             self.edit_state = Some(state);
-            self.message = Some("Name cannot be empty".to_string());
+            self.message = Some(self.messages.tui_msg_name_empty.to_string());
             return Ok(());
         }
 
@@ -1960,12 +1987,12 @@ impl TuiApp {
             let path = state.value_buffer.trim();
             if path.is_empty() {
                 self.edit_state = Some(state);
-                self.message = Some("Source path cannot be empty".to_string());
+                self.message = Some(self.messages.tui_msg_source_path_empty.to_string());
                 return Ok(());
             }
             if !is_valid_path_format(path) {
                 self.edit_state = Some(state);
-                self.message = Some("Invalid file path format".to_string());
+                self.message = Some(self.messages.tui_msg_invalid_path_format.to_string());
                 return Ok(());
             }
         }
@@ -1976,7 +2003,7 @@ impl TuiApp {
             && state.value_buffer.trim().is_empty()
         {
             self.edit_state = Some(state);
-            self.message = Some("Alias value cannot be empty".to_string());
+            self.message = Some(self.messages.tui_msg_alias_value_empty.to_string());
             return Ok(());
         }
 
@@ -2027,7 +2054,7 @@ impl TuiApp {
 
             // Select the newly inserted entry
             self.select_entry_at_line(insert_line);
-            self.message = Some("Entry added successfully".to_string());
+            self.message = Some(self.messages.msg_entry_added.to_string());
         } else {
             // Update existing entry - replace lines in range
             if let Some(entry) = self.entries.get(self.selected_index) {
@@ -2056,7 +2083,7 @@ impl TuiApp {
                     // Safety check: ensure formatter didn't return completely empty content
                     if new_text.trim().is_empty() {
                         self.edit_state = Some(state);
-                        self.message = Some("Formatter returned empty content".to_string());
+                        self.message = Some(self.messages.tui_msg_formatter_empty.to_string());
                         self.mode = AppMode::Normal;
                         return Ok(());
                     }
@@ -2086,7 +2113,7 @@ impl TuiApp {
                 // Re-select the entry
                 self.select_entry_at_line(entry_line);
             }
-            self.message = Some("Entry updated successfully".to_string());
+            self.message = Some(self.messages.tui_msg_entry_updated.to_string());
         }
 
         self.mode = AppMode::Normal;
@@ -2182,7 +2209,7 @@ impl TuiApp {
         self.cleanup_temp_file();
         self.dirty = false;
 
-        self.message = Some("File saved".to_string());
+        self.message = Some(self.messages.tui_msg_file_saved.to_string());
         Ok(())
     }
 
@@ -2236,9 +2263,9 @@ impl TuiApp {
             self.dirty = true;
             self.reload_from_temp()?;
 
-            self.message = Some("Undo successful".to_string());
+            self.message = Some(self.messages.tui_msg_undo_successful.to_string());
         } else {
-            self.message = Some("Nothing to undo".to_string());
+            self.message = Some(self.messages.tui_msg_nothing_to_undo.to_string());
         }
         Ok(())
     }
@@ -2255,9 +2282,9 @@ impl TuiApp {
             self.dirty = true;
             self.reload_from_temp()?;
 
-            self.message = Some("Redo successful".to_string());
+            self.message = Some(self.messages.tui_msg_redo_successful.to_string());
         } else {
-            self.message = Some("Nothing to redo".to_string());
+            self.message = Some(self.messages.tui_msg_nothing_to_redo.to_string());
         }
         Ok(())
     }
@@ -2508,12 +2535,12 @@ impl TuiApp {
                 // Reload temp file to reflect manual edits
                 self.reload_from_temp()?;
                 self.dirty = true;
-                self.message = Some("Temp file reloaded after editing".to_string());
+                self.message = Some(self.messages.tui_msg_temp_file_reloaded.to_string());
             } else {
-                self.message = Some("No changes detected".to_string());
+                self.message = Some(self.messages.tui_msg_no_changes_detected.to_string());
             }
         } else {
-            self.message = Some("Editor exited with error".to_string());
+            self.message = Some(self.messages.tui_msg_editor_error.to_string());
         }
 
         Ok(())
@@ -2564,9 +2591,11 @@ impl TuiApp {
 
         self.clear_selection();
         self.message = Some(if count > 1 {
-            format!("{} entries toggled", count)
+            self.messages
+                .tui_msg_entries_toggled
+                .replace("{}", &count.to_string())
         } else {
-            "Entry toggled".to_string()
+            self.messages.tui_msg_entry_toggled.to_string()
         });
 
         Ok(())
@@ -2580,7 +2609,7 @@ impl TuiApp {
 
         let indices = self.get_selected_indices();
         if indices.is_empty() {
-            self.message = Some("No entry selected to copy".to_string());
+            self.message = Some(self.messages.tui_msg_no_entry_to_copy.to_string());
             return Ok(());
         }
 
@@ -2636,7 +2665,7 @@ impl TuiApp {
 
                 self.write_temp_with_undo(&new_content)?;
                 self.reload_from_temp()?;
-                self.message = Some("Entry pasted".to_string());
+                self.message = Some(self.messages.tui_msg_entry_pasted.to_string());
             } else {
                 // Paste after current entry
                 let current_entry = self
@@ -2664,10 +2693,10 @@ impl TuiApp {
                 self.write_temp_with_undo(&new_content)?;
                 self.reload_from_temp()?;
 
-                self.message = Some("Entry pasted".to_string());
+                self.message = Some(self.messages.tui_msg_entry_pasted.to_string());
             }
         } else {
-            self.message = Some("Clipboard is empty".to_string());
+            self.message = Some(self.messages.tui_msg_clipboard_empty.to_string());
         }
 
         Ok(())
@@ -2736,7 +2765,7 @@ impl TuiApp {
         self.dirty = false;
 
         self.mode = AppMode::Normal;
-        self.message = Some("File saved (validation bypassed)".to_string());
+        self.message = Some(self.messages.tui_msg_file_saved_bypassed.to_string());
         Ok(())
     }
 
