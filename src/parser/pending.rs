@@ -36,6 +36,13 @@ pub enum BoundaryType {
         brace_count: i32,
     },
 
+    /// Track parenthesis balance `( )` for multi-line structures like `plugins=(...)`.
+    /// Block is complete when parenthesis_count reaches 0.
+    ParenthesisCounting {
+        /// Current parenthesis count (open - close).
+        parenthesis_count: i32,
+    },
+
     /// Track single-quote parity for multi-line quoted values.
     /// Block is complete when quote count is even.
     QuoteCounting {
@@ -95,6 +102,10 @@ pub struct PendingBlock {
 
     /// Extracted value (for Alias/EnvVar/etc).
     pub value: Option<String>,
+
+    /// Number of pure comment lines (excluding blank lines).
+    /// Used to decide merge behavior: single comment merges down, multiple don't.
+    pub comment_count: usize,
 }
 
 impl PendingBlock {
@@ -108,6 +119,7 @@ impl PendingBlock {
             entry_hint: None,
             name: None,
             value: None,
+            comment_count: 0,
         }
     }
 
@@ -178,6 +190,7 @@ impl PendingBlock {
             },
         );
         block.entry_hint = Some(EntryType::Comment);
+        block.comment_count = 1; // First line is a comment
         block
     }
 
@@ -191,6 +204,7 @@ impl PendingBlock {
             },
         );
         block.entry_hint = Some(EntryType::Code);
+        block.comment_count = 0; // No comments
         block
     }
 
@@ -218,6 +232,7 @@ impl PendingBlock {
         match &self.boundary {
             BoundaryType::Complete => true,
             BoundaryType::BraceCounting { brace_count } => *brace_count == 0,
+            BoundaryType::ParenthesisCounting { parenthesis_count } => *parenthesis_count == 0,
             BoundaryType::QuoteCounting { quote_count } => quote_count % 2 == 0,
             BoundaryType::KeywordTracking { depth } => *depth == 0,
             // AdjacentMerging blocks are never "complete" by themselves;
@@ -234,6 +249,17 @@ impl PendingBlock {
         {
             *brace_count += open;
             *brace_count = (*brace_count).saturating_sub(close);
+        }
+    }
+
+    /// Update parenthesis count for ParenthesisCounting boundary.
+    pub fn update_parenthesis_count(&mut self, open: i32, close: i32) {
+        if let BoundaryType::ParenthesisCounting {
+            ref mut parenthesis_count,
+        } = self.boundary
+        {
+            *parenthesis_count += open;
+            *parenthesis_count = (*parenthesis_count).saturating_sub(close);
         }
     }
 
@@ -298,6 +324,23 @@ impl PendingBlock {
             }
             _ => false,
         }
+    }
+
+    /// Increment comment count when absorbing a comment line.
+    pub fn increment_comment_count(&mut self) {
+        self.comment_count += 1;
+    }
+
+    /// Check if this pending block represents a structured entry (Alias/EnvVar/Source/Function)
+    /// that is absorbing trailing blank lines.
+    pub fn is_structured_entry(&self) -> bool {
+        matches!(
+            self.entry_hint,
+            Some(EntryType::Alias)
+                | Some(EntryType::EnvVar)
+                | Some(EntryType::Source)
+                | Some(EntryType::Function)
+        )
     }
 }
 

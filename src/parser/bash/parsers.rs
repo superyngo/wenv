@@ -50,18 +50,16 @@ pub fn try_parse_alias(line: &str, line_num: usize) -> ParseEvent {
     // Try complete single-quoted alias first
     if let Some(caps) = ALIAS_SINGLE_RE.captures(line) {
         return ParseEvent::Complete(
-            Entry::new(EntryType::Alias, caps[1].to_string(), caps[2].to_string())
-                .with_line_number(line_num)
-                .with_raw_line(line.to_string()),
+            Entry::new(EntryType::Alias, caps[1].to_string(), line.to_string())
+                .with_line_number(line_num),
         );
     }
 
     // Try complete double-quoted alias
     if let Some(caps) = ALIAS_DOUBLE_RE.captures(line) {
         return ParseEvent::Complete(
-            Entry::new(EntryType::Alias, caps[1].to_string(), caps[2].to_string())
-                .with_line_number(line_num)
-                .with_raw_line(line.to_string()),
+            Entry::new(EntryType::Alias, caps[1].to_string(), line.to_string())
+                .with_line_number(line_num),
         );
     }
 
@@ -85,9 +83,8 @@ pub fn try_parse_alias(line: &str, line_num: usize) -> ParseEvent {
     // Try unquoted alias (LAST - after all quoted/multi-line checks)
     if let Some(caps) = ALIAS_NOQUOTE_RE.captures(line) {
         return ParseEvent::Complete(
-            Entry::new(EntryType::Alias, caps[1].to_string(), caps[2].to_string())
-                .with_line_number(line_num)
-                .with_raw_line(line.to_string()),
+            Entry::new(EntryType::Alias, caps[1].to_string(), line.to_string())
+                .with_line_number(line_num),
         );
     }
 
@@ -129,11 +126,10 @@ pub fn try_parse_env(line: &str, line_num: usize) -> ParseEvent {
     // Try complete export
     if let Some(caps) = EXPORT_RE.captures(line) {
         let (value_clean, _inline_comment) = extract_comment(&caps[2], '#');
-        let value = strip_quotes(&value_clean);
+        let _value = strip_quotes(&value_clean);
         return ParseEvent::Complete(
-            Entry::new(EntryType::EnvVar, caps[1].to_string(), value)
-                .with_line_number(line_num)
-                .with_raw_line(line.to_string()),
+            Entry::new(EntryType::EnvVar, caps[1].to_string(), line.to_string())
+                .with_line_number(line_num),
         );
     }
 
@@ -166,9 +162,7 @@ pub fn try_parse_source(line: &str, line_num: usize) -> ParseEvent {
             .unwrap_or(&path)
             .to_string();
         return ParseEvent::Complete(
-            Entry::new(EntryType::Source, name, path)
-                .with_line_number(line_num)
-                .with_raw_line(line.to_string()),
+            Entry::new(EntryType::Source, name, line.to_string()).with_line_number(line_num),
         );
     }
     ParseEvent::None
@@ -177,9 +171,10 @@ pub fn try_parse_source(line: &str, line_num: usize) -> ParseEvent {
 /// Detect if a line starts a function definition.
 ///
 /// Matches:
-/// - `name() {`
-/// - `function name() {`
-/// - `function name {`
+/// - `name() {` - Named function
+/// - `function name() {` - Named function with keyword
+/// - `function name {` - Named function without parentheses
+/// - `() {` - Anonymous function
 ///
 /// # Arguments
 ///
@@ -187,13 +182,24 @@ pub fn try_parse_source(line: &str, line_num: usize) -> ParseEvent {
 ///
 /// # Returns
 ///
-/// `Some(function_name)` if this is a function start, `None` otherwise.
-pub fn detect_function_start(line: &str) -> Option<String> {
+/// `Some((function_name, is_anonymous))` where:
+/// - `function_name`: The function name, or empty string for anonymous
+/// - `is_anonymous`: true if this is an anonymous function
+///
+/// Returns `None` if not a function start.
+pub fn detect_function_start(line: &str) -> Option<(String, bool)> {
+    use super::patterns::{ANON_FUNC_RE, FUNC_KEYWORD_RE, FUNC_START_RE};
+
+    // Check named functions first
     if let Some(caps) = FUNC_START_RE.captures(line) {
-        return Some(caps[1].to_string());
+        return Some((caps[1].to_string(), false));
     }
     if let Some(caps) = FUNC_KEYWORD_RE.captures(line) {
-        return Some(caps[1].to_string());
+        return Some((caps[1].to_string(), false));
+    }
+    // Check anonymous function
+    if ANON_FUNC_RE.is_match(line) {
+        return Some((String::new(), true));
     }
     None
 }
@@ -207,7 +213,7 @@ mod tests {
         match try_parse_alias("alias ll='ls -la'", 1) {
             ParseEvent::Complete(entry) => {
                 assert_eq!(entry.name, "ll");
-                assert_eq!(entry.value, "ls -la");
+                assert_eq!(entry.value, "alias ll=\'ls -la\'");
             }
             _ => panic!("Expected Complete"),
         }
@@ -218,7 +224,7 @@ mod tests {
         match try_parse_alias(r#"alias gs="git status""#, 1) {
             ParseEvent::Complete(entry) => {
                 assert_eq!(entry.name, "gs");
-                assert_eq!(entry.value, "git status");
+                assert_eq!(entry.value, r#"alias gs="git status""#);
             }
             _ => panic!("Expected Complete"),
         }
@@ -270,7 +276,7 @@ mod tests {
         match try_parse_env("export EDITOR=nvim", 1) {
             ParseEvent::Complete(entry) => {
                 assert_eq!(entry.name, "EDITOR");
-                assert_eq!(entry.value, "nvim");
+                assert_eq!(entry.value, "export EDITOR=nvim");
             }
             _ => panic!("Expected Complete"),
         }
@@ -281,7 +287,7 @@ mod tests {
         match try_parse_env(r#"export PATH="$HOME/bin:$PATH""#, 1) {
             ParseEvent::Complete(entry) => {
                 assert_eq!(entry.name, "PATH");
-                assert_eq!(entry.value, "$HOME/bin:$PATH");
+                assert_eq!(entry.value, r#"export PATH="$HOME/bin:$PATH""#);
             }
             _ => panic!("Expected Complete"),
         }
@@ -306,7 +312,7 @@ mod tests {
             ParseEvent::Complete(entry) => {
                 assert_eq!(entry.entry_type, EntryType::Source);
                 assert_eq!(entry.name, ".bashrc");
-                assert_eq!(entry.value, "~/.bashrc");
+                assert_eq!(entry.value, "source ~/.bashrc");
             }
             _ => panic!("Expected Complete"),
         }
@@ -316,7 +322,7 @@ mod tests {
     fn test_try_parse_source_dot() {
         match try_parse_source(". ~/.profile", 10) {
             ParseEvent::Complete(entry) => {
-                assert_eq!(entry.value, "~/.profile");
+                assert_eq!(entry.value, ". ~/.profile");
             }
             _ => panic!("Expected Complete"),
         }
@@ -324,15 +330,19 @@ mod tests {
 
     #[test]
     fn test_detect_function_start() {
-        assert_eq!(detect_function_start("greet() {"), Some("greet".into()));
+        assert_eq!(
+            detect_function_start("greet() {"),
+            Some(("greet".to_string(), false))
+        );
         assert_eq!(
             detect_function_start("function hello() {"),
-            Some("hello".into())
+            Some(("hello".to_string(), false))
         );
         assert_eq!(
             detect_function_start("function test {"),
-            Some("test".into())
+            Some(("test".to_string(), false))
         );
+        assert_eq!(detect_function_start("() {"), Some((String::new(), true)));
         assert_eq!(detect_function_start("echo hello"), None);
     }
 }

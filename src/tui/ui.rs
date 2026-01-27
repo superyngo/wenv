@@ -426,9 +426,9 @@ fn draw_detail_popup(f: &mut Frame, app: &mut TuiApp) {
         )]),
     ];
 
-    // Use raw_line for Comment/Code to show full content
+    // Use value for Comment/Code to show full content
     let display_value = match entry.entry_type {
-        EntryType::Comment | EntryType::Code => entry.raw_line.as_deref().unwrap_or(&entry.value),
+        EntryType::Comment | EntryType::Code => &entry.value,
         _ => &entry.value,
     };
     for value_line in display_value.lines() {
@@ -674,11 +674,9 @@ fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
             Style::default().fg(Color::Cyan),
         )]));
 
-        // Add value lines - use raw_line for Comment/Code
+        // Add value lines - use value for Comment/Code
         let display_value = match entry.entry_type {
-            EntryType::Comment | EntryType::Code => {
-                entry.raw_line.as_deref().unwrap_or(&entry.value)
-            }
+            EntryType::Comment | EntryType::Code => &entry.value,
             _ => &entry.value,
         };
         for value_line in display_value.lines() {
@@ -725,11 +723,9 @@ fn draw_confirm_popup(f: &mut Frame, app: &mut TuiApp) {
                 entry.name.clone()
             };
 
-            // Get display value with truncation - use raw_line for Comment/Code
+            // Get display value with truncation - use value for Comment/Code
             let display_value = match entry.entry_type {
-                EntryType::Comment | EntryType::Code => {
-                    entry.raw_line.as_deref().unwrap_or(&entry.value)
-                }
+                EntryType::Comment | EntryType::Code => &entry.value,
                 _ => &entry.value,
             };
             // Truncate and replace newlines for display
@@ -1058,11 +1054,8 @@ fn draw_edit_popup(f: &mut Frame, app: &mut TuiApp) {
         msg.tui_edit_value_title
     };
 
-    // Check if we should skip the Name field for Source/Code/Comment
-    let skip_name = matches!(
-        state.entry_type,
-        EntryType::Source | EntryType::Code | EntryType::Comment
-    );
+    // All entry types skip the Name field since value contains complete syntax
+    let skip_name = true;
 
     // Split area: main content + fixed footer (5 lines for submit + hints)
     let chunks = Layout::default()
@@ -1157,7 +1150,8 @@ fn draw_edit_popup(f: &mut Frame, app: &mut TuiApp) {
     let value_lines: Vec<&str> = if state.value_buffer.is_empty() {
         vec![""]
     } else {
-        state.value_buffer.lines().collect()
+        // Use split('\n') to preserve trailing empty lines (separator format)
+        state.value_buffer.split('\n').collect()
     };
 
     // Handle trailing newline

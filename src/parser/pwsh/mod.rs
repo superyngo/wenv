@@ -153,6 +153,7 @@ impl Parser for PowerShellParser {
                                 entry_hint: Some(EntryType::Code),
                                 name: None,
                                 value: None,
+                                comment_count: 0,
                             });
                         }
                     }
@@ -189,6 +190,7 @@ impl Parser for PowerShellParser {
                                 entry_hint: Some(EntryType::Code),
                                 name: None,
                                 value: None,
+                                comment_count: pending.comment_count,
                             });
                         } else {
                             // Flush non-mergeable pending
@@ -302,6 +304,7 @@ impl Parser for PowerShellParser {
                         entry_hint: Some(entry_type),
                         name: Some(name),
                         value: None,
+                        comment_count: 0,
                     });
                     continue;
                 }
@@ -413,16 +416,15 @@ impl PowerShellParser {
         match entry_type {
             EntryType::Function => {
                 let name = block.name.unwrap_or_else(|| "anonymous".to_string());
-                let body = self.extract_function_body(&raw_content);
-                Entry::new(EntryType::Function, name, body)
+                // Store complete function definition (Raw Value Architecture)
+                Entry::new(EntryType::Function, name, raw_content)
                     .with_line_number(block.start_line)
                     .with_end_line(block.end_line)
-                    .with_raw_line(raw_content)
             }
             EntryType::EnvVar => {
                 let name = block.name.unwrap_or_else(|| "UNKNOWN".to_string());
-                let value = block.value.unwrap_or_default();
-                Entry::new(EntryType::EnvVar, name, value)
+                // Always use raw_content to preserve complete syntax (Raw Value Architecture)
+                Entry::new(EntryType::EnvVar, name, raw_content)
                     .with_line_number(block.start_line)
                     .with_end_line(block.end_line)
             }
@@ -432,16 +434,10 @@ impl PowerShellParser {
                 } else {
                     format!("#L{}-L{}", block.start_line, block.end_line)
                 };
-                // First line's comment text as value
-                let value = block
-                    .lines
-                    .first()
-                    .map(|l| l.trim().to_string())
-                    .unwrap_or_default();
-                Entry::new(EntryType::Comment, name, value)
+                // Store complete comment content (Raw Value Architecture)
+                Entry::new(EntryType::Comment, name, raw_content)
                     .with_line_number(block.start_line)
                     .with_end_line(block.end_line)
-                    .with_raw_line(raw_content)
             }
             EntryType::Code => {
                 let name = if block.start_line == block.end_line {
@@ -449,34 +445,22 @@ impl PowerShellParser {
                 } else {
                     format!("L{}-L{}", block.start_line, block.end_line)
                 };
-                // First non-blank line as value, or empty for blank-only blocks
-                let first_non_blank = block
-                    .lines
-                    .iter()
-                    .find(|l| !l.trim().is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| block.lines.first().cloned().unwrap_or_default());
-                let value = if first_non_blank.trim().is_empty() {
-                    String::new()
-                } else {
-                    first_non_blank.trim().to_string()
-                };
-                Entry::new(EntryType::Code, name, value)
+                // Store complete code content (Raw Value Architecture)
+                Entry::new(EntryType::Code, name, raw_content)
                     .with_line_number(block.start_line)
                     .with_end_line(block.end_line)
-                    .with_raw_line(raw_content)
             }
             _ => {
                 // Shouldn't happen, but handle gracefully
                 Entry::new(entry_type, "unknown".to_string(), raw_content.clone())
                     .with_line_number(block.start_line)
                     .with_end_line(block.end_line)
-                    .with_raw_line(raw_content)
             }
         }
     }
 
     /// Extract function body from raw content.
+    #[allow(dead_code)]
     fn extract_function_body(&self, raw: &str) -> String {
         // Find opening brace and extract body
         if let Some(start) = raw.find('{') {
@@ -515,7 +499,7 @@ mod tests {
 
         assert_eq!(aliases.len(), 1);
         assert_eq!(aliases[0].name, "ll");
-        assert_eq!(aliases[0].value, "Get-ChildItem");
+        assert_eq!(aliases[0].value, "Set-Alias ll Get-ChildItem");
     }
 
     #[test]
@@ -532,7 +516,7 @@ mod tests {
 
         assert_eq!(envs.len(), 1);
         assert_eq!(envs[0].name, "EDITOR");
-        assert_eq!(envs[0].value, "code");
+        assert_eq!(envs[0].value, r#"$env:EDITOR = "code""#);
     }
 
     #[test]
@@ -600,8 +584,7 @@ mod tests {
             .filter(|e| e.entry_type == EntryType::Code && e.value.is_empty())
             .collect();
 
-        assert_eq!(blanks.len(), 1);
-        assert_eq!(blanks[0].name, "L2-L3");
+        assert_eq!(blanks.len(), 0);
     }
 
     #[test]
@@ -621,7 +604,13 @@ D:\tools
 
         assert_eq!(envs.len(), 1);
         assert_eq!(envs[0].name, "PATH");
-        assert_eq!(envs[0].value, "C:\\Program Files\\bin\nD:\\tools");
+        assert_eq!(
+            envs[0].value,
+            r#"$env:PATH = @"
+C:\Program Files\bin
+D:\tools
+"@"#
+        );
         assert_eq!(envs[0].line_number, Some(1));
         assert_eq!(envs[0].end_line, Some(4));
     }
@@ -645,7 +634,10 @@ D:\tools
         assert_eq!(envs[0].name, "CONFIG");
         assert_eq!(
             envs[0].value,
-            "  line with leading spaces\n    indented line"
+            r#"$env:CONFIG = @"
+  line with leading spaces
+    indented line
+"@"#
         );
     }
 
@@ -663,7 +655,7 @@ D:\tools
 
         assert_eq!(envs.len(), 1);
         assert_eq!(envs[0].name, "EDITOR");
-        assert_eq!(envs[0].value, "code");
+        assert_eq!(envs[0].value, r#"$env:EDITOR = "code""#);
         assert_eq!(envs[0].line_number, Some(1));
         assert!(envs[0].end_line.is_none());
     }
@@ -687,11 +679,17 @@ $env:SHELL = "pwsh""#;
 
         assert_eq!(envs.len(), 3);
         assert_eq!(envs[0].name, "EDITOR");
-        assert_eq!(envs[0].value, "code");
+        assert_eq!(envs[0].value, r#"$env:EDITOR = "code""#);
         assert_eq!(envs[1].name, "PATH");
-        assert_eq!(envs[1].value, "C:\\bin\nD:\\tools");
+        assert_eq!(
+            envs[1].value,
+            r#"$env:PATH = @"
+C:\bin
+D:\tools
+"@"#
+        );
         assert_eq!(envs[2].name, "SHELL");
-        assert_eq!(envs[2].value, "pwsh");
+        assert_eq!(envs[2].value, r#"$env:SHELL = "pwsh""#);
     }
 
     #[test]
@@ -712,7 +710,14 @@ line3
 
         assert_eq!(envs.len(), 1);
         assert_eq!(envs[0].name, "DATA");
-        assert_eq!(envs[0].value, "line1\n\nline3");
+        assert_eq!(
+            envs[0].value,
+            r#"$env:DATA = @"
+line1
+
+line3
+"@"#
+        );
     }
 
     #[test]
@@ -810,12 +815,8 @@ C:\bin
             .filter(|e| e.entry_type == EntryType::Code)
             .collect();
 
-        // Check raw_line since value only contains first line for multi-line Code blocks
-        assert!(code_blocks.iter().any(|c| c
-            .raw_line
-            .as_ref()
-            .map(|r| r.contains("$env:PATH"))
-            .unwrap_or(false)));
+        // Check value (contains complete content)
+        assert!(code_blocks.iter().any(|c| c.value.contains("$env:PATH")));
     }
 
     // === Tests for Comment/Code merging logic ===
@@ -850,13 +851,8 @@ C:\bin
         assert_eq!(code.entry_type, EntryType::Code);
         assert_eq!(code.line_number, Some(1));
         assert_eq!(code.end_line, Some(2));
-        // value preserves Comment's first line for list display
-        assert_eq!(code.value, "# Note");
-        // raw_line contains complete content (comment + code)
-        assert_eq!(
-            code.raw_line,
-            Some("# Note\nWrite-Host 'hello'".to_string())
-        );
+        // value contains complete content (comment + code)
+        assert_eq!(code.value, "# Note\nWrite-Host 'hello'");
     }
 
     #[test]
@@ -872,11 +868,8 @@ C:\bin
         assert_eq!(code.entry_type, EntryType::Code);
         assert_eq!(code.line_number, Some(1));
         assert_eq!(code.end_line, Some(3));
-        assert_eq!(code.value, "# Header");
-        assert_eq!(
-            code.raw_line,
-            Some("# Header\n\nWrite-Host 'hi'".to_string())
-        );
+        // value contains complete content (comment + blank + code)
+        assert_eq!(code.value, "# Header\n\nWrite-Host 'hi'");
     }
 
     #[test]
@@ -909,7 +902,7 @@ C:\bin
 
         let code = &result.entries[0];
         assert_eq!(code.entry_type, EntryType::Code);
-        assert_eq!(code.value, "Write-Host 'hi'");
+        assert_eq!(code.value, "Write-Host 'hi'\n\n");
         assert_eq!(code.line_number, Some(1));
         assert_eq!(code.end_line, Some(3));
     }
@@ -925,7 +918,7 @@ C:\bin
 
         let first = &result.entries[0];
         assert_eq!(first.entry_type, EntryType::Code);
-        assert_eq!(first.value, "Write-Host 'first'");
+        assert_eq!(first.value, "Write-Host 'first'\n");
         assert_eq!(first.line_number, Some(1));
         assert_eq!(first.end_line, Some(2)); // Absorbed one blank line
 
@@ -1002,16 +995,8 @@ C:\bin
         assert_eq!(code_blocks.len(), 1);
         assert_eq!(code_blocks[0].line_number, Some(1)); // Starts from comment
         assert_eq!(code_blocks[0].end_line, Some(4));
-        // raw_line should contain comment + control structure
-        assert!(code_blocks[0]
-            .raw_line
-            .as_ref()
-            .unwrap()
-            .contains("# This is a conditional"));
-        assert!(code_blocks[0]
-            .raw_line
-            .as_ref()
-            .unwrap()
-            .contains("if ($true)"));
+        // value should contain comment + control structure
+        assert!(code_blocks[0].value.contains("# This is a conditional"));
+        assert!(code_blocks[0].value.contains("if ($true)"));
     }
 }

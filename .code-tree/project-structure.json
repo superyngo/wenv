@@ -1,0 +1,459 @@
+{
+  "version": "1.0",
+  "project_name": "wenv",
+  "root_path": "/mnt/mmc/repos/wenv",
+  "last_indexed": "2026-01-27T22:25:36.510975",
+  "total_files": 52,
+  "total_size": 505196,
+  "file_counts": {
+    ".rs": 52
+  },
+  "files": {
+    "src/lib.rs": {
+      "path": "src/lib.rs",
+      "size": 762,
+      "modified": 1769093027.0383728,
+      "hash": "ccdcc0ada1e6138eab93fa073c4efecc21c41b43bea49d1468bb62b3bff1294e",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/main.rs": {
+      "path": "src/main.rs",
+      "size": 2047,
+      "modified": 1769137620.1735117,
+      "hash": "8f4981ee392a72f07e52738e03ab65aa231354d68b174c54344e3b89cd72160e",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/cache.rs": {
+      "path": "src/cache.rs",
+      "size": 1986,
+      "modified": 1769387406.0964658,
+      "hash": "98223bfa3f4f685b21f546d9bfd925a518541b3848cd69787bf472d3d15f0523",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/cli/mod.rs": {
+      "path": "src/cli/mod.rs",
+      "size": 110,
+      "modified": 1768312729.2227051,
+      "hash": "c8bcd60637a029e6ba3786776b3677c708a0ba0abab67aff159a53a634493d44",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/cli/context.rs": {
+      "path": "src/cli/context.rs",
+      "size": 2599,
+      "modified": 1769211515.313546,
+      "hash": "72281ea294bb12c9ab62a9bb5d1e7f949ec3422006e11c22fa81ea90b4cfc853",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/cli/args.rs": {
+      "path": "src/cli/args.rs",
+      "size": 2806,
+      "modified": 1769137563.4597685,
+      "hash": "01f83714fee436fbcc2836bfc5195795562b6f65541cb5b05d474e93951b8c3e",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/cli/actions/import.rs": {
+      "path": "src/cli/actions/import.rs",
+      "size": 5329,
+      "modified": 1768312782.3914278,
+      "hash": "33b560973ffaa98ac50382c06b1a419c7099cd3efa82fb22405cafbd97909f1a",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/cli/actions/export.rs": {
+      "path": "src/cli/actions/export.rs",
+      "size": 1346,
+      "modified": 1768312788.9253936,
+      "hash": "c6f9f189e7ee00850537ba0303c74163218774bc2339bfcadd9e5a32ba0a9b89",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/cli/actions/mod.rs": {
+      "path": "src/cli/actions/mod.rs",
+      "size": 72,
+      "modified": 1768312792.3983755,
+      "hash": "91b1622a25290bda7346e81637c611c37a17bc3affde73735213d0429bdd21f7",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/cli/actions/source.rs": {
+      "path": "src/cli/actions/source.rs",
+      "size": 840,
+      "modified": 1768376274.933207,
+      "hash": "ccc5f3e00f98e58232e699d5949502c42767d14bf26c68662c1c38c539f0e5b7",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/mod.rs": {
+      "path": "src/parser/mod.rs",
+      "size": 7016,
+      "modified": 1769437436.0855103,
+      "hash": "0126b20c7b763f0982877ae0df7466b8618e4c77000ef16876c6e42773bb4a12",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/pending.rs": {
+      "path": "src/parser/pending.rs",
+      "size": 13407,
+      "modified": 1769520362.4685664,
+      "hash": "b86a1b9b0aa541c01443f0dc4967547fbeac0c62523802fcdd894baa47da008b",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/builders/mod.rs": {
+      "path": "src/parser/builders/mod.rs",
+      "size": 9482,
+      "modified": 1769484643.7354238,
+      "hash": "0c9bd5ff9b2843268214853e9915aae641bca855c61118b092a1c855e7642cea",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/builders/comment.rs": {
+      "path": "src/parser/builders/comment.rs",
+      "size": 7199,
+      "modified": 1769469909.8056383,
+      "hash": "25d6a1727c4ae240a7ebb9886efb082f7eaa027a30bc36c4e253303e060408a6",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/builders/quoted.rs": {
+      "path": "src/parser/builders/quoted.rs",
+      "size": 8821,
+      "modified": 1769459931.2980294,
+      "hash": "c5387d20598ec63261f4d26458d7cb527e9c2e7efd387316ecec677071377e71",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/bash/patterns.rs": {
+      "path": "src/parser/bash/patterns.rs",
+      "size": 7792,
+      "modified": 1769497001.2758303,
+      "hash": "4c87f4b0ef0dbe677219a28bac437003c66f1c9edfe972117590851278a0504a",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/bash/control.rs": {
+      "path": "src/parser/bash/control.rs",
+      "size": 4915,
+      "modified": 1769437436.0361571,
+      "hash": "8826c87b26f78fe979ef8667527c678ff708a463e634dda84f91a51830897788",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/bash/mod.rs": {
+      "path": "src/parser/bash/mod.rs",
+      "size": 58608,
+      "modified": 1769520470.002689,
+      "hash": "9b171fbbefefc04263db092111fd31188a0ea0fcbdb547938c7860c338b5166d",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/bash/parsers.rs": {
+      "path": "src/parser/bash/parsers.rs",
+      "size": 11615,
+      "modified": 1769484871.1172888,
+      "hash": "3dcbfa69307cfc8a281e155256d885976340c5f59d039df4621a24201f0d14c1",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/pwsh/control.rs": {
+      "path": "src/parser/pwsh/control.rs",
+      "size": 4203,
+      "modified": 1769437436.0647254,
+      "hash": "07c89954464cd3024735bebada6330177860d7da51bdae47326d80b9c6f1e513",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/pwsh/patterns.rs": {
+      "path": "src/parser/pwsh/patterns.rs",
+      "size": 5166,
+      "modified": 1769437436.0817654,
+      "hash": "4f9f86d8acb936511e3abe3854e6ee50336726b1e38213dfd2293ba8f1c20785",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/pwsh/mod.rs": {
+      "path": "src/parser/pwsh/mod.rs",
+      "size": 36292,
+      "modified": 1769497414.3087592,
+      "hash": "6c970610a2bf62ef1bedfef8bdb1937f1aa7c904f60866a6aa622a8a93dd688a",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/parser/pwsh/parsers.rs": {
+      "path": "src/parser/pwsh/parsers.rs",
+      "size": 7753,
+      "modified": 1769478076.018446,
+      "hash": "1b2793824b8998972b7e7dcc2f5c3e738b20c6f3d1980920e6557267844f70e1",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/model/mod.rs": {
+      "path": "src/model/mod.rs",
+      "size": 232,
+      "modified": 1769387389.496554,
+      "hash": "504e0aab2e2bebc7b20118bb307b42315009c648d4d340700bebda4fae6b3b50",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/model/config.rs": {
+      "path": "src/model/config.rs",
+      "size": 5330,
+      "modified": 1769387341.363809,
+      "hash": "c7067e1fc5be3aad81a5cb39fda35c4d09a3e2a2b7e831418ac2b57acb127b0b",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/model/shell.rs": {
+      "path": "src/model/shell.rs",
+      "size": 6991,
+      "modified": 1769387380.1516035,
+      "hash": "17314ceb38750dfc2d7bad35dcdd2d36dcb53a1d07b1362d771be33362f40272",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/model/entry.rs": {
+      "path": "src/model/entry.rs",
+      "size": 10587,
+      "modified": 1769436902.0,
+      "hash": "9d9a4551309ca28d167336dcc411b69ff992f6996aec8a5deba2c014ed1bae1a",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/formatter/mod.rs": {
+      "path": "src/formatter/mod.rs",
+      "size": 2582,
+      "modified": 1768920412.5005429,
+      "hash": "c9ac884b3a25100a456ef09d1f59ac88c481b0ca532d70e9d5d0c9d0d5ca6752",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/formatter/indent.rs": {
+      "path": "src/formatter/indent.rs",
+      "size": 4955,
+      "modified": 1768306503.3234477,
+      "hash": "f6241d0e6ea7e0e30e9a2f53d0a6af3c90f851c7e26207cf7cbc0cefabe432af",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/formatter/bash.rs": {
+      "path": "src/formatter/bash.rs",
+      "size": 25265,
+      "modified": 1769471215.705935,
+      "hash": "f5a0c030859f2568532810d9c425035805fd6e8ab59362d021fda808f5db7ce1",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/formatter/pwsh.rs": {
+      "path": "src/formatter/pwsh.rs",
+      "size": 10912,
+      "modified": 1769474977.443532,
+      "hash": "547510e2137d043a195df24166525b1f19c5df4d3bbb1a805eb85e5a42d88fe9",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/checker/mod.rs": {
+      "path": "src/checker/mod.rs",
+      "size": 2292,
+      "modified": 1768919516.925702,
+      "hash": "7102acb07536fc23b14bca8de9e16118386230c1bb09729fa75e52c3a4ddf1ec",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/checker/duplicate.rs": {
+      "path": "src/checker/duplicate.rs",
+      "size": 2866,
+      "modified": 1768192015.4894385,
+      "hash": "0ac7dc5591bcf8f20f94b89d9762181e38688037f057a1201af6582cb76c2025",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/backup/mod.rs": {
+      "path": "src/backup/mod.rs",
+      "size": 6060,
+      "modified": 1769094164.7316244,
+      "hash": "58a164fe47f2c7c851ac1864ca3b59764eb780346f7b6a806a576faf49f49911",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/config/mod.rs": {
+      "path": "src/config/mod.rs",
+      "size": 830,
+      "modified": 1768192015.565438,
+      "hash": "0d36b966de9fccd3b9678b914582a0a8f9f601dcb2b55a93081740c6e0dc02af",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/utils/mod.rs": {
+      "path": "src/utils/mod.rs",
+      "size": 128,
+      "modified": 1768919459.7200327,
+      "hash": "61e96300b926a85fcaa234da11bdf348c471399888c9d1dfe100f20990af6fa5",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/utils/shell_detect.rs": {
+      "path": "src/utils/shell_detect.rs",
+      "size": 2924,
+      "modified": 1768705451.2232938,
+      "hash": "1756569b6d034981ff715ec488d0156026bc900d20a7edf92fe79293c774641d",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/utils/http.rs": {
+      "path": "src/utils/http.rs",
+      "size": 1176,
+      "modified": 1769124274.9474118,
+      "hash": "181cc31289ba3f574af9b6c64229309d3f7880fa2553ce0de91991ae9c8a14fa",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/utils/dependency.rs": {
+      "path": "src/utils/dependency.rs",
+      "size": 9814,
+      "modified": 1768203610.093233,
+      "hash": "7d365eabb9689bc0facad5f80e3bb2ea5749a5a68700fe627b899e4e4db3f493",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/utils/path_merge.rs": {
+      "path": "src/utils/path_merge.rs",
+      "size": 7723,
+      "modified": 1768345278.3896916,
+      "hash": "2475ba2263ca8bc07231fc5913caa0d127a436a07dead931dffc4bd27cd1043a",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/utils/strings.rs": {
+      "path": "src/utils/strings.rs",
+      "size": 3876,
+      "modified": 1768829191.7051744,
+      "hash": "0004f5df76457e77124e11514c9290a05a559eaf2bc0768ef7fe69f23e2042c6",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/utils/path.rs": {
+      "path": "src/utils/path.rs",
+      "size": 1808,
+      "modified": 1768919452.3060756,
+      "hash": "6af90142f207aa9a7156412f1693058867617d791b68858c01f92f3f593a0458",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/tui/mod.rs": {
+      "path": "src/tui/mod.rs",
+      "size": 118,
+      "modified": 1767933477.3342464,
+      "hash": "67b294b93bdcb6b94174a6d3cdc09af6783d401779777c39989f2011686c6faf",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/tui/event.rs": {
+      "path": "src/tui/event.rs",
+      "size": 355,
+      "modified": 1767933528.6720245,
+      "hash": "323b7fc3a0c052dc303456efa6bbe72a0c8cbd4c64058db791e0c4ba87813793",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/tui/ui.rs": {
+      "path": "src/tui/ui.rs",
+      "size": 45954,
+      "modified": 1769502452.723611,
+      "hash": "ede2f4435145b4d1d129b8e94860d6f16777658f7c9aab12872b32320fd51da4",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/tui/app.rs": {
+      "path": "src/tui/app.rs",
+      "size": 109086,
+      "modified": 1769523856.140687,
+      "hash": "2538b6c3c70ef94c88463058c79c2e7bc839fe5235f814dca56b3279f69992af",
+      "language": "rust",
+      "parse_error": null
+    },
+    "src/i18n/mod.rs": {
+      "path": "src/i18n/mod.rs",
+      "size": 31031,
+      "modified": 1769221201.9043438,
+      "hash": "410677f304636a792f07c91dbae4d89fc2f0808bc5240926b2444e70bfa850b8",
+      "language": "rust",
+      "parse_error": null
+    },
+    "tests/pwsh_heredoc_integration.rs": {
+      "path": "tests/pwsh_heredoc_integration.rs",
+      "size": 2468,
+      "modified": 1769485256.627371,
+      "hash": "4833ccd04cf6464f326b430bc089fad7b3469d7a48c17b33abc7ec88a0c056cf",
+      "language": "rust",
+      "parse_error": null
+    },
+    "tests/parser_fixes_test.rs": {
+      "path": "tests/parser_fixes_test.rs",
+      "size": 3562,
+      "modified": 1769504394.5637956,
+      "hash": "5788995b1e349c712574f84a8eef663ae62cd75e6cab15853f8d5cd4e1dd8d66",
+      "language": "rust",
+      "parse_error": null
+    },
+    "tests/integration/bash_tests.rs": {
+      "path": "tests/integration/bash_tests.rs",
+      "size": 4125,
+      "modified": 1767865546.0259206,
+      "hash": "ed8c2093d631616c8406bde5d00ce5f6d204e940517ca64c582faba4dd0e294d",
+      "language": "rust",
+      "parse_error": null
+    },
+    "tests/integration/pwsh_tests.rs": {
+      "path": "tests/integration/pwsh_tests.rs",
+      "size": 1948,
+      "modified": 1767865546.4379184,
+      "hash": "d8fd4a4d9d3ea7be70713cda54f8a983e2f7e216655fa3e6f2429f8a765eff5b",
+      "language": "rust",
+      "parse_error": null
+    },
+    "tests/integration/mod.rs": {
+      "path": "tests/integration/mod.rs",
+      "size": 32,
+      "modified": 1767865546.9649158,
+      "hash": "6f8dc11c936d506246500061b5931339e23cc74cee6258ae3700ab7211c29189",
+      "language": "rust",
+      "parse_error": null
+    }
+  },
+  "directories": [
+    ".github",
+    ".github/workflows",
+    ".serena",
+    ".serena/cache",
+    ".serena/cache/rust",
+    ".serena/memories",
+    "assets",
+    "assets/i18n",
+    "docs",
+    "languages",
+    "src",
+    "src/backup",
+    "src/checker",
+    "src/cli",
+    "src/cli/actions",
+    "src/config",
+    "src/formatter",
+    "src/i18n",
+    "src/model",
+    "src/parser",
+    "src/parser/bash",
+    "src/parser/builders",
+    "src/parser/pwsh",
+    "src/tui",
+    "src/utils",
+    "tests",
+    "tests/fixtures",
+    "tests/integration"
+  ]
+}

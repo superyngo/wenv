@@ -30,7 +30,8 @@ Set-Alias ll Get-ChildItem
 
     // Verify single-line env var
     let editor = envs.iter().find(|e| e.name == "EDITOR").unwrap();
-    assert_eq!(editor.value, "code");
+    // With Raw Value Architecture, value contains complete syntax
+    assert_eq!(editor.value, "$env:EDITOR = \"code\"");
     assert!(
         editor.end_line.is_none(),
         "Single-line should not have end_line"
@@ -38,7 +39,10 @@ Set-Alias ll Get-ChildItem
 
     // Verify multi-line env var
     let path = envs.iter().find(|e| e.name == "PATH").unwrap();
-    assert_eq!(path.value, "C:\\Program Files\\bin\nD:\\tools");
+    // Value contains complete syntax including heredoc markers
+    assert!(path.value.contains("$env:PATH = @\""));
+    assert!(path.value.contains("C:\\Program Files\\bin"));
+    assert!(path.value.contains("D:\\tools"));
     assert!(path.end_line.is_some(), "Multi-line should have end_line");
 
     // Verify alias still works
@@ -59,19 +63,22 @@ fn test_powershell_heredoc_formatter_integration() {
 
     let formatter = PowerShellFormatter::new();
 
-    // Single-line env var
-    let entry1 = Entry::new(EntryType::EnvVar, "EDITOR".into(), "code".into());
+    // Single-line env var - value now contains complete syntax
+    let entry1 = Entry::new(
+        EntryType::EnvVar,
+        "EDITOR".into(),
+        "$env:EDITOR = \"code\"".into(),
+    );
+    // Formatter should return value as-is (Raw Value Architecture)
     assert_eq!(formatter.format_entry(&entry1), "$env:EDITOR = \"code\"");
 
-    // Multi-line env var
+    // Multi-line env var - value contains complete syntax including heredoc markers
     let entry2 = Entry::new(
         EntryType::EnvVar,
         "PATH".into(),
-        "C:\\bin\nD:\\tools".into(),
+        "$env:PATH = @\"\nC:\\bin\nD:\\tools\n\"@".into(),
     );
+    // Formatter returns value as-is
     let formatted = formatter.format_entry(&entry2);
-    assert!(formatted.starts_with("$env:PATH = @\""));
-    assert!(formatted.contains("C:\\bin"));
-    assert!(formatted.contains("D:\\tools"));
-    assert!(formatted.ends_with("\"@"));
+    assert_eq!(formatted, "$env:PATH = @\"\nC:\\bin\nD:\\tools\n\"@");
 }

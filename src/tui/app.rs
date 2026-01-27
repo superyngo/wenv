@@ -13,7 +13,6 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 use crate::i18n::Messages;
 use crate::model::{Entry, EntryType, ShellType};
-use crate::utils::strings::split_lines_preserve_trailing;
 
 /// Application mode
 #[derive(Debug, Clone, PartialEq)]
@@ -807,6 +806,30 @@ impl TuiApp {
         Ok(())
     }
 
+    /// Get entry template with initial cursor position
+    /// Returns: (template_string, cursor_position, cursor_row, cursor_col)
+    fn get_entry_template(&self, entry_type: &EntryType) -> (String, usize, usize, usize) {
+        match self.shell_type {
+            ShellType::PowerShell => match entry_type {
+                EntryType::Alias => ("Set-Alias  ''".to_string(), 10, 0, 10),
+                EntryType::Function => ("function  {\n    \n}".to_string(), 9, 0, 9),
+                EntryType::EnvVar => ("$env: = ''".to_string(), 5, 0, 5),
+                EntryType::Source => (". ".to_string(), 2, 0, 2),
+                EntryType::Comment => ("# ".to_string(), 2, 0, 2),
+                EntryType::Code => (String::new(), 0, 0, 0),
+            },
+            _ => match entry_type {
+                // Bash/Zsh
+                EntryType::Alias => ("alias =''".to_string(), 6, 0, 6),
+                EntryType::Function => ("() {\n    \n}".to_string(), 0, 0, 0),
+                EntryType::EnvVar => ("export =''".to_string(), 7, 0, 7),
+                EntryType::Source => ("source ".to_string(), 7, 0, 7),
+                EntryType::Comment => ("# ".to_string(), 2, 0, 2),
+                EntryType::Code => (String::new(), 0, 0, 0),
+            },
+        }
+    }
+
     /// Confirm type selection and open edit window
     fn confirm_type_selection(&mut self) {
         // Code/Comment merged: index 4 is now Code/Comment, parser decides final type
@@ -819,23 +842,23 @@ impl TuiApp {
             _ => EntryType::Alias,
         };
 
-        // For Source/Code, start at Value field (skip Name)
-        let start_field = if matches!(entry_type, EntryType::Source | EntryType::Code) {
-            EditField::Value
-        } else {
-            EditField::Name
-        };
+        // Get template for the selected entry type
+        let (value_buffer, cursor_position, cursor_row, cursor_col) =
+            self.get_entry_template(&entry_type);
 
-        // Create edit state for new entry
+        // All entry types start at Value field (Name field is skipped)
+        let start_field = EditField::Value;
+
+        // Create edit state for new entry with template
         self.edit_state = Some(EditState {
             field: start_field,
             name_buffer: String::new(),
-            value_buffer: String::new(),
+            value_buffer, // Use template instead of empty string
             entry_type,
             is_new: true,
-            cursor_position: 0,
-            cursor_row: 0,
-            cursor_col: 0,
+            cursor_position, // Position cursor intelligently
+            cursor_row,
+            cursor_col,
             scroll_offset: 0,
         });
         self.mode = AppMode::Editing;
@@ -853,27 +876,12 @@ impl TuiApp {
 
         match key {
             KeyCode::Tab => {
-                // For Source/Code/Comment, skip the Name field
-                let skip_name = matches!(
-                    state.entry_type,
-                    EntryType::Source | EntryType::Code | EntryType::Comment
-                );
-                state.field = if skip_name {
-                    state.field.next_skip_name()
-                } else {
-                    state.field.next()
-                };
+                // All entry types skip the Name field
+                state.field = state.field.next_skip_name();
             }
             KeyCode::BackTab => {
-                let skip_name = matches!(
-                    state.entry_type,
-                    EntryType::Source | EntryType::Code | EntryType::Comment
-                );
-                state.field = if skip_name {
-                    state.field.prev_skip_name()
-                } else {
-                    state.field.prev()
-                };
+                // All entry types skip the Name field
+                state.field = state.field.prev_skip_name();
             }
             KeyCode::Esc => {
                 // Cancel editing from any field (including Submit)
@@ -884,13 +892,12 @@ impl TuiApp {
                     // Submit the edit
                     self.submit_editing()?;
                 } else if state.field == EditField::Value {
-                    // For PowerShell: Source/Alias are single-line, Enter jumps to Submit
-                    // For Bash/Zsh: only Source is single-line
+                    // All entry types allow multi-line (trailing blanks are part of value)
+                    // For PowerShell Alias, keep single-line behavior
                     let is_single_line = if self.shell_type == ShellType::PowerShell {
-                        matches!(state.entry_type, EntryType::Source | EntryType::Alias)
+                        state.entry_type == EntryType::Alias
                     } else {
-                        // Bash and Zsh
-                        state.entry_type == EntryType::Source
+                        false // Bash/Zsh allow multi-line for all types
                     };
 
                     if is_single_line {
@@ -1097,7 +1104,8 @@ impl TuiApp {
             return;
         };
 
-        let lines: Vec<&str> = state.value_buffer.lines().collect();
+        // Use split('\n') to preserve trailing empty lines (separator format)
+        let lines: Vec<&str> = state.value_buffer.split('\n').collect();
 
         if state.cursor_row == 0 {
             return;
@@ -1142,7 +1150,8 @@ impl TuiApp {
             return;
         };
 
-        let lines: Vec<&str> = state.value_buffer.lines().collect();
+        // Use split('\n') to preserve trailing empty lines (separator format)
+        let lines: Vec<&str> = state.value_buffer.split('\n').collect();
         // Check for trailing newline - lines() doesn't count it
         let has_trailing_newline = state.value_buffer.ends_with('\n');
         let line_count = if has_trailing_newline {
@@ -1783,26 +1792,13 @@ impl TuiApp {
             let name = entry.name.clone();
             let entry_type = entry.entry_type;
 
-            // For Comment/Code, use raw_line (contains complete original content)
+            // For Comment/Code, use value (contains complete original content)
             // For other types, use value
-            let value = if matches!(entry_type, EntryType::Comment | EntryType::Code) {
-                entry
-                    .raw_line
-                    .clone()
-                    .unwrap_or_else(|| entry.value.clone())
-            } else {
-                entry.value.clone()
-            };
+            let value = entry.value.clone();
 
-            // For Source/Code/Comment, start at Value field (skip Name)
-            let (start_field, cursor_pos, cursor_col) = if matches!(
-                entry_type,
-                EntryType::Source | EntryType::Code | EntryType::Comment
-            ) {
-                (EditField::Value, value.len(), value.len())
-            } else {
-                (EditField::Name, name.len(), name.len())
-            };
+            // All entry types start at Value field (Name field is skipped)
+            let (start_field, cursor_pos, cursor_col) =
+                (EditField::Value, value.len(), value.len());
 
             self.edit_state = Some(EditState {
                 field: start_field,
@@ -1972,49 +1968,16 @@ impl TuiApp {
             return Ok(());
         };
 
-        // For Source/Code, name can be empty (auto-generated)
-        let skip_name_validation = matches!(state.entry_type, EntryType::Source | EntryType::Code);
-
-        // Validate name for types that need it
-        if !skip_name_validation && state.name_buffer.trim().is_empty() {
-            self.edit_state = Some(state);
-            self.message = Some(self.messages.tui_msg_name_empty.to_string());
-            return Ok(());
-        }
-
-        // Validate Source path format
-        if state.entry_type == EntryType::Source {
-            let path = state.value_buffer.trim();
-            if path.is_empty() {
-                self.edit_state = Some(state);
-                self.message = Some(self.messages.tui_msg_source_path_empty.to_string());
-                return Ok(());
-            }
-            if !is_valid_path_format(path) {
-                self.edit_state = Some(state);
-                self.message = Some(self.messages.tui_msg_invalid_path_format.to_string());
-                return Ok(());
-            }
-        }
-
-        // PowerShell alias value non-empty validation
-        if state.entry_type == EntryType::Alias
-            && self.shell_type == ShellType::PowerShell
-            && state.value_buffer.trim().is_empty()
-        {
+        // Value buffer must not be empty for all types
+        if state.value_buffer.trim().is_empty() {
             self.edit_state = Some(state);
             self.message = Some(self.messages.tui_msg_alias_value_empty.to_string());
             return Ok(());
         }
 
-        // Auto-extract filename from Source path as NAME if name is empty
+        // Auto-extract name from value_buffer for UI display
         let mut state = state;
-        if state.entry_type == EntryType::Source && state.name_buffer.trim().is_empty() {
-            let path = std::path::Path::new(state.value_buffer.trim());
-            if let Some(stem) = path.file_stem() {
-                state.name_buffer = stem.to_string_lossy().to_string();
-            }
-        }
+        state.name_buffer = extract_name_from_value(&state.entry_type, &state.value_buffer);
 
         // Read current content
         let content = self.read_current_content()?;
@@ -2040,10 +2003,8 @@ impl TuiApp {
             let insert_idx = insert_line.saturating_sub(1).min(lines.len());
 
             // Handle multi-line entries
-            for (i, new_line) in split_lines_preserve_trailing(&new_text)
-                .into_iter()
-                .enumerate()
-            {
+            // Use split('\n') to preserve trailing empty lines (separator format)
+            for (i, new_line) in new_text.split('\n').enumerate() {
                 lines.insert(insert_idx + i, new_line.to_string());
             }
 
@@ -2088,7 +2049,8 @@ impl TuiApp {
                         return Ok(());
                     }
 
-                    let new_lines: Vec<&str> = split_lines_preserve_trailing(&new_text);
+                    // Use split('\n') to preserve trailing empty lines (separator format)
+                    let new_lines: Vec<&str> = new_text.split('\n').collect();
 
                     // Remove old lines
                     let remove_count = (end - start + 1).min(lines.len() - start);
@@ -2131,12 +2093,9 @@ impl TuiApp {
         let mut lines: Vec<String> = Vec::new();
 
         for entry in sorted {
-            // For Code/Comment, use raw_line; for others, use formatter
+            // For Code/Comment, use value; for others, use formatter
             let formatted = match entry.entry_type {
-                EntryType::Code | EntryType::Comment => entry
-                    .raw_line
-                    .clone()
-                    .unwrap_or_else(|| entry.value.clone()),
+                EntryType::Code | EntryType::Comment => entry.value.clone(),
                 _ => formatter.format_entry(entry),
             };
             lines.push(formatted);
@@ -2915,13 +2874,77 @@ fn next_char_boundary(s: &str, pos: usize) -> usize {
 
 /// Check if path format is valid (does not check file existence)
 /// Rejects paths with invalid characters that would be problematic on most systems
-fn is_valid_path_format(path: &str) -> bool {
-    // Cannot be empty or pure whitespace
-    if path.trim().is_empty() {
-        return false;
+/// Extract name from value for UI display purposes
+/// This is called after the user submits editing, to populate name_buffer
+fn extract_name_from_value(entry_type: &EntryType, value: &str) -> String {
+    match entry_type {
+        EntryType::Alias => {
+            // Extract alias name from "alias name='value'" or similar
+            // Find "alias" keyword and extract the name part
+            if let Some(pos) = value.find("alias") {
+                let after_alias = &value[pos + 5..]; // Skip "alias"
+                let trimmed = after_alias.trim();
+                // Get the identifier before '=' or space
+                if let Some(eq_pos) = trimmed.find('=') {
+                    trimmed[..eq_pos].trim().to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            } else {
+                "unknown".to_string()
+            }
+        }
+        EntryType::Function => {
+            // Extract function name from "name() { ... }" or "function name { ... }"
+            let trimmed = value.trim();
+            if let Some(after_kw) = trimmed.strip_prefix("function ") {
+                // "function name {" format
+                let after_kw = after_kw.trim();
+                if let Some(space_pos) = after_kw.find(|c: char| c.is_whitespace() || c == '{') {
+                    after_kw[..space_pos].trim().to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            } else if let Some(paren_pos) = trimmed.find("()") {
+                // "name() {" format
+                trimmed[..paren_pos].trim().to_string()
+            } else if trimmed.starts_with("() {") {
+                // Anonymous function
+                "anonymous".to_string()
+            } else {
+                "unknown".to_string()
+            }
+        }
+        EntryType::EnvVar => {
+            // Extract variable name from "export VAR='value'" or "VAR='value'"
+            let trimmed = value.trim().trim_start_matches("export").trim();
+            if let Some(eq_pos) = trimmed.find('=') {
+                trimmed[..eq_pos].trim().to_string()
+            } else {
+                "unknown".to_string()
+            }
+        }
+        EntryType::Source => {
+            // Extract filename from "source /path/to/file" or ". /path/to/file"
+            let path = value
+                .trim()
+                .trim_start_matches("source")
+                .trim_start_matches('.')
+                .trim();
+            std::path::Path::new(path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        }
+        EntryType::Code | EntryType::Comment => {
+            // For Code/Comment, use a line-based identifier
+            let line_count = value.split('\n').count();
+            if line_count <= 1 {
+                let preview: String = value.chars().take(20).collect();
+                preview
+            } else {
+                format!("{} lines", line_count)
+            }
+        }
     }
-    // Reject paths with characters that are invalid across platforms
-    // Note: We allow ':' for Windows drive letters and '?' for shell expansion
-    let invalid_chars = ['<', '>', '|', '\0'];
-    !path.chars().any(|c| invalid_chars.contains(&c))
 }

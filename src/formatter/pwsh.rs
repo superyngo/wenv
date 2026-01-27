@@ -14,10 +14,12 @@ impl PowerShellFormatter {
         Self
     }
 
+    #[allow(dead_code)]
     fn format_alias(&self, entry: &Entry) -> String {
         format!("Set-Alias {} '{}'", entry.name, entry.value)
     }
 
+    #[allow(dead_code)]
     fn format_env(&self, entry: &Entry) -> String {
         // Use Here-String format for multi-line values
         if entry.value.contains('\n') {
@@ -28,18 +30,15 @@ impl PowerShellFormatter {
         }
     }
 
+    #[allow(dead_code)]
     fn format_source(&self, entry: &Entry) -> String {
         format!(". {}", entry.value)
     }
 
+    #[allow(dead_code)]
     fn format_function(&self, entry: &Entry) -> String {
-        // If we have raw_line, preserve original format
-        if let Some(ref raw) = entry.raw_line {
-            return raw.clone();
-        }
-
-        // Otherwise, format as standard function
-        format!("function {} {{\n{}\n}}", entry.name, entry.value)
+        // With the new architecture, value already contains complete syntax
+        entry.value.clone()
     }
 }
 
@@ -231,35 +230,8 @@ impl Formatter for PowerShellFormatter {
     }
 
     fn format_entry(&self, entry: &Entry) -> String {
-        match entry.entry_type {
-            // For Alias/EnvVar/Source: prioritize raw_line if available (unedited entries)
-            // This preserves original formatting for entries that haven't been modified
-            EntryType::Alias => {
-                if let Some(ref raw) = entry.raw_line {
-                    return raw.clone();
-                }
-                self.format_alias(entry)
-            }
-            EntryType::EnvVar => {
-                if let Some(ref raw) = entry.raw_line {
-                    return raw.clone();
-                }
-                self.format_env(entry)
-            }
-            EntryType::Source => {
-                if let Some(ref raw) = entry.raw_line {
-                    return raw.clone();
-                }
-                self.format_source(entry)
-            }
-            // Function: uses format_function which handles raw_line internally
-            EntryType::Function => self.format_function(entry),
-            // Code/Comment: always use raw_line if available
-            EntryType::Code | EntryType::Comment => entry
-                .raw_line
-                .clone()
-                .unwrap_or_else(|| entry.value.clone()),
-        }
+        // With the new architecture, value already contains complete raw syntax
+        entry.value.clone()
     }
 
     fn shell_type(&self) -> ShellType {
@@ -274,7 +246,11 @@ mod tests {
     #[test]
     fn test_format_alias() {
         let formatter = PowerShellFormatter::new();
-        let entry = Entry::new(EntryType::Alias, "ll".into(), "Get-ChildItem".into());
+        let entry = Entry::new(
+            EntryType::Alias,
+            "ll".into(),
+            "Set-Alias ll 'Get-ChildItem'".into(),
+        );
         assert_eq!(
             formatter.format_entry(&entry),
             "Set-Alias ll 'Get-ChildItem'"
@@ -284,32 +260,45 @@ mod tests {
     #[test]
     fn test_format_env() {
         let formatter = PowerShellFormatter::new();
-        let entry = Entry::new(EntryType::EnvVar, "EDITOR".into(), "code".into());
+        let entry = Entry::new(
+            EntryType::EnvVar,
+            "EDITOR".into(),
+            "$env:EDITOR = \"code\"".into(),
+        );
         assert_eq!(formatter.format_entry(&entry), "$env:EDITOR = \"code\"");
     }
 
     #[test]
     fn test_format_env_multiline() {
         let formatter = PowerShellFormatter::new();
-        let value = "C:\\Program Files\\bin\nD:\\tools\nE:\\bin";
+        // Entry with complete syntax (Raw Value Architecture)
+        let value = r#"$env:PATH = @"
+C:\Program Files\bin
+D:\tools
+E:\bin
+"@"#;
         let entry = Entry::new(EntryType::EnvVar, "PATH".into(), value.into());
-        let expected = "$env:PATH = @\"\nC:\\Program Files\\bin\nD:\\tools\nE:\\bin\n\"@";
-        assert_eq!(formatter.format_entry(&entry), expected);
+        // Formatter returns value directly
+        assert_eq!(formatter.format_entry(&entry), value);
     }
 
     #[test]
     fn test_format_source() {
         let formatter = PowerShellFormatter::new();
-        // Source with line number pattern as name (should not append comment)
-        let entry = Entry::new(EntryType::Source, "L10".into(), ".\\aliases.ps1".into());
+        // Entry with complete syntax (Raw Value Architecture)
+        let entry = Entry::new(EntryType::Source, "L10".into(), ". .\\aliases.ps1".into());
         assert_eq!(formatter.format_entry(&entry), ". .\\aliases.ps1");
     }
 
     #[test]
     fn test_format_source_with_name() {
         let formatter = PowerShellFormatter::new();
-        // Source with custom name (name is for TUI identification only, not in output)
-        let entry = Entry::new(EntryType::Source, "aliases".into(), ".\\aliases.ps1".into());
+        // Entry with complete syntax (Raw Value Architecture)
+        let entry = Entry::new(
+            EntryType::Source,
+            "aliases".into(),
+            ". .\\aliases.ps1".into(),
+        );
         assert_eq!(formatter.format_entry(&entry), ". .\\aliases.ps1");
     }
 }

@@ -42,7 +42,9 @@ pub mod parsers;
 pub mod patterns;
 
 use crate::model::{Entry, EntryType, ParseResult, ShellType};
-use crate::parser::builders::{count_braces_outside_quotes, CommentBlockBuilder};
+use crate::parser::builders::{
+    count_braces_outside_quotes, count_parens_outside_quotes, CommentBlockBuilder,
+};
 use crate::parser::pending::{BoundaryType, MergeType, PendingBlock};
 use crate::parser::Parser;
 
@@ -77,6 +79,92 @@ impl BashParser {
         Self
     }
 
+    /// Convert an entry to a pending block that can absorb trailing blanks.
+    fn entry_to_trailing_pending(entry: Entry) -> PendingBlock {
+        PendingBlock {
+            lines: entry.value.split('\n').map(|s| s.to_string()).collect(),
+            start_line: entry.line_number.unwrap_or(1),
+            end_line: entry.end_line.unwrap_or(entry.line_number.unwrap_or(1)),
+            boundary: BoundaryType::AdjacentMerging {
+                merge_type: MergeType::CodeWithBlanks,
+            },
+            entry_hint: Some(entry.entry_type),
+            name: Some(entry.name),
+            value: None, // Don't set value - let build_entry_from_pending use raw_content
+            comment_count: 0,
+        }
+    }
+
+    /// Merge pending entry (Comment/Code/blank lines) with a structured entry.
+    /// The pending content becomes a prefix to the structured entry's value.
+    ///
+    /// New merge rules:
+    /// - Single comment (comment_count == 1): merge downward to structured entry
+    /// - Multiple comments (comment_count > 1): don't merge, return as separate entries
+    /// - Blank lines only (comment_count == 0): don't merge, return as separate entry
+    /// - Structured entry pending (has stored value): flush and don't merge
+    fn merge_pending_with_structured(
+        pending: Option<PendingBlock>,
+        entry: Entry,
+        parser: &BashParser,
+    ) -> (Option<Entry>, Entry) {
+        if let Some(pending) = pending {
+            // If pending has a stored value, it's a structured entry absorbing trailing blanks
+            // Flush it using build_entry_from_pending to preserve proper name extraction
+            if pending.is_structured_entry() {
+                let flushed = parser.build_entry_from_pending(pending);
+                return (Some(flushed), entry);
+            }
+
+            if pending.comment_count == 0 {
+                // All blank lines → return as separate Code entry
+                (
+                    Some(
+                        Entry::new(
+                            EntryType::Code,
+                            format!("L{}-L{}", pending.start_line, pending.end_line),
+                            pending.raw_content(),
+                        )
+                        .with_line_number(pending.start_line)
+                        .with_end_line(pending.end_line),
+                    ),
+                    entry,
+                )
+            } else if pending.comment_count == 1 {
+                // Single comment → merge downward
+                let pending_content = pending.raw_content();
+                let merged_value = format!("{}\n{}", pending_content, entry.value);
+                let end_line = entry
+                    .end_line
+                    .or(entry.line_number)
+                    .unwrap_or(pending.start_line);
+
+                (
+                    None,
+                    Entry::new(entry.entry_type, entry.name, merged_value)
+                        .with_line_number(pending.start_line)
+                        .with_end_line(end_line),
+                )
+            } else {
+                // Multiple comments → return as separate Comment entry
+                (
+                    Some(
+                        Entry::new(
+                            EntryType::Comment,
+                            format!("#L{}-L{}", pending.start_line, pending.end_line),
+                            pending.raw_content(),
+                        )
+                        .with_line_number(pending.start_line)
+                        .with_end_line(pending.end_line),
+                    ),
+                    entry,
+                )
+            }
+        } else {
+            (None, entry)
+        }
+    }
+
     /// Build an Entry from a completed PendingBlock.
     fn build_entry_from_pending(&self, block: PendingBlock) -> Entry {
         let entry_type = block.entry_hint.unwrap_or(EntryType::Code);
@@ -85,19 +173,24 @@ impl BashParser {
         // Determine name and value based on entry type
         let (name, value) = match entry_type {
             EntryType::Function => {
-                let name = block
+                let mut name = block
                     .name
                     .unwrap_or_else(|| format!("L{}", block.start_line));
-                // Extract function body from raw content
-                let body = self.extract_function_body(&raw_content);
-                (name, body)
+
+                // Update anonymous function name with end_line if it was a multi-line function
+                if name.starts_with("(fL") && block.start_line != block.end_line {
+                    name = format!("(fL{}-L{})", block.start_line, block.end_line);
+                }
+
+                // Store complete function definition in value (Raw Value Architecture)
+                (name, raw_content)
             }
             EntryType::Alias | EntryType::EnvVar => {
                 let name = block
                     .name
                     .unwrap_or_else(|| format!("L{}", block.start_line));
-                let value = block.value.unwrap_or_else(|| raw_content.clone());
-                (name, value)
+                // Use raw_content (includes all absorbed trailing blanks)
+                (name, raw_content)
             }
             EntryType::Comment => {
                 let prefix = if block.start_line == block.end_line {
@@ -105,9 +198,8 @@ impl BashParser {
                 } else {
                     format!("#L{}-L{}", block.start_line, block.end_line)
                 };
-                // Value is first line for display
-                let first_line = block.lines.first().cloned().unwrap_or_default();
-                (prefix, first_line)
+                // Store complete comment content (Raw Value Architecture)
+                (prefix, raw_content)
             }
             EntryType::Code => {
                 let prefix = if block.start_line == block.end_line {
@@ -115,39 +207,22 @@ impl BashParser {
                 } else {
                     format!("L{}-L{}", block.start_line, block.end_line)
                 };
-                // Value is first non-blank line for display (for control blocks with absorbed blank lines)
-                let first_non_blank = block
-                    .lines
-                    .iter()
-                    .find(|l| !l.trim().is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| block.lines.first().cloned().unwrap_or_default());
-                (prefix, first_non_blank)
+                // Store complete code content (Raw Value Architecture)
+                (prefix, raw_content)
             }
             EntryType::Source => {
-                let name = format!("L{}", block.start_line);
-                let value = block.value.unwrap_or_else(|| raw_content.clone());
-                (name, value)
+                // Use stored name if available (from trailing pending), otherwise generate from line
+                let name = block
+                    .name
+                    .unwrap_or_else(|| format!("L{}", block.start_line));
+                // Use raw_content (includes all absorbed trailing blanks)
+                (name, raw_content)
             }
         };
 
         Entry::new(entry_type, name, value)
             .with_line_number(block.start_line)
             .with_end_line(block.end_line)
-            .with_raw_line(raw_content)
-    }
-
-    /// Extract function body from raw content.
-    fn extract_function_body(&self, raw: &str) -> String {
-        // Find opening brace and extract body
-        if let Some(start) = raw.find('{') {
-            if let Some(end) = raw.rfind('}') {
-                if start < end {
-                    return raw[start + 1..end].trim().to_string();
-                }
-            }
-        }
-        raw.to_string()
     }
 
     /// Flush pending Comment/Code block and return Entry if exists.
@@ -214,7 +289,8 @@ impl Parser for BashParser {
 
                         if *brace_count == 0 {
                             let entry = self.build_entry_from_pending(active_block.take().unwrap());
-                            result.add_entry(entry);
+                            // Set as pending to absorb trailing blanks
+                            pending_entry = Some(Self::entry_to_trailing_pending(entry));
                         }
                     }
                     BoundaryType::QuoteCounting {
@@ -224,12 +300,25 @@ impl Parser for BashParser {
                         *quote_count += line.matches('\'').count();
 
                         if *quote_count % 2 == 0 {
-                            let mut completed = active_block.take().unwrap();
-                            // Extract value from complete content
-                            let raw = completed.raw_content();
-                            completed.value = Some(self.extract_quoted_value(&raw));
+                            let completed = active_block.take().unwrap();
+                            // Don't set completed.value - let build_entry_from_pending use raw_content
                             let entry = self.build_entry_from_pending(completed);
-                            result.add_entry(entry);
+                            // Set as pending to absorb trailing blanks
+                            pending_entry = Some(Self::entry_to_trailing_pending(entry));
+                        }
+                    }
+                    BoundaryType::ParenthesisCounting {
+                        ref mut parenthesis_count,
+                    } => {
+                        // Multi-line parenthesis structure (e.g., plugins=(...))
+                        let (open, close) = count_parens_outside_quotes(trimmed);
+                        *parenthesis_count += open as i32;
+                        *parenthesis_count = (*parenthesis_count).saturating_sub(close as i32);
+
+                        if *parenthesis_count == 0 {
+                            let entry = self.build_entry_from_pending(active_block.take().unwrap());
+                            // Set as pending to absorb trailing blanks
+                            pending_entry = Some(Self::entry_to_trailing_pending(entry));
                         }
                     }
                     BoundaryType::KeywordTracking { ref mut depth } => {
@@ -255,6 +344,7 @@ impl Parser for BashParser {
                                 entry_hint: Some(EntryType::Code),
                                 name: None,
                                 value: None,
+                                comment_count: 0,
                             });
                         }
                     }
@@ -291,6 +381,7 @@ impl Parser for BashParser {
                                 entry_hint: Some(EntryType::Code),
                                 name: None,
                                 value: None,
+                                comment_count: pending.comment_count,
                             });
                         } else {
                             // Flush non-mergeable pending
@@ -339,6 +430,7 @@ impl Parser for BashParser {
                     Some(pending) if pending.can_absorb_comment() => {
                         // Comment merges with Comment
                         pending.add_line(line, line_number);
+                        pending.increment_comment_count();
                     }
                     Some(_) => {
                         // Non-Comment pending: flush and start new comment
@@ -361,11 +453,14 @@ impl Parser for BashParser {
             // Try alias
             match try_parse_alias(trimmed, line_number) {
                 ParseEvent::Complete(entry) => {
-                    // Flush pending entry
-                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(e);
+                    // Merge pending entry (if exists) with this structured entry
+                    let (pending_entry_to_add, merged) =
+                        Self::merge_pending_with_structured(pending_entry.take(), entry, self);
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
                     }
-                    result.add_entry(entry);
+                    // Set merged entry as pending to absorb trailing blanks
+                    pending_entry = Some(Self::entry_to_trailing_pending(merged));
                     continue;
                 }
                 ParseEvent::Started {
@@ -374,19 +469,36 @@ impl Parser for BashParser {
                     boundary,
                     first_line,
                 } => {
-                    // Flush pending entry
-                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(e);
-                    }
+                    // For multi-line alias, check pending merge rules
+                    let (merged_first_line, start_line) =
+                        if let Some(pending) = pending_entry.take() {
+                            // If pending has stored value, it's a trailing structured entry - flush it
+                            if pending.is_structured_entry() {
+                                result.add_entry(self.build_entry_from_pending(pending));
+                                (first_line, line_number)
+                            } else if pending.comment_count == 1 {
+                                // Single comment can merge down
+                                let merged = format!("{}\n{}", pending.raw_content(), first_line);
+                                (merged, pending.start_line)
+                            } else {
+                                // Multiple comments or pure blank - don't merge
+                                result.add_entry(self.build_entry_from_pending(pending));
+                                (first_line, line_number)
+                            }
+                        } else {
+                            (first_line, line_number)
+                        };
+
                     // Create PendingBlock directly from ParseEvent
                     active_block = Some(PendingBlock {
-                        lines: vec![first_line],
-                        start_line: line_number,
+                        lines: vec![merged_first_line],
+                        start_line,
                         end_line: line_number,
                         boundary,
                         entry_hint: Some(entry_type),
                         name: Some(name),
                         value: None,
+                        comment_count: 0,
                     });
                     continue;
                 }
@@ -396,11 +508,14 @@ impl Parser for BashParser {
             // Try export (environment variable)
             match try_parse_env(trimmed, line_number) {
                 ParseEvent::Complete(entry) => {
-                    // Flush pending entry
-                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(e);
+                    // Merge pending entry (if exists) with this structured entry
+                    let (pending_entry_to_add, merged) =
+                        Self::merge_pending_with_structured(pending_entry.take(), entry, self);
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
                     }
-                    result.add_entry(entry);
+                    // Set merged entry as pending to absorb trailing blanks
+                    pending_entry = Some(Self::entry_to_trailing_pending(merged));
                     continue;
                 }
                 ParseEvent::Started {
@@ -409,19 +524,36 @@ impl Parser for BashParser {
                     boundary,
                     first_line,
                 } => {
-                    // Flush pending entry
-                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(e);
-                    }
+                    // For multi-line env, check pending merge rules
+                    let (merged_first_line, start_line) =
+                        if let Some(pending) = pending_entry.take() {
+                            // If pending has stored value, it's a trailing structured entry - flush it
+                            if pending.is_structured_entry() {
+                                result.add_entry(self.build_entry_from_pending(pending));
+                                (first_line, line_number)
+                            } else if pending.comment_count == 1 {
+                                // Single comment can merge down
+                                let merged = format!("{}\n{}", pending.raw_content(), first_line);
+                                (merged, pending.start_line)
+                            } else {
+                                // Multiple comments or pure blank - don't merge
+                                result.add_entry(self.build_entry_from_pending(pending));
+                                (first_line, line_number)
+                            }
+                        } else {
+                            (first_line, line_number)
+                        };
+
                     // Create PendingBlock directly from ParseEvent
                     active_block = Some(PendingBlock {
-                        lines: vec![first_line],
-                        start_line: line_number,
+                        lines: vec![merged_first_line],
+                        start_line,
                         end_line: line_number,
                         boundary,
                         entry_hint: Some(entry_type),
                         name: Some(name),
                         value: None,
+                        comment_count: 0,
                     });
                     continue;
                 }
@@ -431,11 +563,14 @@ impl Parser for BashParser {
             // Try source
             match try_parse_source(trimmed, line_number) {
                 ParseEvent::Complete(entry) => {
-                    // Flush pending entry
-                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(e);
+                    // Merge pending entry (if exists) with this structured entry
+                    let (pending_entry_to_add, merged) =
+                        Self::merge_pending_with_structured(pending_entry.take(), entry, self);
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
                     }
-                    result.add_entry(entry);
+                    // Set merged entry as pending to absorb trailing blanks
+                    pending_entry = Some(Self::entry_to_trailing_pending(merged));
                     continue;
                 }
                 ParseEvent::Started { .. } => {
@@ -447,25 +582,111 @@ impl Parser for BashParser {
             }
 
             // Try function
-            if let Some(func_name) = detect_function_start(trimmed) {
-                // Flush pending entry
-                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                    result.add_entry(e);
-                }
-
+            if let Some((func_name, is_anonymous)) = detect_function_start(trimmed) {
                 let (open, close) = count_braces_outside_quotes(trimmed);
                 let brace_count = (open as i32).saturating_sub(close as i32);
 
-                let func_block =
-                    PendingBlock::function(func_name.clone(), line_number, line, brace_count);
+                // Check if single-line function
+                let is_single_line = brace_count == 0 && trimmed.contains('}');
 
-                // Single-line function check
-                if brace_count == 0 && trimmed.contains('}') {
-                    let entry = self.build_entry_from_pending(func_block);
-                    result.add_entry(entry);
+                // Generate name for anonymous function if needed
+                let name = if is_anonymous {
+                    if is_single_line {
+                        format!("(fL{})", line_number)
+                    } else {
+                        // Will update with end_line later
+                        format!("(fL{})", line_number)
+                    }
                 } else {
+                    func_name
+                };
+
+                if is_single_line {
+                    // Single-line function: build entry directly
+                    let entry = Entry::new(EntryType::Function, name, line.to_string())
+                        .with_line_number(line_number)
+                        .with_end_line(line_number);
+                    // Merge with pending
+                    let (pending_entry_to_add, merged) =
+                        Self::merge_pending_with_structured(pending_entry.take(), entry, self);
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
+                    }
+                    // Set merged entry as pending to absorb trailing blanks
+                    pending_entry = Some(Self::entry_to_trailing_pending(merged));
+                } else {
+                    // Multi-line function: check pending merge rules
+                    let (merged_first_line, start_line) =
+                        if let Some(pending) = pending_entry.take() {
+                            // If pending has stored value, it's a trailing structured entry - flush it
+                            if pending.is_structured_entry() {
+                                result.add_entry(self.build_entry_from_pending(pending));
+                                (line.to_string(), line_number)
+                            } else if pending.comment_count == 1 {
+                                // Single comment can merge down
+                                let merged = format!("{}\n{}", pending.raw_content(), line);
+                                (merged, pending.start_line)
+                            } else {
+                                // Multiple comments or pure blank - don't merge
+                                result.add_entry(self.build_entry_from_pending(pending));
+                                (line.to_string(), line_number)
+                            }
+                        } else {
+                            (line.to_string(), line_number)
+                        };
+
+                    let func_block = PendingBlock {
+                        lines: vec![merged_first_line],
+                        start_line,
+                        end_line: line_number,
+                        boundary: BoundaryType::BraceCounting { brace_count },
+                        entry_hint: Some(EntryType::Function),
+                        name: Some(name),
+                        value: None,
+                        comment_count: 0,
+                    };
                     active_block = Some(func_block);
                 }
+                continue;
+            }
+
+            // ------------------------------------------------------------------
+            // Check for multi-line parenthesis structure (e.g., plugins=(...))
+            // ------------------------------------------------------------------
+            let (open_paren, close_paren) = count_parens_outside_quotes(trimmed);
+            if open_paren > close_paren {
+                // Start multi-line parenthesis structure
+                let parenthesis_count = (open_paren - close_paren) as i32;
+
+                let (merged_first_line, start_line) = if let Some(pending) = pending_entry.take() {
+                    // If pending has stored value, it's a trailing structured entry - flush it
+                    if pending.is_structured_entry() {
+                        result.add_entry(self.build_entry_from_pending(pending));
+                        (line.to_string(), line_number)
+                    } else if pending.comment_count == 1 {
+                        // Single comment can merge down
+                        let merged = format!("{}\n{}", pending.raw_content(), line);
+                        (merged, pending.start_line)
+                    } else {
+                        // Multiple comments or pure blank - don't merge
+                        result.add_entry(self.build_entry_from_pending(pending));
+                        (line.to_string(), line_number)
+                    }
+                } else {
+                    (line.to_string(), line_number)
+                };
+
+                let paren_block = PendingBlock {
+                    lines: vec![merged_first_line],
+                    start_line,
+                    end_line: line_number,
+                    boundary: BoundaryType::ParenthesisCounting { parenthesis_count },
+                    entry_hint: Some(EntryType::Code),
+                    name: None,
+                    value: None,
+                    comment_count: 0,
+                };
+                active_block = Some(paren_block);
                 continue;
             }
 
@@ -474,9 +695,18 @@ impl Parser for BashParser {
             // ------------------------------------------------------------------
             match &mut pending_entry {
                 Some(pending) if pending.entry_hint == Some(EntryType::Comment) => {
-                    // Comment + non-blank Code → merge and upgrade to Code
-                    pending.add_line(line, line_number);
-                    pending.upgrade_to_code();
+                    // Only single comment can merge down to code
+                    if pending.comment_count == 1 {
+                        // Comment + non-blank Code → merge and upgrade to Code
+                        pending.add_line(line, line_number);
+                        pending.upgrade_to_code();
+                    } else {
+                        // Multiple comments don't merge - flush and start new code
+                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
+                            result.add_entry(entry);
+                        }
+                        pending_entry = Some(PendingBlock::code(line_number, line));
+                    }
                 }
                 Some(pending) if pending.entry_hint == Some(EntryType::Code) => {
                     // Non-blank Code pending + new non-blank Code → flush pending, new pending
@@ -524,28 +754,7 @@ impl Parser for BashParser {
     }
 }
 
-impl BashParser {
-    /// Extract quoted value from raw multi-line content.
-    fn extract_quoted_value(&self, raw: &str) -> String {
-        // Find the first quote and extract value
-        if let Some(start) = raw.find('\'') {
-            if let Some(end) = raw.rfind('\'') {
-                if start < end {
-                    return raw[start + 1..end].to_string();
-                }
-            }
-        }
-        // Fallback: try double quotes
-        if let Some(start) = raw.find('"') {
-            if let Some(end) = raw.rfind('"') {
-                if start < end {
-                    return raw[start + 1..end].to_string();
-                }
-            }
-        }
-        raw.to_string()
-    }
-}
+impl BashParser {}
 
 #[cfg(test)]
 mod tests {
@@ -560,7 +769,7 @@ mod tests {
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].entry_type, EntryType::Alias);
         assert_eq!(result.entries[0].name, "ll");
-        assert_eq!(result.entries[0].value, "ls -la");
+        assert_eq!(result.entries[0].value, "alias ll='ls -la'");
     }
 
     #[test]
@@ -571,7 +780,7 @@ mod tests {
 
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].name, "gs");
-        assert_eq!(result.entries[0].value, "git status");
+        assert_eq!(result.entries[0].value, r#"alias gs="git status""#);
     }
 
     #[test]
@@ -590,9 +799,11 @@ mod tests {
         assert_eq!(aliases[0].name, "complex");
         assert_eq!(aliases[0].line_number, Some(1));
         assert_eq!(aliases[0].end_line, Some(3));
-        assert!(aliases[0].value.contains("line1"));
-        assert!(aliases[0].value.contains("line2"));
-        assert!(aliases[0].value.contains("line3"));
+        // Value should contain complete syntax, not just quoted content
+        assert_eq!(
+            aliases[0].value,
+            "alias complex='echo line1\necho line2\necho line3'"
+        );
     }
 
     #[test]
@@ -611,6 +822,8 @@ mod tests {
         assert_eq!(exports[0].name, "LONG");
         assert_eq!(exports[0].line_number, Some(1));
         assert_eq!(exports[0].end_line, Some(3));
+        // Value should contain complete syntax
+        assert_eq!(exports[0].value, "export LONG='value1\nvalue2\nvalue3'");
     }
 
     #[test]
@@ -622,7 +835,7 @@ mod tests {
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].entry_type, EntryType::EnvVar);
         assert_eq!(result.entries[0].name, "EDITOR");
-        assert_eq!(result.entries[0].value, "nvim");
+        assert_eq!(result.entries[0].value, "export EDITOR=nvim");
     }
 
     #[test]
@@ -634,7 +847,7 @@ mod tests {
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].entry_type, EntryType::Source);
         assert_eq!(result.entries[0].name, ".aliases");
-        assert_eq!(result.entries[0].value, "~/.aliases");
+        assert_eq!(result.entries[0].value, "source ~/.aliases");
     }
 
     #[test]
@@ -656,21 +869,26 @@ mod tests {
     }
 
     #[test]
-    fn test_adjacent_comments_merged() {
+    fn test_adjacent_comments_merged_with_alias() {
+        // NEW BEHAVIOR: Multiple comments don't merge with alias
+        // Comments followed by alias should NOT merge (comment_count > 1)
         let parser = BashParser::new();
         let content = "# Header comment\n# Second line\n# Third line\nalias test='value'";
         let result = parser.parse(content);
 
-        let comments: Vec<_> = result
-            .entries
-            .iter()
-            .filter(|e| e.entry_type == EntryType::Comment)
-            .collect();
+        // Should have 2 entries: Comment block + Alias (not merged)
+        assert_eq!(result.entries.len(), 2);
 
-        assert_eq!(comments.len(), 1);
-        assert_eq!(comments[0].name, "#L1-L3");
-        assert_eq!(comments[0].line_number, Some(1));
-        assert_eq!(comments[0].end_line, Some(3));
+        let comment = &result.entries[0];
+        assert_eq!(comment.entry_type, EntryType::Comment);
+        assert_eq!(comment.line_number, Some(1)); // Starts from first comment
+        assert_eq!(comment.end_line, Some(3)); // Ends at third comment line
+
+        let alias = &result.entries[1];
+        assert_eq!(alias.entry_type, EntryType::Alias);
+        assert_eq!(alias.name, "test");
+        assert_eq!(alias.line_number, Some(4)); // Starts on its own line
+        assert!(!alias.value.contains("# Header comment")); // NOT merged
     }
 
     #[test]
@@ -696,17 +914,22 @@ mod tests {
 
     #[test]
     fn test_comments_separated_by_code() {
+        // First comment merges with alias, second comment is standalone
         let parser = BashParser::new();
         let content = "# First block\nalias a='a'\n# Second block";
         let result = parser.parse(content);
 
-        let comments: Vec<_> = result
-            .entries
-            .iter()
-            .filter(|e| e.entry_type == EntryType::Comment)
-            .collect();
+        // Should have 2 entries: Alias (with merged comment) + Comment
+        assert_eq!(result.entries.len(), 2);
 
-        assert_eq!(comments.len(), 2);
+        let alias = &result.entries[0];
+        assert_eq!(alias.entry_type, EntryType::Alias);
+        assert_eq!(alias.name, "a");
+        assert!(alias.value.contains("# First block"));
+
+        let comment = &result.entries[1];
+        assert_eq!(comment.entry_type, EntryType::Comment);
+        assert!(comment.value.contains("# Second block"));
     }
 
     #[test]
@@ -739,8 +962,7 @@ mod tests {
             .filter(|e| e.entry_type == EntryType::Code && e.value.is_empty())
             .collect();
 
-        assert_eq!(blanks.len(), 1);
-        assert_eq!(blanks[0].name, "L2-L3");
+        assert_eq!(blanks.len(), 0);
     }
 
     #[test]
@@ -799,10 +1021,8 @@ mod tests {
         assert_eq!(code.entry_type, EntryType::Code);
         assert_eq!(code.line_number, Some(1));
         assert_eq!(code.end_line, Some(2));
-        // value preserves Comment's first line for list display
-        assert_eq!(code.value, "# Note");
         // raw_line contains complete content (comment + code)
-        assert_eq!(code.raw_line, Some("# Note\necho hello".to_string()));
+        assert_eq!(code.value, ("# Note\necho hello".to_string()));
         // comment field is no longer set - raw_line has complete content
     }
 
@@ -823,10 +1043,8 @@ mod tests {
         assert_eq!(code.entry_type, EntryType::Code);
         assert_eq!(code.line_number, Some(1));
         assert_eq!(code.end_line, Some(3));
-        // value preserves Comment's first line for list display
-        assert_eq!(code.value, "# Header");
         // raw_line contains complete content (comment + blank + code)
-        assert_eq!(code.raw_line, Some("# Header\n\necho hi".to_string()));
+        assert_eq!(code.value, ("# Header\n\necho hi".to_string()));
         // comment field is no longer set - raw_line has complete content
     }
 
@@ -870,32 +1088,34 @@ mod tests {
     }
 
     #[test]
-    fn test_comment_then_alias_not_merged() {
+    fn test_comment_then_alias_merged() {
         // # Section header
         // alias ll='ls -la'
-        // → Comment L1 flushed, Alias L2
+        // → Merged into single Alias entry starting at L1
         let parser = BashParser::new();
         let content = "# Section header\nalias ll='ls -la'";
         let result = parser.parse(content);
 
-        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries.len(), 1);
 
-        let comment = &result.entries[0];
-        assert_eq!(comment.entry_type, EntryType::Comment);
-        assert_eq!(comment.line_number, Some(1));
-
-        let alias = &result.entries[1];
+        let alias = &result.entries[0];
         assert_eq!(alias.entry_type, EntryType::Alias);
         assert_eq!(alias.name, "ll");
+        assert_eq!(alias.line_number, Some(1)); // Starts from comment line
+        assert_eq!(alias.end_line, Some(2)); // Ends at alias line
+                                             // Value should contain both comment and alias
+        assert!(alias.value.contains("# Section header"));
+        assert!(alias.value.contains("alias ll='ls -la'"));
     }
 
     #[test]
-    fn test_comment_blank_alias_scenario() {
+    fn test_comment_blank_alias_merged() {
+        // NEW BEHAVIOR: Multiple comments don't merge down
         // # Section header
         // # with description
         // (blank)
         // alias ll='ls -la'
-        // Expected: Comment L1-L3, Alias L4
+        // Expected: Comment block (L1-L3) + Alias (L4)
         let parser = BashParser::new();
         let content = "# Section header\n# with description\n\nalias ll='ls -la'";
         let result = parser.parse(content);
@@ -905,11 +1125,12 @@ mod tests {
         let comment = &result.entries[0];
         assert_eq!(comment.entry_type, EntryType::Comment);
         assert_eq!(comment.line_number, Some(1));
-        assert_eq!(comment.end_line, Some(3)); // Absorbed blank line
+        assert_eq!(comment.end_line, Some(3)); // Absorbs blank line
 
         let alias = &result.entries[1];
         assert_eq!(alias.entry_type, EntryType::Alias);
-        assert_eq!(alias.line_number, Some(4));
+        assert_eq!(alias.line_number, Some(4)); // Starts on its own line
+        assert!(!alias.value.contains("# Section header")); // NOT merged
     }
 
     #[test]
@@ -927,7 +1148,7 @@ mod tests {
 
         let code = &result.entries[0];
         assert_eq!(code.entry_type, EntryType::Code);
-        assert_eq!(code.value, "echo hi");
+        assert_eq!(code.value, "echo hi\n\n");
         assert_eq!(code.line_number, Some(1));
         assert_eq!(code.end_line, Some(3));
     }
@@ -947,7 +1168,7 @@ mod tests {
 
         let first = &result.entries[0];
         assert_eq!(first.entry_type, EntryType::Code);
-        assert_eq!(first.value, "echo first");
+        assert_eq!(first.value, "echo first\n");
         assert_eq!(first.line_number, Some(1));
         assert_eq!(first.end_line, Some(2)); // Absorbed one blank line
 
@@ -972,8 +1193,8 @@ mod tests {
         assert_eq!(entry.entry_type, EntryType::Comment);
         assert_eq!(entry.line_number, Some(1));
         assert_eq!(entry.end_line, Some(2)); // Comment absorbs the blank line
-                                             // raw_line should contain "# comment\n" (2 lines: comment + blank)
-        assert_eq!(entry.raw_line, Some("# comment\n".to_string()));
+                                             // value should contain "# comment\n" (2 lines: comment + blank)
+        assert_eq!(entry.value, "# comment\n");
     }
 
     #[test]
@@ -990,8 +1211,8 @@ mod tests {
         assert_eq!(entry.entry_type, EntryType::Comment);
         assert_eq!(entry.line_number, Some(1));
         assert_eq!(entry.end_line, Some(3)); // Comment absorbs 2 blank lines
-                                             // raw_line should contain all 3 lines
-        assert_eq!(entry.raw_line, Some("# comment\n\n".to_string()));
+                                             // value should contain all 3 lines
+        assert_eq!(entry.value, "# comment\n\n");
     }
 
     #[test]
@@ -1011,5 +1232,190 @@ mod tests {
         let result2 = parser.parse(content2);
         assert_eq!(result2.entries.len(), 1);
         assert_eq!(result2.entries[0].end_line, Some(2)); // 2 lines: comment + blank
+    }
+
+    // === Tests for new merge logic ===
+
+    #[test]
+    fn test_alias_with_options() {
+        let parser = BashParser::new();
+        let content = "alias -g ll='ls -la'";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        let alias = &result.entries[0];
+        assert_eq!(alias.entry_type, EntryType::Alias);
+        assert_eq!(alias.name, "ll");
+        assert_eq!(alias.value, "alias -g ll='ls -la'");
+    }
+
+    #[test]
+    fn test_multiple_comments_dont_merge_down() {
+        // Rule 2 & 4: Multiple comments form independent blocks
+        let parser = BashParser::new();
+        let content = "# comment 1\n# comment 2\n\nalias a='b'";
+        let result = parser.parse(content);
+
+        // Should have 2 entries: Comment block + Alias (not merged)
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::Comment);
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(3)); // Comment absorbs blank line
+        assert_eq!(result.entries[1].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[1].line_number, Some(4)); // Alias starts on line 4
+        assert!(!result.entries[1].value.contains("comment")); // Not merged
+    }
+
+    #[test]
+    fn test_blank_lines_merge_up_not_down() {
+        // Rule 1: Blank lines only merge upward
+        let parser = BashParser::new();
+        let content = "\n\nalias a='b'\n\nalias c='d'";
+        let result = parser.parse(content);
+
+        // Should have 3 entries:
+        // 1. Code (blank lines)
+        // 2. Alias a (absorbs trailing blank)
+        // 3. Alias c
+        assert_eq!(result.entries.len(), 3);
+
+        // First entry: leading blank lines
+        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(2));
+
+        // Second entry: alias a with trailing blank absorbed
+        assert_eq!(result.entries[1].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[1].line_number, Some(3));
+        assert_eq!(result.entries[1].end_line, Some(4)); // Absorbs blank line 4
+
+        // Third entry: alias c
+        assert_eq!(result.entries[2].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[2].line_number, Some(5));
+    }
+
+    #[test]
+    fn test_single_comment_merges_down() {
+        // Rule 3: Single comment merges downward to structured entry
+        let parser = BashParser::new();
+        let content = "# single comment\nalias a='b'";
+        let result = parser.parse(content);
+
+        // Should have 1 entry: Alias with merged comment
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[0].line_number, Some(1)); // Starts from comment
+        assert_eq!(result.entries[0].end_line, Some(2));
+        assert!(result.entries[0].value.contains("# single comment"));
+        assert!(result.entries[0].value.contains("alias a='b'"));
+    }
+
+    #[test]
+    fn test_single_vs_multiple_comment_distinction() {
+        // Rule 4: Distinguish between single and multiple comments
+        let parser = BashParser::new();
+        let content = "# comment 1\n# comment 2\n\nalias a='b'\n\n# single\n\nalias c='d'\n";
+        let result = parser.parse(content);
+
+        // Should have 3 entries:
+        // 1. Multiple comments (not merged with alias a)
+        // 2. Alias a (absorbs trailing blank)
+        // 3. Alias c (merges with single comment, absorbs trailing blank)
+        assert_eq!(result.entries.len(), 3);
+
+        // Multiple comments block
+        assert_eq!(result.entries[0].entry_type, EntryType::Comment);
+        assert_eq!(result.entries[0].line_number, Some(1));
+
+        // Alias a (not merged with comments above)
+        assert_eq!(result.entries[1].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[1].line_number, Some(4));
+        assert!(!result.entries[1].value.contains("comment 1"));
+
+        // Alias c (merged with single comment)
+        assert_eq!(result.entries[2].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[2].line_number, Some(6)); // Starts from single comment
+        assert!(result.entries[2].value.contains("# single"));
+    }
+
+    #[test]
+    fn test_alias_with_trailing_blanks() {
+        // Test that alias correctly absorbs trailing blank lines
+        let parser = BashParser::new();
+        let content = "alias foo='bar'\n\n\nexport BAR=baz\n";
+        let result = parser.parse(content);
+
+        // Alias should absorb L2-L3 trailing blanks
+        assert_eq!(result.entries[0].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[0].name, "foo");
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(3));
+        assert_eq!(result.entries[0].value, "alias foo='bar'\n\n");
+
+        // Export starts at L4
+        assert_eq!(result.entries[1].entry_type, EntryType::EnvVar);
+        assert_eq!(result.entries[1].name, "BAR");
+        assert_eq!(result.entries[1].line_number, Some(4));
+        assert_eq!(result.entries[1].value, "export BAR=baz");
+    }
+
+    #[test]
+    fn test_env_with_trailing_blanks() {
+        // Test that export correctly absorbs trailing blank lines
+        let parser = BashParser::new();
+        let content = "export FOO=bar\n\n\nalias TEST='value'\n";
+        let result = parser.parse(content);
+
+        // Export should absorb L2-L3 trailing blanks
+        assert_eq!(result.entries[0].entry_type, EntryType::EnvVar);
+        assert_eq!(result.entries[0].name, "FOO");
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(3));
+        assert_eq!(result.entries[0].value, "export FOO=bar\n\n");
+
+        // Alias starts at L4
+        assert_eq!(result.entries[1].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[1].line_number, Some(4));
+    }
+
+    #[test]
+    fn test_source_with_trailing_blanks() {
+        // Test that source correctly absorbs trailing blank lines
+        let parser = BashParser::new();
+        let content = "source ~/.profile\n\n\nalias TEST='value'\n";
+        let result = parser.parse(content);
+
+        // Source should absorb L2-L3 trailing blanks
+        assert_eq!(result.entries[0].entry_type, EntryType::Source);
+        assert_eq!(result.entries[0].name, ".profile");
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(3));
+        assert_eq!(result.entries[0].value, "source ~/.profile\n\n");
+
+        // Alias starts at L4
+        assert_eq!(result.entries[1].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[1].line_number, Some(4));
+    }
+
+    #[test]
+    fn test_multiline_alias_with_trailing_blanks() {
+        // Test that multi-line alias correctly absorbs trailing blank lines
+        let parser = BashParser::new();
+        let content = "alias complex='line1\nline2\nline3'\n\n\nalias next='value'\n";
+        let result = parser.parse(content);
+
+        // Multi-line alias should absorb L4-L5 trailing blanks
+        assert_eq!(result.entries[0].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[0].name, "complex");
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(5));
+        assert_eq!(
+            result.entries[0].value,
+            "alias complex='line1\nline2\nline3'\n\n"
+        );
+
+        // Next alias starts at L6
+        assert_eq!(result.entries[1].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[1].line_number, Some(6));
     }
 }

@@ -28,7 +28,7 @@ lazy_static! {
     // Alias Patterns
     // =========================================================================
 
-    /// Matches single-quoted alias: `alias name='value'`
+    /// Matches single-quoted alias: `alias name='value'` or `alias -g name='value'`
     ///
     /// Captures:
     /// - Group 1: alias name (allows special chars like `.`, `~`, `-`)
@@ -36,26 +36,31 @@ lazy_static! {
     ///
     /// Note: This only matches complete single-line aliases.
     /// Multi-line aliases are handled by `QuotedValueBuilder`.
+    /// Supports alias options like `-g`, `-a`, etc.
     pub static ref ALIAS_SINGLE_RE: Regex = Regex::new(
-        r#"^alias\s+([^\s=]+)='([^']*)'(?:\s*(?:#.*)?)?$"#
+        r#"^alias(?:\s+-[a-zA-Z0-9]+)*\s+([^\s=]+)='([^']*)'(?:\s*(?:#.*)?)?$"#
     ).unwrap();
 
-    /// Matches double-quoted alias: `alias name="value"`
+    /// Matches double-quoted alias: `alias name="value"` or `alias -a name="value"`
     ///
     /// Captures:
     /// - Group 1: alias name
     /// - Group 2: alias value
+    ///
+    /// Supports alias options like `-g`, `-a`, etc.
     pub static ref ALIAS_DOUBLE_RE: Regex = Regex::new(
-        r#"^alias\s+([^\s=]+)="([^"]*)"(?:\s*(?:#.*)?)?$"#
+        r#"^alias(?:\s+-[a-zA-Z0-9]+)*\s+([^\s=]+)="([^"]*)"(?:\s*(?:#.*)?)?$"#
     ).unwrap();
 
-    /// Matches unquoted alias: `alias name=value`
+    /// Matches unquoted alias: `alias name=value` or `alias -g name=value`
     ///
     /// Captures:
     /// - Group 1: alias name
     /// - Group 2: alias value (single word, no spaces)
+    ///
+    /// Supports alias options like `-g`, `-a`, etc.
     pub static ref ALIAS_NOQUOTE_RE: Regex = Regex::new(
-        r#"^alias\s+([^\s=]+)=(\S+)(?:\s*(?:#.*)?)?$"#
+        r#"^alias(?:\s+-[a-zA-Z0-9]+)*\s+([^\s=]+)=(\S+)(?:\s*(?:#.*)?)?$"#
     ).unwrap();
 
     /// Matches the start of a potentially multi-line single-quoted alias.
@@ -64,8 +69,9 @@ lazy_static! {
     /// - Group 1: alias name
     ///
     /// This pattern matches `alias name='...` where the quote is not closed.
+    /// Supports alias options like `-g`, `-a`, etc.
     pub static ref ALIAS_MULTILINE_START_RE: Regex = Regex::new(
-        r#"^alias\s+([^\s=]+)='"#
+        r#"^alias(?:\s+-[a-zA-Z0-9]+)*\s+([^\s=]+)='"#
     ).unwrap();
 
     // =========================================================================
@@ -120,6 +126,14 @@ lazy_static! {
     pub static ref FUNC_KEYWORD_RE: Regex = Regex::new(
         r#"^function\s+(\w+)\s*\{"#
     ).unwrap();
+
+    /// Matches anonymous function: `() {`
+    ///
+    /// This pattern detects anonymous function definitions commonly used in zsh.
+    /// No captures (anonymous functions have no name).
+    pub static ref ANON_FUNC_RE: Regex = Regex::new(
+        r#"^\(\s*\)\s*\{"#
+    ).unwrap();
 }
 
 #[cfg(test)]
@@ -153,6 +167,32 @@ mod tests {
     fn test_alias_multiline_start() {
         let caps = ALIAS_MULTILINE_START_RE
             .captures("alias complex='echo")
+            .unwrap();
+        assert_eq!(&caps[1], "complex");
+    }
+
+    #[test]
+    fn test_alias_with_options() {
+        // Test -g option
+        let caps = ALIAS_SINGLE_RE.captures("alias -g ll='ls -la'").unwrap();
+        assert_eq!(&caps[1], "ll");
+        assert_eq!(&caps[2], "ls -la");
+
+        // Test -a option with double quotes
+        let caps = ALIAS_DOUBLE_RE
+            .captures(r#"alias -a gs="git status""#)
+            .unwrap();
+        assert_eq!(&caps[1], "gs");
+        assert_eq!(&caps[2], "git status");
+
+        // Test no-quote with option
+        let caps = ALIAS_NOQUOTE_RE.captures("alias -p ls=exa").unwrap();
+        assert_eq!(&caps[1], "ls");
+        assert_eq!(&caps[2], "exa");
+
+        // Test multiline start with option
+        let caps = ALIAS_MULTILINE_START_RE
+            .captures("alias -g complex='echo")
             .unwrap();
         assert_eq!(&caps[1], "complex");
     }

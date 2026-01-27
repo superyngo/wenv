@@ -9,6 +9,7 @@ use super::Formatter;
 /// Bash configuration file formatter
 pub struct BashFormatter {
     /// Indentation style (e.g., "    " for 4 spaces, "\t" for tab)
+    #[allow(dead_code)]
     indent_style: String,
 }
 
@@ -24,6 +25,7 @@ impl BashFormatter {
         Self { indent_style }
     }
 
+    #[allow(dead_code)]
     fn format_alias(&self, entry: &Entry) -> String {
         let value = &entry.value;
 
@@ -54,6 +56,7 @@ impl BashFormatter {
         }
     }
 
+    #[allow(dead_code)]
     fn format_export(&self, entry: &Entry) -> String {
         let value = &entry.value;
 
@@ -83,23 +86,19 @@ impl BashFormatter {
         }
     }
 
+    #[allow(dead_code)]
     fn format_source(&self, entry: &Entry) -> String {
         format!("source {}", entry.value)
     }
 
-    fn format_function(&self, entry: &Entry, indent_style: &str) -> String {
-        // If we have raw_line, use it but apply formatting to the body
-        if let Some(ref raw) = entry.raw_line {
-            return self.format_raw_function(raw, indent_style);
-        }
-
-        // Build from value (function body only)
-        // Apply indentation to body and wrap in function declaration
-        let body = super::indent::format_body_preserve_relative(&entry.value, indent_style);
-        format!("{}() {{\n{}\n}}", entry.name, body)
+    #[allow(dead_code)]
+    fn format_function(&self, entry: &Entry, _indent_style: &str) -> String {
+        // With the new architecture, value already contains complete syntax
+        entry.value.clone()
     }
 
     /// Format a raw function definition, applying indentation to the body
+    #[allow(dead_code)]
     fn format_raw_function(&self, raw: &str, indent_style: &str) -> String {
         let lines: Vec<&str> = raw.lines().collect();
 
@@ -312,36 +311,9 @@ impl Formatter for BashFormatter {
     }
 
     fn format_entry(&self, entry: &Entry) -> String {
-        match entry.entry_type {
-            // For Alias/EnvVar/Source: prioritize raw_line if available (unedited entries)
-            // This preserves original formatting for entries that haven't been modified
-            EntryType::Alias => {
-                if let Some(ref raw) = entry.raw_line {
-                    return raw.clone();
-                }
-                self.format_alias(entry)
-            }
-            EntryType::EnvVar => {
-                if let Some(ref raw) = entry.raw_line {
-                    return raw.clone();
-                }
-                self.format_export(entry)
-            }
-            EntryType::Source => {
-                if let Some(ref raw) = entry.raw_line {
-                    return raw.clone();
-                }
-                self.format_source(entry)
-            }
-            // Function: continues to use format_function which handles raw_line internally
-            // (applies indentation formatting to body)
-            EntryType::Function => self.format_function(entry, &self.indent_style),
-            // Code/Comment: always use raw_line if available
-            EntryType::Code | EntryType::Comment => entry
-                .raw_line
-                .clone()
-                .unwrap_or_else(|| entry.value.clone()),
-        }
+        // With the new architecture, value already contains complete raw syntax
+        // (including leading comments, keywords, options, quotes)
+        entry.value.clone()
     }
 
     fn shell_type(&self) -> ShellType {
@@ -356,21 +328,29 @@ mod tests {
     #[test]
     fn test_format_alias() {
         let formatter = BashFormatter::new();
-        let entry = Entry::new(EntryType::Alias, "ll".into(), "ls -la".into());
+        let entry = Entry::new(EntryType::Alias, "ll".into(), "alias ll='ls -la'".into());
         assert_eq!(formatter.format_entry(&entry), "alias ll='ls -la'");
     }
 
     #[test]
     fn test_format_export() {
         let formatter = BashFormatter::new();
-        let entry = Entry::new(EntryType::EnvVar, "EDITOR".into(), "nvim".into());
+        let entry = Entry::new(
+            EntryType::EnvVar,
+            "EDITOR".into(),
+            "export EDITOR=nvim".into(),
+        );
         assert_eq!(formatter.format_entry(&entry), "export EDITOR=nvim");
     }
 
     #[test]
     fn test_format_export_with_spaces() {
         let formatter = BashFormatter::new();
-        let entry = Entry::new(EntryType::EnvVar, "PATH".into(), "$HOME/bin:$PATH".into());
+        let entry = Entry::new(
+            EntryType::EnvVar,
+            "PATH".into(),
+            "export PATH=\"$HOME/bin:$PATH\"".into(),
+        );
         assert_eq!(
             formatter.format_entry(&entry),
             "export PATH=\"$HOME/bin:$PATH\""
@@ -380,7 +360,7 @@ mod tests {
     #[test]
     fn test_format_export_empty() {
         let formatter = BashFormatter::new();
-        let entry = Entry::new(EntryType::EnvVar, "EMPTY".into(), "".into());
+        let entry = Entry::new(EntryType::EnvVar, "EMPTY".into(), "export EMPTY=''".into());
         assert_eq!(formatter.format_entry(&entry), "export EMPTY=''");
     }
 
@@ -388,7 +368,7 @@ mod tests {
     fn test_format_source() {
         let formatter = BashFormatter::new();
         // Source with line number pattern as name (should not append comment)
-        let entry = Entry::new(EntryType::Source, "L10".into(), "~/.aliases".into());
+        let entry = Entry::new(EntryType::Source, "L10".into(), "source ~/.aliases".into());
         assert_eq!(formatter.format_entry(&entry), "source ~/.aliases");
     }
 
@@ -396,7 +376,11 @@ mod tests {
     fn test_format_source_with_name() {
         let formatter = BashFormatter::new();
         // Source with custom name (name is for TUI identification only, not in output)
-        let entry = Entry::new(EntryType::Source, "aliases".into(), "~/.aliases".into());
+        let entry = Entry::new(
+            EntryType::Source,
+            "aliases".into(),
+            "source ~/.aliases".into(),
+        );
         assert_eq!(formatter.format_entry(&entry), "source ~/.aliases");
     }
 
@@ -452,8 +436,7 @@ greet() {
             "if true; then\n    echo hi\nfi".into(),
         )
         .with_line_number(10)
-        .with_end_line(12)
-        .with_raw_line("if true; then\n    echo hi\nfi".into());
+        .with_end_line(12);
 
         let formatted = formatter.format_entry(&entry);
         assert_eq!(formatted, "if true; then\n    echo hi\nfi");
@@ -462,9 +445,12 @@ greet() {
     #[test]
     fn test_format_comment_entry() {
         let formatter = BashFormatter::new();
-        let entry = Entry::new(EntryType::Comment, "L5".into(), "This is a comment".into())
-            .with_line_number(5)
-            .with_raw_line("# This is a comment".into());
+        let entry = Entry::new(
+            EntryType::Comment,
+            "L5".into(),
+            "# This is a comment".into(),
+        )
+        .with_line_number(5);
 
         let formatted = formatter.format_entry(&entry);
         assert_eq!(formatted, "# This is a comment");
@@ -553,7 +539,10 @@ alias test='echo test'
         let entry = Entry::new(
             EntryType::Alias,
             "multi".into(),
-            "line1\nline2\nline3".into(),
+            "alias multi='line1
+line2
+line3'"
+                .into(),
         );
         // Should use single quotes for multiline without single quotes in value
         assert_eq!(
@@ -566,7 +555,13 @@ alias test='echo test'
     fn test_format_multiline_alias_with_single_quotes() {
         let formatter = BashFormatter::new();
         // Entry without raw_line (edited entry) with single quotes in value
-        let entry = Entry::new(EntryType::Alias, "multi".into(), "it's line1\nline2".into());
+        let entry = Entry::new(
+            EntryType::Alias,
+            "multi".into(),
+            "alias multi=\"it's line1
+line2\""
+                .into(),
+        );
         // Should use double quotes with escaping when value contains single quotes
         assert_eq!(
             formatter.format_entry(&entry),
@@ -578,7 +573,13 @@ alias test='echo test'
     fn test_format_multiline_export() {
         let formatter = BashFormatter::new();
         // Entry without raw_line (edited entry)
-        let entry = Entry::new(EntryType::EnvVar, "MULTI".into(), "line1\nline2".into());
+        let entry = Entry::new(
+            EntryType::EnvVar,
+            "MULTI".into(),
+            "export MULTI='line1
+line2'"
+                .into(),
+        );
         // Should use single quotes for multiline export (matches parser)
         assert_eq!(
             formatter.format_entry(&entry),
@@ -593,7 +594,9 @@ alias test='echo test'
         let entry = Entry::new(
             EntryType::EnvVar,
             "MULTI".into(),
-            "it's line1\nline2".into(),
+            "export MULTI=\"it's line1
+line2\""
+                .into(),
         );
         // Should use double quotes with escaping when value contains single quotes
         assert_eq!(
@@ -605,45 +608,43 @@ alias test='echo test'
     #[test]
     fn test_alias_preserves_raw_line_when_unedited() {
         let formatter = BashFormatter::new();
-        // Entry with raw_line (unedited entry from parser)
-        let entry = Entry::new(EntryType::Alias, "ll".into(), "ls -la".into())
-            .with_raw_line("alias ll='ls -la'".into());
-        // Should use raw_line directly, not format_alias
+        // Entry with complete syntax in value (as parsed)
+        let entry = Entry::new(EntryType::Alias, "ll".into(), "alias ll='ls -la'".into());
+        // Should return value directly
         assert_eq!(formatter.format_entry(&entry), "alias ll='ls -la'");
     }
 
     #[test]
     fn test_multiline_alias_preserves_raw_line() {
         let formatter = BashFormatter::new();
-        // Original multiline alias with custom formatting
-        let raw = "alias multi='line1\nline2\nline3'";
-        let entry = Entry::new(
-            EntryType::Alias,
-            "multi".into(),
-            "line1\nline2\nline3".into(),
-        )
-        .with_raw_line(raw.into());
-        // Should preserve the original raw_line exactly
-        assert_eq!(formatter.format_entry(&entry), raw);
+        // Original multiline alias with complete syntax
+        let value = "alias multi='line1
+line2
+line3'";
+        let entry = Entry::new(EntryType::Alias, "multi".into(), value.into());
+        // Should return value directly
+        assert_eq!(formatter.format_entry(&entry), value);
     }
 
     #[test]
     fn test_export_preserves_raw_line_when_unedited() {
         let formatter = BashFormatter::new();
-        // Entry with raw_line (unedited entry from parser)
-        let entry = Entry::new(EntryType::EnvVar, "EDITOR".into(), "nvim".into())
-            .with_raw_line("export EDITOR=nvim".into());
-        // Should use raw_line directly
+        // Entry with complete syntax in value (as parsed)
+        let entry = Entry::new(
+            EntryType::EnvVar,
+            "EDITOR".into(),
+            "export EDITOR=nvim".into(),
+        );
+        // Should return value directly
         assert_eq!(formatter.format_entry(&entry), "export EDITOR=nvim");
     }
 
     #[test]
     fn test_source_preserves_raw_line_when_unedited() {
         let formatter = BashFormatter::new();
-        // Entry with raw_line (unedited entry from parser)
-        let entry = Entry::new(EntryType::Source, "L10".into(), "~/.aliases".into())
-            .with_raw_line("source ~/.aliases".into());
-        // Should use raw_line directly
+        // Entry with complete syntax in value (as parsed)
+        let entry = Entry::new(EntryType::Source, "L10".into(), "source ~/.aliases".into());
+        // Should return value directly
         assert_eq!(formatter.format_entry(&entry), "source ~/.aliases");
     }
 

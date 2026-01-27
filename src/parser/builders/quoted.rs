@@ -186,13 +186,12 @@ impl QuotedValueBuilder {
     /// An `Entry` with proper `line_number` and `end_line` set.
     pub fn build(self, entry_type: EntryType) -> Entry {
         let end_line = self.start_line + self.lines.len().saturating_sub(1);
-        let raw = self.lines.join("\n");
+        let _raw = self.lines.join("\n");
         let value = self.extract_value();
 
         Entry::new(entry_type, self.name, value)
             .with_line_number(self.start_line)
             .with_end_line(end_line)
-            .with_raw_line(raw)
     }
 }
 

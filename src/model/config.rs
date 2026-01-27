@@ -12,6 +12,8 @@ pub struct Config {
     pub format: FormatConfig,
     #[serde(default)]
     pub backup: BackupConfig,
+    #[serde(default)]
+    pub cache: CacheConfig,
 }
 
 /// UI configuration options
@@ -53,6 +55,15 @@ pub struct TypeOrder {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BackupConfig {
     pub max_count: usize,
+}
+
+/// Cache configuration (auto-generated, but user-editable)
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct CacheConfig {
+    /// PowerShell Core profile path (auto-detected)
+    pub pwsh_profile: Option<String>,
+    /// Windows PowerShell profile path (auto-detected)
+    pub powershell_profile: Option<String>,
 }
 
 impl Default for FormatConfig {
@@ -106,13 +117,34 @@ impl Config {
     /// Load configuration from file, or return default if file doesn't exist
     pub fn load() -> anyhow::Result<Self> {
         let path = Self::config_path();
-        if path.exists() {
+        let mut config = if path.exists() {
             let content = std::fs::read_to_string(&path)?;
-            let config: Config = toml::from_str(&content)?;
-            Ok(config)
+            toml::from_str(&content)?
         } else {
-            Ok(Config::default())
+            Config::default()
+        };
+
+        // Migration: if old .path_cache.toml exists, merge it into config.toml
+        let old_cache_path = Self::config_dir().join(".path_cache.toml");
+        if old_cache_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&old_cache_path) {
+                if let Ok(old_cache) = toml::from_str::<CacheConfig>(&content) {
+                    // Merge old cache into config (only if not already set)
+                    if config.cache.pwsh_profile.is_none() {
+                        config.cache.pwsh_profile = old_cache.pwsh_profile;
+                    }
+                    if config.cache.powershell_profile.is_none() {
+                        config.cache.powershell_profile = old_cache.powershell_profile;
+                    }
+                    // Save the merged config
+                    let _ = config.save();
+                    // Remove old cache file
+                    let _ = std::fs::remove_file(&old_cache_path);
+                }
+            }
         }
+
+        Ok(config)
     }
 
     /// Save configuration to file

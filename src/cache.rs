@@ -1,62 +1,46 @@
 //! Path caching system for shell profile paths
 
-use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-use std::fs;
+use crate::model::Config;
+use anyhow::Result;
 use std::path::PathBuf;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PathCache {
+pub struct PathCache;
+
+impl PathCache {
+    /// Load cache from config
+    pub fn load() -> Result<CacheData> {
+        let config = Config::load()?;
+        Ok(CacheData {
+            pwsh_profile: config.cache.pwsh_profile,
+            powershell_profile: config.cache.powershell_profile,
+        })
+    }
+
+    /// Save cache to config
+    pub fn save(data: &CacheData) -> Result<()> {
+        let mut config = Config::load()?;
+        config.cache.pwsh_profile = data.pwsh_profile.clone();
+        config.cache.powershell_profile = data.powershell_profile.clone();
+        config.save()
+    }
+
+    /// Clear the cache
+    pub fn clear() -> Result<()> {
+        let mut config = Config::load()?;
+        config.cache.pwsh_profile = None;
+        config.cache.powershell_profile = None;
+        config.save()
+    }
+}
+
+/// Cache data structure
+#[derive(Debug, Clone)]
+pub struct CacheData {
     pub pwsh_profile: Option<String>,
     pub powershell_profile: Option<String>,
 }
 
-impl PathCache {
-    /// Get the path to the cache file
-    fn cache_file_path() -> Result<PathBuf> {
-        let config_dir = dirs::config_dir()
-            .or_else(|| dirs::home_dir().map(|p| p.join(".config")))
-            .context("Cannot determine config directory")?;
-
-        let wenv_dir = config_dir.join("wenv");
-        fs::create_dir_all(&wenv_dir).context("Failed to create wenv config directory")?;
-
-        Ok(wenv_dir.join(".path_cache.toml"))
-    }
-
-    /// Load cache from disk
-    pub fn load() -> Result<Self> {
-        let cache_path = Self::cache_file_path()?;
-
-        if !cache_path.exists() {
-            return Ok(PathCache {
-                pwsh_profile: None,
-                powershell_profile: None,
-            });
-        }
-
-        let content = fs::read_to_string(&cache_path).context("Failed to read cache file")?;
-
-        toml::from_str(&content).context("Failed to parse cache file")
-    }
-
-    /// Save cache to disk
-    pub fn save(&self) -> Result<()> {
-        let cache_path = Self::cache_file_path()?;
-        let content = toml::to_string_pretty(self).context("Failed to serialize cache")?;
-
-        fs::write(&cache_path, content).context("Failed to write cache file")
-    }
-
-    /// Clear the cache file
-    pub fn clear() -> Result<()> {
-        let cache_path = Self::cache_file_path()?;
-        if cache_path.exists() {
-            fs::remove_file(&cache_path).context("Failed to remove cache file")?;
-        }
-        Ok(())
-    }
-
+impl CacheData {
     /// Get cached PowerShell profile path, validating it still exists
     pub fn get_pwsh_profile(&self) -> Option<PathBuf> {
         self.pwsh_profile

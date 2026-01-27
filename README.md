@@ -226,10 +226,6 @@ wenv --version
 
 ## Shell Support / Shell 支持
 
-> **Note**: wenv currently supports **Bash** and **PowerShell** only. Other shells (zsh, fish, etc.) are not yet supported.
->
-> **注意**: wenv 目前**仅支援 Bash 和 PowerShell**。其他 shell（zsh、fish 等）尚未支援。
-
 ### Bash
 
 Supported configuration files / 支持的配置文件:
@@ -242,6 +238,25 @@ Supported entry types / 支持的条目类型:
 - Functions: `function_name() { ... }`
 - Environment variables: `export VAR=value`
 - Source statements: `source /path/to/file`
+
+### Zsh
+
+**Zsh is supported through Bash syntax compatibility** / **Zsh 透過 Bash 語法相容性支援**
+
+Supported configuration files / 支持的配置文件:
+- `~/.zshrc`
+- `~/.zprofile`
+- `~/.zshenv`
+
+Usage / 使用方式:
+```bash
+# Specify shell type as bash for zsh files / 對 zsh 檔案指定 shell 類型為 bash
+wenv --shell bash --file ~/.zshrc
+```
+
+> **Note**: Zsh shares most syntax with Bash for aliases, functions, and environment variables. The Bash parser can handle most common zsh configurations. Zsh-specific features (e.g., advanced parameter expansion, zsh-only functions) may not be fully supported.
+>
+> **注意**: Zsh 在別名、函數和環境變數方面與 Bash 共享大部分語法。Bash 解析器可以處理大多數常見的 zsh 配置。Zsh 特定功能（如進階參數擴展、zsh 專用函數）可能無法完全支援。
 
 ### PowerShell
 
@@ -312,17 +327,56 @@ For architecture details, see [AGENTS.md](AGENTS.md).
 
 ---
 
-## Backup System / 备份系统
+## Configuration and Data Directories / 設定檔與資料目錄
 
-wenv automatically creates backups before modifying configuration files:  
-wenv 在修改配置文件前自动创建备份：
+### wenv Configuration File / wenv 設定檔
 
-- **Backup location / 备份位置:** `~/.config/wenv/backups/<shell>/`
+wenv stores its configuration in a platform-specific location:
+wenv 將設定檔儲存在對應平台的路徑：
+
+| Platform / 平台 | Path / 路徑 |
+|-----------------|------------|
+| Linux | `~/.config/wenv/config.toml` |
+| macOS | `~/Library/Application Support/wenv/config.toml` |
+| Windows | `%APPDATA%\wenv\config.toml` |
+
+### i18n Language Files / i18n 語言包
+
+Custom language files can be placed in the i18n directory:
+自訂語言檔案可放置在 i18n 目錄：
+
+| Platform / 平台 | Path / 路徑 |
+|-----------------|------------|
+| Linux | `~/.config/wenv/i18n/{lang}.toml` |
+| macOS | `~/Library/Application Support/wenv/i18n/{lang}.toml` |
+| Windows | `%APPDATA%\wenv\i18n\{lang}.toml` |
+
+**Installation Steps / 安裝步驟:**
+
+1. Download a language file (example: [`languages/zh-TW.toml`](languages/zh-TW.toml)) / 下載語言檔（範例：[`languages/zh-TW.toml`](languages/zh-TW.toml)）
+2. Place it in the i18n directory for your platform / 放置到對應平台的 i18n 目錄
+3. Set the language in `config.toml`: / 在 `config.toml` 中設定語言：
+   ```toml
+   [ui]
+   language = "zh-TW"
+   ```
+
+### Backup Directory / 備份目錄
+
+wenv automatically creates backups before modifying configuration files:
+wenv 在修改配置文件前自動創建備份：
+
+| Platform / 平台 | Path / 路徑 |
+|-----------------|------------|
+| Linux | `~/.config/wenv/backups/<shell>/` |
+| macOS | `~/Library/Application Support/wenv/backups/<shell>/` |
+| Windows | `%APPDATA%\wenv\backups\<shell>\` |
+
 - **Naming format / 命名格式:** `<original_filename>.<timestamp>.bak`
-- **Auto-backup / 自动备份:** Triggered whenever you save changes in TUI mode / 在 TUI 模式中保存变更时自动触发
+- **Auto-backup / 自動備份:** Triggered whenever you save changes in TUI mode / 在 TUI 模式中保存變更時自動觸發
 
-Backups are managed automatically - no manual commands needed.  
-备份自动管理 - 无需手动命令。
+Backups are managed automatically - no manual commands needed.
+備份自動管理 - 無需手動命令。
 
 ---
 

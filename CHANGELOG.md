@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **TUI: Entry Template Generation for Add Feature** (2026-01-27)
+  - Add entry now pre-fills syntax templates with intelligent cursor positioning
+  - Bash/Zsh templates: `alias =''`, `() {\n    \n}`, `export =''`, `source `, `# `
+  - PowerShell templates: `Set-Alias  ''`, `function  {\n    \n}`, `$env: = ''`, `. `, `# `
+  - Cursor automatically positioned at first input location (name or value)
+  - Reduces syntax errors and improves user experience
+  - Code/Comment types remain blank for free-form input
+
+### Fixed
+- **Parser: Fix Alias/EnvVar/Source Trailing Blank Lines Preservation** (2026-01-27)
+  - Fixed bug where trailing blank lines after Alias/EnvVar/Source entries would disappear in TUI edit mode
+  - Root cause: Multi-line alias/env parsing was calling `extract_quoted_value()`, storing only quoted content instead of complete syntax
+  - Root cause: `entry_to_trailing_pending()` was setting outdated `value` field that shadowed the updated `lines` after blank absorption
+  - Solution: Unified all entry types to use `raw_content` (from `lines`) in `build_entry_from_pending()`
+  - Solution: Removed `extract_quoted_value()` call for multi-line alias/env (preserves complete syntax per Raw Value Architecture)
+  - Solution: Added `PendingBlock::is_structured_entry()` helper to distinguish structured entries from Comment/Code
+  - Impact: Alias/EnvVar/Source now correctly preserve trailing blanks like Function/Code/Comment already did
+  - All 221 tests passing
+
+### Changed
+- **Parser & TUI: Enhanced Entry Parsing and Editing UX** (2026-01-27)
+  - TUI editing now hides Name field for all entry types (only shows Value field for consistency)
+  - Name is auto-extracted from Value after editing (for Alias/Function/EnvVar/Source) or generated from line numbers (for Code/Comment)
+  - Comment + structured entry (Alias/Function/EnvVar/Source) now merge into single entry
+  - Multi-line parenthesis structures (e.g., `plugins=(...)`) now recognized as single Code entry
+  - Anonymous functions (`() { ... }`) now recognized and named with pattern `(fL<start>-L<end>)`
+  - Improved parser accuracy for complex shell configurations
+
+- **BREAKING: Raw Value Architecture Refactoring** (2026-01-27)
+  - `Entry.value` now stores complete raw syntax (including keywords, options, quotes)
+  - `Entry.raw_line` field removed (redundant with new value semantics)
+  - Parsers store full command syntax in value (e.g., `"alias ll='ls -la'"` instead of `"ls -la"`)
+  - Formatters simplified to directly return `entry.value` (no syntax reconstruction)
+  - Comment/blank lines can now merge with structured entries (Alias, Function, EnvVar, Source)
+  - `Entry.name` and `entry_type` remain purely for UI identification and filtering
+  - TUI editing now shows/edits complete syntax directly
+  - **Migration**: Existing entries in memory will parse correctly, no user action needed
+  - **Impact**: Internal architecture change; external behavior remains the same
+
+- **Config: Merge PowerShell Cache into config.toml** (2026-01-26)
+  - PowerShell profile path cache now stored in `[cache]` section of `config.toml`
+  - Automatic migration from old `.path_cache.toml` to `config.toml` on first run
+  - Old `.path_cache.toml` file removed after successful migration
+  - User can manually edit cache paths in config.toml if needed
+
+### Added
+- **Docs: Configuration and Data Directories** (2026-01-26)
+  - README now documents platform-specific paths for config files, i18n language files, and backups
+  - Added installation guide for external language files
+  - Clear documentation of configuration directory structure
+
 ## [0.8.0] - 2026-01-24
 
 ### Changed

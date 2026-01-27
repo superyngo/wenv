@@ -99,7 +99,7 @@ impl ShellType {
                                             "powershell" => cache.set_powershell_profile(path.clone()),
                                             _ => {}
                                         }
-                                        let _ = cache.save();
+                                        let _ = PathCache::save(&cache);
                                     }
                                     return Some(path);
                                 }

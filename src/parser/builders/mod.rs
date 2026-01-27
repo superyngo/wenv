@@ -103,6 +103,45 @@ pub fn count_braces_outside_quotes(line: &str) -> (usize, usize) {
     (open_count, close_count)
 }
 
+/// Count opening `(` and closing `)` parentheses outside quoted strings.
+///
+/// This is used to track multi-line structures that use parentheses for grouping,
+/// such as `plugins=(...)` in shell configs.
+///
+/// # Arguments
+///
+/// - `line`: The line to analyze
+///
+/// # Returns
+///
+/// A tuple `(open_count, close_count)` of parentheses counts outside quotes.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let (open, close) = count_parens_outside_quotes("plugins=(");
+/// assert_eq!(open, 1);
+/// assert_eq!(close, 0);
+/// ```
+pub fn count_parens_outside_quotes(line: &str) -> (usize, usize) {
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut open_count = 0;
+    let mut close_count = 0;
+
+    for c in line.chars() {
+        match c {
+            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
+            '"' if !in_single_quote => in_double_quote = !in_double_quote,
+            '(' if !in_single_quote && !in_double_quote => open_count += 1,
+            ')' if !in_single_quote && !in_double_quote => close_count += 1,
+            _ => {}
+        }
+    }
+
+    (open_count, close_count)
+}
+
 /// Extract inline comment from a line, respecting quoted strings.
 ///
 /// The comment character (typically `#`) is only recognized outside

@@ -49,20 +49,16 @@ pub fn try_parse_alias(line: &str, line_num: usize) -> ParseEvent {
     // Try simple format first
     if let Some(caps) = ALIAS_SIMPLE_RE.captures(line) {
         return ParseEvent::Complete(
-            Entry::new(EntryType::Alias, caps[1].to_string(), caps[2].to_string())
-                .with_line_number(line_num)
-                .with_raw_line(line.to_string()),
+            Entry::new(EntryType::Alias, caps[1].to_string(), line.to_string())
+                .with_line_number(line_num),
         );
     }
 
     // Try complex format with -Name and -Value
     if let Some(caps) = ALIAS_RE.captures(line) {
         let name = caps[2].to_string();
-        let value = strip_quotes(&caps[4]);
         return ParseEvent::Complete(
-            Entry::new(EntryType::Alias, name, value)
-                .with_line_number(line_num)
-                .with_raw_line(line.to_string()),
+            Entry::new(EntryType::Alias, name, line.to_string()).with_line_number(line_num),
         );
     }
 
@@ -102,11 +98,10 @@ pub fn try_parse_env(line: &str, line_num: usize) -> ParseEvent {
     // Try single-line env var
     if let Some(caps) = ENV_RE.captures(line) {
         let (value_clean, _inline_comment) = extract_comment(&caps[2], '#');
-        let value = strip_quotes(&value_clean);
+        let _value = strip_quotes(&value_clean);
         return ParseEvent::Complete(
-            Entry::new(EntryType::EnvVar, caps[1].to_string(), value)
-                .with_line_number(line_num)
-                .with_raw_line(line.to_string()),
+            Entry::new(EntryType::EnvVar, caps[1].to_string(), line.to_string())
+                .with_line_number(line_num),
         );
     }
 
@@ -137,9 +132,7 @@ pub fn try_parse_source(line: &str, line_num: usize) -> ParseEvent {
             .unwrap_or(&path)
             .to_string();
         return ParseEvent::Complete(
-            Entry::new(EntryType::Source, name, path)
-                .with_line_number(line_num)
-                .with_raw_line(line.to_string()),
+            Entry::new(EntryType::Source, name, line.to_string()).with_line_number(line_num),
         );
     }
     ParseEvent::None
@@ -187,7 +180,7 @@ mod tests {
         match try_parse_alias("Set-Alias ll Get-ChildItem", 1) {
             ParseEvent::Complete(entry) => {
                 assert_eq!(entry.name, "ll");
-                assert_eq!(entry.value, "Get-ChildItem");
+                assert_eq!(entry.value, "Set-Alias ll Get-ChildItem");
             }
             _ => panic!("Expected Complete"),
         }
@@ -198,7 +191,7 @@ mod tests {
         match try_parse_alias("Set-Alias -Name gs -Value git", 5) {
             ParseEvent::Complete(entry) => {
                 assert_eq!(entry.name, "gs");
-                assert_eq!(entry.value, "git");
+                assert_eq!(entry.value, "Set-Alias -Name gs -Value git");
                 assert_eq!(entry.line_number, Some(5));
             }
             _ => panic!("Expected Complete"),
@@ -210,7 +203,7 @@ mod tests {
         match try_parse_env(r#"$env:EDITOR = "code""#, 10) {
             ParseEvent::Complete(entry) => {
                 assert_eq!(entry.name, "EDITOR");
-                assert_eq!(entry.value, "code");
+                assert_eq!(entry.value, "$env:EDITOR = \"code\"");
             }
             _ => panic!("Expected Complete"),
         }

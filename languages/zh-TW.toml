@@ -1,0 +1,229 @@
+# === General ===
+no_entries_found = "找不到任何條目。"
+total_entries = "總計：{} 個條目"
+entry_not_found = "找不到條目：{} '{}'"
+entry_added = "已新增 {} '{}' = '{}'"
+entry_removed = "已移除 {} '{}'"
+entry_updated = "已更新 {} '{}'"
+skipped = "已跳過。"
+cancelled = "已取消。"
+
+# === Headers ===
+header_type = "類型"
+header_name = "名稱"
+header_value = "值"
+header_line_num = "行號"
+header_line = "行："
+header_lines = "行："
+header_comment = "註解："
+header_raw = "原始："
+
+# === Check Command ===
+no_issues_found = "沒有發現問題！"
+parse_warnings = "解析警告："
+issues_found = "發現問題："
+checked_entries = "已檢查 {} 個條目"
+found_errors_warnings = "發現 {} 個錯誤、{} 個警告、{} 個解析警告"
+found_warnings = "發現 {} 個警告、{} 個解析警告"
+
+# === Add/Remove/Edit ===
+already_exists_skip = "{} '{}' 已存在，跳過"
+already_exists_value = "{} '{}' 已存在，值為：{}"
+overwrite_prompt = "覆蓋？"
+remove_prompt = "移除此條目？"
+invalid_alias_format = "別名格式無效。請使用：NAME=VALUE"
+invalid_env_format = "環境變數格式無效。請使用：NAME=VALUE"
+
+# === Backup ===
+backup_created = "已建立備份：{}"
+backup_restored = "已從備份還原：{}"
+no_backups_found = "找不到備份。"
+backup_list_header = "可用的備份："
+
+# === Format ===
+msg_file_formatted = "檔案格式化成功"
+
+# === Import/Export ===
+imported_entries = "已匯入 {} 個條目"
+exported_entries = "已匯出 {} 個條目到 {}"
+
+# === Reload Hint ===
+reload_hint = "執行 '{}' 以套用變更"
+
+# === TUI ===
+tui_title = "wenv - {}"
+tui_entries = " 條目 ({}) "
+tui_help_title = " 說明 "
+tui_confirm_delete_title = " 確認刪除 "
+tui_delete_prompt = "刪除此條目？"
+tui_yes_no = "[Y]是 / [N]否"
+tui_add_entry_title = " 新增條目 "
+tui_edit_name_title = " 編輯名稱 "
+tui_edit_value_title = " 編輯值 "
+tui_input_title = " 輸入 "
+tui_enter_submit_esc_cancel = "[Enter] 提交  [Esc] 取消"
+tui_entry_details_title = " 條目詳情 "
+
+# TUI prompts
+tui_enter_entry_type = "輸入條目類型 (alias/func/env/source)："
+tui_enter_name = "輸入名稱："
+tui_enter_value = "輸入值："
+tui_invalid_type = "無效類型。請嘗試：alias/func/env/source"
+tui_name_value_empty = "名稱和值不能為空"
+tui_edit_name_for = "編輯名稱：{}"
+tui_edit_value_for = "編輯 {} 的值"
+
+# TUI messages
+tui_entry_deleted = "條目已刪除（尚未儲存）"
+msg_entry_added = "條目新增成功"
+tui_name_updated = "名稱更新成功"
+tui_value_updated = "值更新成功"
+tui_no_issues = "沒有發現問題"
+tui_found_issues = "發現 {} 個問題"
+
+# TUI status bar
+tui_status_normal = "[↑/↓]導航 [Shift+↑/↓]選擇 [i]資訊 [a]新增 [e]編輯 [m]移動 [d]刪除 [t]切換 [s]儲存 [?]說明 [q]退出"
+tui_status_detail = "[Enter/i/q/Esc]關閉"
+tui_status_help = "[q/Esc]關閉"
+tui_status_confirm_delete = "[y]是 [n]否 [Esc]取消"
+tui_status_input = "[Enter]提交 [Esc]取消 [Backspace]刪除"
+tui_status_exiting = "正在退出..."
+
+# TUI new status messages (Phase 3)
+tui_status_searching = "[輸入]搜尋 [Enter]確認 [Esc]退出 [PgUp/PgDn]跳轉"
+tui_status_detail_extended = "[↑/↓/Scroll/PgUp/PgDn]捲動 [e]編輯 [Esc]關閉"
+tui_status_confirm_delete_extended = "[↑/↓/PgUp/PgDn]捲動 [y/Enter]是 [n/Esc]否"
+tui_status_confirm_quit = "[y]儲存並退出 [n]捨棄 [Esc]取消"
+tui_status_confirm_format = "[y/Enter]套用 [n/Esc]取消 [↑↓]捲動"
+tui_status_confirm_save_errors = "[y/Enter]仍要儲存 [n/Esc]取消 [↑↓]捲動"
+tui_status_selecting_type = "[↑/↓]選擇 [Enter]確認 [Esc]取消"
+tui_status_editing = "[Tab]下一個 [↑/↓/Scroll/PgUp/PgDn]導航 [Enter]提交/換行 [Esc]取消"
+tui_status_moving = "[↑/↓/Scroll]移動 [Enter]確認 [Esc]取消"
+
+# TUI search popup
+tui_search_title = " 搜尋條目 "
+tui_search_query = "查詢："
+tui_search_matches = "({} 個符合項目)"
+tui_search_no_matches = "(無符合項目)"
+tui_search_hint = "[Enter] 確認  [Esc] 退出  [PgUp/PgDn] 跳轉"
+
+# TUI detail/edit labels (shared)
+label_type = "類型："
+label_name = "名稱："
+label_value = "值："
+tui_detail_hint = "[e] 編輯  [↑/↓] 捲動  [Esc] 關閉"
+
+# TUI help popup
+tui_help_keyboard_shortcuts = "鍵盤快捷鍵"
+tui_help_section_navigation = "導航"
+tui_help_section_editing = "編輯"
+tui_help_section_other = "其他"
+
+# TUI confirm/edit popup
+tui_confirm_quit_title = " 未儲存的變更 "
+tui_confirm_quit_msg = "您有未儲存的變更！"
+tui_confirm_quit_question = "退出前儲存變更？"
+tui_type_alias_desc = "Shell 別名"
+tui_type_func_desc = "Shell 函式"
+tui_type_env_desc = "環境變數"
+tui_type_source_desc = "來源檔案"
+tui_type_code_desc = "程式碼區塊"
+tui_type_comment_desc = "註解區塊"
+tui_edit_submit = "提交"
+
+# TUI dynamic messages
+tui_msg_selection_cleared = "已清除選取"
+tui_msg_use_arrows_to_move = "使用 ↑/↓ 移動，Enter 確認，Esc 取消"
+tui_msg_moving_entries = "正在移動 {} 個條目 - 使用 ↑/↓，Enter 確認，Esc 取消"
+tui_msg_move_cancelled = "移動已取消（保留選取 - 再按 Esc 清除）"
+tui_msg_moved_entries = "已移動 {} 個條目"
+tui_msg_entries_deleted = "已刪除 {} 個條目"
+tui_msg_format_cancelled_validation = "因驗證錯誤而取消格式化"
+tui_msg_save_cancelled_validation = "因驗證錯誤而取消儲存"
+tui_msg_review_changes = "檢視變更並按 [y] 確認或 [n] 取消"
+tui_msg_validation_failed = "格式化後 Shell 驗證失敗。檢視錯誤並確認仍要套用。"
+tui_msg_format_cancelled = "格式化已取消"
+tui_msg_format_bypassed = "檔案格式化成功（略過驗證）"
+tui_msg_select_entry_type = "選擇條目類型："
+tui_msg_failed_consolidate = "合併條目失敗：{}"
+tui_msg_name_empty = "名稱不能為空"
+tui_msg_source_path_empty = "來源路徑不能為空"
+tui_msg_invalid_path_format = "無效的檔案路徑格式"
+tui_msg_alias_value_empty = "別名值不能為空"
+tui_msg_formatter_empty = "格式化器返回空內容"
+tui_msg_entry_updated = "條目更新成功"
+tui_msg_file_saved = "檔案已儲存"
+tui_msg_file_saved_bypassed = "檔案已儲存（略過驗證）"
+tui_msg_undo_successful = "復原成功"
+tui_msg_nothing_to_undo = "沒有可復原的操作"
+tui_msg_redo_successful = "重做成功"
+tui_msg_nothing_to_redo = "沒有可重做的操作"
+tui_msg_temp_file_reloaded = "編輯後已重新載入暫存檔"
+tui_msg_no_changes_detected = "未偵測到變更"
+tui_msg_editor_error = "編輯器異常退出"
+tui_msg_entries_selected = "已選取 {} 個條目"
+tui_msg_entry_selected = "已選取 {} 個條目"
+tui_msg_no_entry_to_copy = "沒有選取要複製的條目"
+tui_msg_entries_copied = "已複製 {} 個條目"
+tui_msg_entry_copied = "已複製 {} 個條目"
+tui_msg_entry_pasted = "條目已貼上"
+tui_msg_clipboard_empty = "剪貼簿為空"
+
+# TUI help shortcuts
+tui_help_nav_updown = "導航條目"
+tui_help_nav_scroll = "滑鼠滾輪上下捲動"
+tui_help_nav_home_end = "跳到第一個/最後一個"
+tui_help_nav_pgup_pgdn = "上一頁/下一頁"
+tui_help_search = "搜尋條目（名稱和值）"
+tui_help_info_detail = "顯示條目詳情"
+tui_help_add = "新增條目"
+tui_help_edit_entry = "編輯條目"
+tui_help_move = "上下移動條目"
+tui_help_delete = "刪除條目"
+tui_help_toggle_select = "切換註解（註解/取消註解）"
+tui_help_select_range = "多選條目"
+tui_help_check = "檢查問題"
+tui_help_format_file = "格式化檔案"
+tui_help_save = "儲存至檔案"
+tui_help_undo = "復原上一個變更"
+tui_help_redo = "重做上一個變更"
+tui_help_copy = "複製條目"
+tui_help_paste = "貼上條目"
+tui_help_help_key = "顯示此說明"
+tui_help_quit = "退出（或清除選取）"
+
+# TUI edit hints
+tui_hint_tab_next = "[Tab] 下一個"
+tui_hint_arrows_navigate = "[↑/↓] 導航"
+tui_hint_enter_submit = "[Enter] 提交/換行"
+tui_hint_esc_cancel = "[Esc] 取消"
+
+# TUI additional popup elements
+tui_edit_hint = "[Tab] 下一個  [↑/↓] 導航  [Enter] 提交/換行  [Esc] 取消"
+tui_edit_hint_source = "[Tab] 下一個  [Enter] 提交  [Esc] 取消"
+tui_type_select_hint = "[Enter] 選擇  [Esc] 取消"
+tui_confirm_delete_hint = "[y/Enter] 是  [n/Esc] 否  [↑/↓] 捲動"
+tui_confirm_quit_hint = "[y] 儲存並退出  [n] 捨棄並退出  [Esc] 取消"
+tui_format_preview_title = " 格式預覽 "
+tui_validation_error_title = " Shell 驗證失敗 "
+tui_validation_error_hint = "[y/Enter] 仍要儲存  [n/Esc] 取消  [↑/↓] 捲動"
+tui_submit_button = "[   提交   ]"
+tui_submit_button_focused = "[ ▸ 提交 ◂ ]"
+tui_help_edit_mode = "編輯模式："
+tui_help_next_field = "下一個欄位"
+tui_help_prev_field = "上一個欄位"
+tui_help_submit_on_button = "提交（在提交按鈕上）"
+tui_help_cancel = "取消"
+tui_delete_multi_prompt = "刪除 {} 個選取的條目？"
+
+# === TUI Format Preview Messages ===
+tui_fmt_sorting_aliases = "✓ 依字母順序排序 {} 個別名"
+tui_fmt_sorting_functions = "✓ 依字母順序排序 {} 個函數"
+tui_fmt_sorting_envvars = "✓ 依相依性排序 {} 個環境變數"
+tui_fmt_sorting_sources = "✓ 依字母順序排序 {} 個 source 語句"
+tui_fmt_grouping_entries = "✓ 依類型分組條目"
+tui_fmt_no_changes_needed = "✓ 檔案已是最佳格式，無需變更"
+
+# === TUI Toggle Comment Messages ===
+tui_msg_entry_toggled = "已切換條目的註解狀態"
+tui_msg_entries_toggled = "已切換 {} 個條目的註解狀態"

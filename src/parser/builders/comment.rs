@@ -147,7 +147,6 @@ impl CommentBlockBuilder {
         Entry::new(EntryType::Comment, name, value)
             .with_line_number(self.start_line)
             .with_end_line(end_line)
-            .with_raw_line(raw)
     }
 }
 
@@ -222,7 +221,7 @@ mod tests {
         builder.add_line("# Normal");
         let entry = builder.build();
 
-        assert!(entry.raw_line.as_ref().unwrap().contains("  # Indented"));
-        assert!(entry.raw_line.as_ref().unwrap().contains("# Normal"));
+        assert!(&entry.value.contains("  # Indented"));
+        assert!(&entry.value.contains("# Normal"));
     }
 }
