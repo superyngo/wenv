@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-01-27
+
 ### Added
-- **TUI: Entry Template Generation for Add Feature** (2026-01-27)
+- **TUI: Entry Template Generation for Add Feature**
   - Add entry now pre-fills syntax templates with intelligent cursor positioning
   - Bash/Zsh templates: `alias =''`, `() {\n    \n}`, `export =''`, `source `, `# `
   - PowerShell templates: `Set-Alias  ''`, `function  {\n    \n}`, `$env: = ''`, `. `, `# `
@@ -16,8 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Reduces syntax errors and improves user experience
   - Code/Comment types remain blank for free-form input
 
+- **Docs: Configuration and Data Directories**
+  - README now documents platform-specific paths for config files, i18n language files, and backups
+  - Added installation guide for external language files
+  - Clear documentation of configuration directory structure
+
 ### Fixed
-- **Parser: Fix Alias/EnvVar/Source Trailing Blank Lines Preservation** (2026-01-27)
+- **Parser: Fix Alias/EnvVar/Source Trailing Blank Lines Preservation**
   - Fixed bug where trailing blank lines after Alias/EnvVar/Source entries would disappear in TUI edit mode
   - Root cause: Multi-line alias/env parsing was calling `extract_quoted_value()`, storing only quoted content instead of complete syntax
   - Root cause: `entry_to_trailing_pending()` was setting outdated `value` field that shadowed the updated `lines` after blank absorption
@@ -27,8 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Impact: Alias/EnvVar/Source now correctly preserve trailing blanks like Function/Code/Comment already did
   - All 221 tests passing
 
+- **Code Quality: Fix Clippy Warnings**
+  - Fixed manual string strip warning (use `strip_prefix` instead of manual slicing)
+  - Added `#[allow(dead_code)]` for unused formatter methods (reserved for future use)
+  - All Clippy warnings resolved
+
 ### Changed
-- **Parser & TUI: Enhanced Entry Parsing and Editing UX** (2026-01-27)
+- **Parser & TUI: Enhanced Entry Parsing and Editing UX**
   - TUI editing now hides Name field for all entry types (only shows Value field for consistency)
   - Name is auto-extracted from Value after editing (for Alias/Function/EnvVar/Source) or generated from line numbers (for Code/Comment)
   - Comment + structured entry (Alias/Function/EnvVar/Source) now merge into single entry
@@ -36,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Anonymous functions (`() { ... }`) now recognized and named with pattern `(fL<start>-L<end>)`
   - Improved parser accuracy for complex shell configurations
 
-- **BREAKING: Raw Value Architecture Refactoring** (2026-01-27)
+- **BREAKING: Raw Value Architecture Refactoring**
   - `Entry.value` now stores complete raw syntax (including keywords, options, quotes)
   - `Entry.raw_line` field removed (redundant with new value semantics)
   - Parsers store full command syntax in value (e.g., `"alias ll='ls -la'"` instead of `"ls -la"`)
@@ -47,16 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Migration**: Existing entries in memory will parse correctly, no user action needed
   - **Impact**: Internal architecture change; external behavior remains the same
 
-- **Config: Merge PowerShell Cache into config.toml** (2026-01-26)
+- **Config: Merge PowerShell Cache into config.toml**
   - PowerShell profile path cache now stored in `[cache]` section of `config.toml`
   - Automatic migration from old `.path_cache.toml` to `config.toml` on first run
   - Old `.path_cache.toml` file removed after successful migration
   - User can manually edit cache paths in config.toml if needed
 
-### Added
-- **Docs: Configuration and Data Directories** (2026-01-26)
-  - README now documents platform-specific paths for config files, i18n language files, and backups
-  - Added installation guide for external language files
   - Clear documentation of configuration directory structure
 
 ## [0.8.0] - 2026-01-24
