@@ -140,6 +140,26 @@ When comments/blank lines precede structured entries, they merge into a single e
 - `entry_type = Alias` (determined by the structured part)
 - `name = "foo"` (extracted from structured part)
 
+### PATH Merging
+
+When formatting entries with `group_by_type` enabled, the TUI can merge multiple PATH environment variable definitions into a single entry:
+
+**Merge Logic (`src/utils/path_merge.rs`):**
+1. Extracts path segments from each PATH entry's value field (which contains complete `export` syntax)
+2. The `extract_path_value()` helper handles various export formats:
+   - `export PATH="/usr/bin:$PATH"` (double quotes)
+   - `export PATH='/usr/bin:$PATH'` (single quotes)
+   - `export PATH=/usr/bin:$PATH` (unquoted)
+   - `export PATH="/part1":"$PATH"` (concatenated quoted strings in bash)
+3. Removes duplicate path segments while preserving order
+4. Ensures `$PATH` self-reference appears at the end
+5. Returns merged value (path segments only, not complete export syntax)
+
+**Usage in TUI (`src/tui/app.rs`):**
+- When user triggers format with merge, TUI creates a new Entry with merged path value
+- The merged entry's value is then wrapped with `export PATH="..."` syntax by the formatter
+- Original PATH entries are removed from the list
+
 ### Comment/Code Merge Rules
 
 The parser uses a pending entry state machine to merge adjacent Comment/Code entries and structured entries:

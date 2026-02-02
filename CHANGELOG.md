@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **2026-02-02**: Fixed PATH environment variable merging to correctly parse and merge entries with complete export syntax
+  - Root cause: `merge_path_definitions()` was directly splitting `entry.value` (which contains complete syntax like `export PATH="/usr/bin:$PATH"`) instead of extracting the value part first
+  - This caused incorrect merging like `export PATH="/dir1:$PATH":export PATH="/dir2":"$PATH"` instead of proper path concatenation
+  - Solution: Added `extract_path_value()` helper function to extract value from various export formats:
+    - `export PATH="/value"` (double quotes)
+    - `export PATH='value'` (single quotes)
+    - `export PATH=value` (unquoted)
+    - `export PATH="/part1":"$PATH"` (concatenated quoted strings)
+  - Now correctly merges to: `export PATH="/dir1:/dir2:$PATH"`
+  - Added comprehensive test coverage for all quote styles and concatenation cases
+  - All 227 tests passing
+
 ## [0.9.0] - 2026-01-27
 
 ### Added
