@@ -139,6 +139,8 @@ Priority:
 
 Supported shell types (first phase): `bash`, `zsh`, `powershell`.
 
+**Zsh parsing:** Zsh reuses the bash parser. The existing codebase already handles zsh this way — the `Zsh` variant in `ShellType` delegates to `BashParser` since zsh config syntax is compatible with the bash parser's grammar. No separate zsh parser is needed.
+
 The `ShellType` enum and detection logic remain extensible for future shells (fish, sh, ksh).
 
 ---
@@ -334,9 +336,9 @@ Uses a fuzzy matching library (e.g., `nucleo` or `fuzzy-matcher`) for fzf-style 
 | Module | LOC | Notes |
 |--------|-----|-------|
 | `parser/bash/` | ~2,180 | Core parsing logic untouched |
-| `parser/pwsh/` | ~1,000 | Core parsing logic untouched |
+| `parser/pwsh/` | ~1,570 | Core parsing logic untouched |
 | `parser/pending.rs` | ~413 | PendingBlock state machine untouched |
-| `parser/builders/` | ~200 | QuotedValue/CommentBlock builders |
+| `parser/builders/` | ~820 | QuotedValue/CommentBlock builders |
 | `model/entry.rs` | ~350 | Add `file_index` field |
 | `model/types.rs` | ~200 | EntryType, ShellType unchanged |
 | `formatter/` | ~1,280 | Used for add-entry template syntax |
@@ -396,7 +398,7 @@ Uses a fuzzy matching library (e.g., `nucleo` or `fuzzy-matcher`) for fzf-style 
 - `anyhow`, `thiserror` — Error handling
 - `time` — Timestamp utilities
 - `terminal_size` — Terminal dimension detection
-- `tempfile` (dev) — Test utilities
+- `tempfile` — Temp files for $EDITOR integration (promoted from dev-only)
 
 ---
 
@@ -410,6 +412,8 @@ When the user presses `w`/`Ctrl+s`:
    b. Write to the file path
    c. Set `dirty = false`
 3. Display a status message: "Saved N file(s)"
+
+After saving, `line_number` and `end_line` for all entries in the saved file are recalculated based on the new file content, since operations like cross-file moves invalidate original line numbers.
 
 When quitting with dirty files, a confirmation prompt lists the unsaved files.
 
