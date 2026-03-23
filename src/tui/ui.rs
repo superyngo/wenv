@@ -7,18 +7,36 @@ use crate::tui::state::AppMode;
 use crate::model::profile::ListItem as ProfileListItem;
 
 pub fn draw(f: &mut Frame, app: &TuiApp) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    let has_search = app.mode == AppMode::Searching;
+    let constraints = if has_search {
+        vec![
+            Constraint::Length(1),  // title bar
+            Constraint::Min(1),     // main list
+            Constraint::Length(1),  // search bar
+            Constraint::Length(1),  // status bar
+        ]
+    } else {
+        vec![
             Constraint::Length(1),  // title bar
             Constraint::Min(1),     // main list
             Constraint::Length(1),  // status bar
-        ])
+        ]
+    };
+    
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
         .split(f.size());
 
     draw_title(f, chunks[0], app);
     draw_list(f, chunks[1], app);
-    draw_status(f, chunks[2], app);
+    
+    if has_search {
+        draw_search_bar(f, chunks[2], app);
+        draw_status(f, chunks[3], app);
+    } else {
+        draw_status(f, chunks[2], app);
+    }
 
     // Draw confirmation popups on top
     match &app.mode {
@@ -77,11 +95,29 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     let prefix = if is_selected { "● " } else { "  " };
                     let text = format!("  {}{} {}", prefix, type_str, name);
                     
-                    let mut style = match (is_cursor, is_selected) {
-                        (true, true) => Style::default().bg(Color::Cyan).fg(Color::Black),      // cursor + selected
-                        (true, false) => Style::default().bg(Color::DarkGray).fg(Color::White), // cursor only
-                        (false, true) => Style::default().bg(Color::Blue).fg(Color::White),     // selected only
-                        (false, false) => Style::default().fg(Color::Gray),                      // normal
+                    // When rendering an Entry, check if it's a search match
+                    let is_search_match = app.search.as_ref()
+                        .map_or(false, |s| s.is_match(*fi, *ei));
+                    let is_search_selected = app.search.as_ref()
+                        .map_or(false, |s| s.is_selected_match(*fi, *ei));
+
+                    // Adjust the style based on search state
+                    let mut style = if app.mode == AppMode::Searching {
+                        if is_search_selected {
+                            Style::default().bg(Color::Yellow).fg(Color::Black)  // Highlighted match
+                        } else if is_search_match {
+                            Style::default().fg(Color::White)  // Match but not selected
+                        } else {
+                            Style::default().fg(Color::DarkGray)  // Non-match (dimmed)
+                        }
+                    } else {
+                        // Existing style logic (cursor, selection)
+                        match (is_cursor, is_selected) {
+                            (true, true) => Style::default().bg(Color::Cyan).fg(Color::Black),      // cursor + selected
+                            (true, false) => Style::default().bg(Color::DarkGray).fg(Color::White), // cursor only
+                            (false, true) => Style::default().bg(Color::Blue).fg(Color::White),     // selected only
+                            (false, false) => Style::default().fg(Color::Gray),                      // normal
+                        }
                     };
                     
                     // Override with move target style
@@ -159,4 +195,13 @@ fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
         .block(block)
         .alignment(Alignment::Center);
     f.render_widget(text, popup_area);
+}
+
+fn draw_search_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
+    if let Some(ref search) = app.search {
+        let match_count = search.matches.len();
+        let text = format!(" / {}  [{} matches]", search.query, match_count);
+        let style = Style::default().bg(Color::Black).fg(Color::Yellow);
+        f.render_widget(Paragraph::new(text).style(style), area);
+    }
 }

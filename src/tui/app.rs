@@ -13,6 +13,7 @@ use crate::i18n::Messages;
 use crate::model::profile::{ListItem, ShellProfile};
 use crate::tui::keys::{self, Action};
 use crate::tui::list;
+use crate::tui::search::SearchState;
 use crate::tui::state::{AppMode, ClipboardState, UndoSnapshot, MoveState};
 use crate::tui::selection::SelectionState;
 
@@ -35,6 +36,7 @@ pub struct TuiApp {
     pub clipboard: ClipboardState,
     pub undo_snapshot: Option<UndoSnapshot>,
     pub move_state: Option<MoveState>,
+    pub search: Option<SearchState>,
 }
 
 impl TuiApp {
@@ -52,6 +54,7 @@ impl TuiApp {
             clipboard: ClipboardState::new(),
             undo_snapshot: None,
             move_state: None,
+            search: None,
         })
     }
 
@@ -105,7 +108,12 @@ impl TuiApp {
 
         match action {
             Action::NavigateUp => {
-                if self.mode == AppMode::Moving {
+                if self.mode == AppMode::Searching {
+                    if let Some(ref mut search) = self.search {
+                        search.select_prev();
+                    }
+                    self.navigate_to_search_match();
+                } else if self.mode == AppMode::Moving {
                     if let Some(ref mut ms) = self.move_state {
                         if ms.insertion_cursor > 0 {
                             ms.insertion_cursor -= 1;
@@ -116,7 +124,12 @@ impl TuiApp {
                 }
             }
             Action::NavigateDown => {
-                if self.mode == AppMode::Moving {
+                if self.mode == AppMode::Searching {
+                    if let Some(ref mut search) = self.search {
+                        search.select_next();
+                    }
+                    self.navigate_to_search_match();
+                } else if self.mode == AppMode::Moving {
                     if let Some(ref mut ms) = self.move_state {
                         if ms.insertion_cursor < self.visible_items.len().saturating_sub(1) {
                             ms.insertion_cursor += 1;
@@ -259,6 +272,12 @@ impl TuiApp {
             }
             Action::Confirm => {
                 match &self.mode {
+                    AppMode::Searching => {
+                        // Jump to current match and exit search
+                        self.navigate_to_search_match();
+                        self.search = None;
+                        self.mode = AppMode::Normal;
+                    }
                     AppMode::Moving => {
                         self.execute_move();
                     }
@@ -280,6 +299,11 @@ impl TuiApp {
             }
             Action::Cancel => {
                 match &self.mode {
+                    AppMode::Searching => {
+                        self.search = None;
+                        self.mode = AppMode::Normal;
+                        self.message = None;
+                    }
                     AppMode::Moving => {
                         // Restore from snapshot
                         if let Some(snapshot) = self.undo_snapshot.take() {
@@ -316,6 +340,32 @@ impl TuiApp {
                     self.message = Some(format!("Unsaved changes in: {}. Quit? (y/n)", dirty.join(", ")));
                 } else {
                     self.should_quit = true;
+                }
+            }
+            Action::Search => {
+                self.search = Some(SearchState::new());
+                self.mode = AppMode::Searching;
+                self.message = None;
+            }
+            Action::SearchInput(c) => {
+                if let Some(ref mut search) = self.search {
+                    search.input_char(c);
+                    search.update_matches(&self.profile);
+                    // Navigate to first match
+                    self.navigate_to_search_match();
+                }
+            }
+            Action::SearchBackspace => {
+                if let Some(ref mut search) = self.search {
+                    search.backspace();
+                    if search.query.is_empty() {
+                        // If query emptied, exit search
+                        self.search = None;
+                        self.mode = AppMode::Normal;
+                    } else {
+                        search.update_matches(&self.profile);
+                        self.navigate_to_search_match();
+                    }
                 }
             }
             _ => {
@@ -358,6 +408,24 @@ impl TuiApp {
             Some(ListItem::FileHeader(fi)) => *fi,
             Some(ListItem::Entry(fi, _)) => *fi,
             None => 0,
+        }
+    }
+
+    /// Navigate cursor to the currently selected search match
+    fn navigate_to_search_match(&mut self) {
+        if let Some(ref search) = self.search {
+            if let Some((fi, ei)) = search.current_match() {
+                // Ensure the file is expanded
+                self.profile.files[fi].expanded = true;
+                self.rebuild_list();
+                // Find the entry in visible_items
+                for (i, item) in self.visible_items.iter().enumerate() {
+                    if matches!(item, ListItem::Entry(f, e) if *f == fi && *e == ei) {
+                        self.cursor = i;
+                        break;
+                    }
+                }
+            }
         }
     }
 
