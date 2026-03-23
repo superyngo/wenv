@@ -8,6 +8,12 @@ pub struct SelectionState {
     pub anchor: Option<usize>,
 }
 
+impl Default for SelectionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SelectionState {
     pub fn new() -> Self {
         Self {

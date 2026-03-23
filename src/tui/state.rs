@@ -15,6 +15,12 @@ pub struct ClipboardState {
     pub entries: Vec<crate::model::Entry>,
 }
 
+impl Default for ClipboardState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClipboardState {
     pub fn new() -> Self {
         Self { entries: Vec::new() }

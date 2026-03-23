@@ -240,7 +240,7 @@ impl TuiApp {
                             insertion_cursor: self.cursor,
                         });
                         self.mode = AppMode::Moving;
-                        self.message = Some(format!("Move mode: ↑↓ to position, Enter to drop, Esc to cancel"));
+                        self.message = Some("Move mode: ↑↓ to position, Enter to drop, Esc to cancel".into());
                     }
                 }
             }

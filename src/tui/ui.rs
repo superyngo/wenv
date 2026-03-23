@@ -70,7 +70,7 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
             let is_cursor = i == app.cursor;
             let is_selected = app.selection.is_selected(i);
             let is_move_target = app.mode == AppMode::Moving 
-                && app.move_state.as_ref().map_or(false, |ms| ms.insertion_cursor == i);
+                && app.move_state.as_ref().is_some_and(|ms| ms.insertion_cursor == i);
             
             match item {
                 ProfileListItem::FileHeader(fi) => {
@@ -103,9 +103,9 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     
                     // When rendering an Entry, check if it's a search match
                     let is_search_match = app.search.as_ref()
-                        .map_or(false, |s| s.is_match(*fi, *ei));
+                        .is_some_and(|s| s.is_match(*fi, *ei));
                     let is_search_selected = app.search.as_ref()
-                        .map_or(false, |s| s.is_selected_match(*fi, *ei));
+                        .is_some_and(|s| s.is_selected_match(*fi, *ei));
 
                     // Adjust the style based on search state
                     let mut style = if app.mode == AppMode::Searching {

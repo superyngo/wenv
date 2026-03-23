@@ -52,9 +52,8 @@ fn map_normal_key(key: KeyEvent) -> Action {
     }
     // Check Ctrl modifiers
     if key.modifiers.contains(KeyModifiers::CONTROL) {
-        match key.code {
-            KeyCode::Char('s') => return Action::Save,
-            _ => {}
+        if let KeyCode::Char('s') = key.code {
+            return Action::Save;
         }
     }
     match key.code {

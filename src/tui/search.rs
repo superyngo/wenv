@@ -17,6 +17,12 @@ pub struct SearchState {
     pub selected: usize,  // index into matches for navigation
 }
 
+impl Default for SearchState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SearchState {
     pub fn new() -> Self {
         Self {
@@ -82,6 +88,6 @@ impl SearchState {
     /// Check if a given (file_index, entry_index) is the currently selected match
     pub fn is_selected_match(&self, fi: usize, ei: usize) -> bool {
         self.matches.get(self.selected)
-            .map_or(false, |m| m.file_index == fi && m.entry_index == ei)
+            .is_some_and(|m| m.file_index == fi && m.entry_index == ei)
     }
 }

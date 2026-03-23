@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**wenv** is a cross-platform CLI tool for managing shell configuration files (`.bashrc`, PowerShell profiles). It parses, organizes, edits, and maintains aliases, functions, environment variables, and source statements.
+**wenv** is a cross-platform CLI tool for managing multiple shell configuration files (.bashrc, .zshrc, PowerShell profiles) with an interactive Terminal User Interface (TUI). It provides a tree view for multi-file management, entry editing with $EDITOR, search capabilities, and cross-file operations like cut/paste/move.
 
 ## Build and Test Commands
 
@@ -14,32 +14,68 @@ cargo build --release    # Release build
 cargo check              # Fast syntax check
 cargo test               # Run all tests
 cargo test --lib         # Library tests only
-cargo test bash_tests    # Run specific test module
+cargo test tui_logic_tests # Run TUI logic tests
 cargo clippy             # Linting
 cargo fmt                # Format code
-cargo run -- list        # Run with arguments
+cargo run               # Run TUI
+cargo run -- --shell bash # Force shell type
 ```
 
 ## Architecture
 
-### Trait-Based Design
+### Multi-File Data Model (`src/model/profile.rs`)
 
-The codebase uses traits for extensibility across shell types:
+The core data structure supports multiple configuration files per shell:
 
-- **`Parser` trait** (`src/parser/mod.rs`) - Implemented by `BashParser` and `PwshParser` for shell-specific parsing
-- **`Formatter` trait** (`src/formatter/mod.rs`) - Shell-specific formatting of configuration files
-- **`Checker` trait** (`src/checker/mod.rs`) - Validation rules (duplicate detection, syntax checking)
+```rust
+// Shell session with multiple files
+ShellProfile {
+    shell_type: ShellType,
+    files: Vec<ProfileFile>,
+}
 
-### Command Pattern
+// Individual configuration file
+ProfileFile {
+    path: PathBuf,
+    entries: Vec<Entry>,
+    content: String,
+    expanded: bool,   // UI tree state
+    dirty: bool,      // Has unsaved changes
+    exists: bool,     // File exists on disk
+}
 
-Each CLI command has its own module in `src/cli/commands/` with an `execute()` function. Commands share context via `CommandContext`.
+// TUI navigation items
+ListItem::FileHeader(file_index)     // Tree headers
+ListItem::Entry(file_index, entry_index)  // Individual entries
+```
+
+### TUI Architecture (`src/tui/`)
+
+Interactive terminal interface with these modules:
+
+- **`app.rs`** - Main TUI application state and event handling
+- **`ui.rs`** - Terminal rendering with ratatui
+- **`keys.rs`** - Key binding definitions and help text
+- **`list.rs`** - Entry list rendering with tree view
+- **`operations.rs`** - Entry manipulation (delete, cut, paste, undo)
+- **`selection.rs`** - Multi-selection with visual indicators
+- **`state.rs`** - Application modes and clipboard/undo state
+- **`editor.rs`** - External $EDITOR integration
+- **`search.rs`** - Fuzzy search with filtering
+
+### Trait-Based Parsing/Formatting
+
+Shell-specific logic implemented via traits:
+
+- **`Parser` trait** (`src/parser/mod.rs`) - Implemented by `BashParser` and `PwshParser`
+- **`Formatter` trait** (`src/formatter/mod.rs`) - Shell-specific file reconstruction
 
 ### Core Data Models (`src/model/`)
 
 ```rust
 EntryType { Alias, Function, EnvVar, Source, Code, Comment }
-ShellType { Bash, PowerShell }
-Entry { entry_type, name, value, line_number, end_line }
+ShellType { Bash, Zsh, PowerShell }
+Entry { entry_type, name, value, line_number, end_line, file_index }
 ```
 
 **Entry Field Semantics:**
@@ -64,8 +100,8 @@ When Comment/blank lines precede structured entries, they merge:
 
 - `src/parser/bash.rs` - Bash parser with control structure awareness (skips definitions inside if/while/for/case blocks)
 - `src/parser/pwsh.rs` - PowerShell parser (in progress)
-- `src/backup/mod.rs` - Automatic backup system before write operations
-- `src/utils/shell_detect.rs` - Shell type detection from env, extension, filename patterns
+- `src/utils/shell_detect.rs` - Shell type detection from env, extension, filename patterns (runtime only)
+- `src/config/mod.rs` - Configuration file management with `[files.*]` sections
 
 ## Important Implementation Details
 
@@ -77,27 +113,80 @@ The parser operates in "lenient mode" - it skips unparseable lines with warnings
 
 The Bash parser tracks control structure depth (`if`/`while`/`for`/`case`) to only extract top-level definitions, avoiding aliases and functions defined inside conditional blocks.
 
-### Backup System
-
-Backups are automatically created before any write operation in platform-specific backup directories with timestamp naming:
-- Linux: `~/.config/wenv/backups/<shell>/`
-- macOS: `~/Library/Application Support/wenv/backups/<shell>/`
-- Windows: `%APPDATA%\wenv\backups\<shell>\`
-
 ### Configuration System
 
 **Config File Locations:**
-- Linux: `~/.config/wenv/config.toml`
-- macOS: `~/Library/Application Support/wenv/config.toml`
-- Windows: `%APPDATA%\wenv\config.toml`
+- All platforms: `~/.config/wenv/config.toml` (unified location)
 
 **Config Structure:**
 - `[ui]` - UI settings (language selection)
-- `[format]` - Formatting rules (indent, grouping, sorting)
-- `[backup]` - Backup settings (max_count)
-- `[cache]` - PowerShell profile path cache (auto-detected and user-editable)
+- `[files.bash]` - Bash file paths list
+- `[files.zsh]` - Zsh file paths list  
+- `[files.powershell]` - PowerShell file paths list
 
-**PowerShell Path Cache:**
+**Example Config:**
+```toml
+[ui]
+language = "en"
+
+[files.bash]
+paths = [
+    "~/.bashrc",
+    "~/.bash_aliases", 
+    "~/.profile"
+]
+
+[files.zsh]
+paths = [
+    "~/.zshrc",
+    "~/.zsh_aliases"
+]
+```
+
+### TUI Key Bindings Reference
+
+| Key | Action |
+|-----|--------|
+| `j`/`k`, `↑`/`↓` | Navigate entries |
+| `Space` | Toggle selection |
+| `Shift+↑`/`↓` | Extend selection range |
+| `Enter` | Edit entry with $EDITOR |
+| `a` | Add new entry with $EDITOR |
+| `d` | Delete selected entries |
+| `x` | Cut selected entries |
+| `p` | Paste clipboard entries |
+| `m` | Enter move mode |
+| `Tab` | Toggle file expanded/collapsed |
+| `Shift+Tab` | Toggle all files |
+| `u` | Undo last operation |
+| `/` | Search/filter entries |
+| `Esc` | Clear selection/exit modes |
+| `r` | Refresh from disk |
+| `s` | Save all changes |
+| `?` | Show help |
+| `q` | Quit (confirms if unsaved) |
+
+### Shell Type Detection
+
+Shell type is determined at runtime via:
+1. `--shell` flag (bash/zsh/powershell)
+2. Environment variable detection (`$SHELL`, `$0`)
+3. No config-based shell preference (simplified)
+
+### $EDITOR Integration
+
+The TUI launches external editors for entry creation and editing:
+- Detects `$EDITOR`, `$VISUAL`, or falls back to platform defaults
+- Creates temporary files with shell syntax highlighting hints
+- Parses editor output back into Entry format
+
+### Multi-File Operations
+
+Cross-file operations supported:
+- **Cut/Paste**: Move entries between files
+- **Undo**: Restores all files to previous state
+- **Search**: Filters entries across all expanded files
+- **Save**: Writes all dirty files atomically
 The `[cache]` section stores auto-detected PowerShell profile paths:
 ```toml
 [cache]
@@ -113,16 +202,9 @@ powershell_profile = "/path/to/powershell/profile.ps1"
 - Set language in config: `[ui] language = "zh-TW"`
 - English embedded in binary as fallback
 
-### Regex Patterns
-
-Due to Rust regex limitations (no backreferences), the Bash parser uses separate patterns for different quote styles:
-- Single-quoted aliases: `alias name='value'`
-- Double-quoted aliases: `alias name="value"`
-- Unquoted aliases: `alias name=value`
-
 ### Entry Value Semantics
 
-All entry types now store complete raw syntax in the `value` field:
+All entry types store complete raw syntax in the `value` field:
 
 **Structured Entries:**
 - `Alias` - value contains full syntax: `"alias name='value'"` (not just the value part)
@@ -139,53 +221,6 @@ When comments/blank lines precede structured entries, they merge into a single e
 - `value = "# comment\n\nalias foo='bar'"` (complete content)
 - `entry_type = Alias` (determined by the structured part)
 - `name = "foo"` (extracted from structured part)
-
-### PATH Merging
-
-When formatting entries with `group_by_type` enabled, the TUI can merge multiple PATH environment variable definitions into a single entry:
-
-**Merge Logic (`src/utils/path_merge.rs`):**
-1. Extracts path segments from each PATH entry's value field (which contains complete `export` syntax)
-2. The `extract_path_value()` helper handles various export formats:
-   - `export PATH="/usr/bin:$PATH"` (double quotes)
-   - `export PATH='/usr/bin:$PATH'` (single quotes)
-   - `export PATH=/usr/bin:$PATH` (unquoted)
-   - `export PATH="/part1":"$PATH"` (concatenated quoted strings in bash)
-3. Removes duplicate path segments while preserving order
-4. Ensures `$PATH` self-reference appears at the end
-5. Returns merged value (path segments only, not complete export syntax)
-
-**Usage in TUI (`src/tui/app.rs`):**
-- When user triggers format with merge, TUI creates a new Entry with merged path value
-- The merged entry's value is then wrapped with `export PATH="..."` syntax by the formatter
-- Original PATH entries are removed from the list
-
-### Comment/Code Merge Rules
-
-The parser uses a pending entry state machine to merge adjacent Comment/Code entries and structured entries:
-
-| Scenario | Result |
-|----------|--------|
-| Comment + Comment | Comment (merged) |
-| Comment + blank line(s) | Comment (absorbs blanks) |
-| Comment + non-blank Code | Code (type upgrade, merged) |
-| Comment + Alias/Function/EnvVar/Source | Structured type (merged, comment becomes prefix) |
-| Comment + blank + Structured | Structured type (all merged) |
-| Comment + blank + Code + blank | Code (all merged, absorbs trailing blanks) |
-| Comment + (optional blanks) + control structure | Code (merged into control block) |
-| blank + blank | Code (empty, merged) |
-| non-blank Code + blank line(s) | Code (absorbs trailing blanks) |
-| Control structure ends | Code (becomes pending, absorbs trailing blanks) |
-| blank + non-blank Code | **Don't merge** (separate entries) |
-
-Key principles:
-- Blank lines can only be absorbed, never actively absorb other content
-- Comments can absorb blanks downward; meeting non-blank Code upgrades to Code
-- **Upgraded Code entries stay pending** to absorb subsequent blank lines
-- Structured entries (Alias, Function, EnvVar, Source) can merge with preceding Comment/blank lines
-- **`value` contains complete original content** after merge (all lines including comments, blanks, and syntax)
-- `name` and `entry_type` are extracted from the structured/code part for UI purposes
-- Formatters directly return `entry.value` (no syntax reconstruction)
 
 ### 換行符格式規範（分隔符 vs 終止符）
 
@@ -205,3 +240,10 @@ Key principles:
 
 使用 `replace_line_range()` 直接替換 entry 佔據的行範圍：
 - `value_buffer` 是分隔符格式，寫入時無條件加 `\n` 終止符
+
+### Regex Patterns
+
+Due to Rust regex limitations (no backreferences), the Bash parser uses separate patterns for different quote styles:
+- Single-quoted aliases: `alias name='value'`
+- Double-quoted aliases: `alias name="value"`
+- Unquoted aliases: `alias name=value`
