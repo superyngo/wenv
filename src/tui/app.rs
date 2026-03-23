@@ -14,6 +14,7 @@ use crate::model::profile::{ListItem, ShellProfile};
 use crate::tui::keys::{self, Action};
 use crate::tui::list;
 use crate::tui::state::AppMode;
+use crate::tui::selection::SelectionState;
 
 pub struct TuiApp {
     pub profile: ShellProfile,
@@ -23,6 +24,7 @@ pub struct TuiApp {
     pub should_quit: bool,
     pub message: Option<String>,
     pub messages: &'static Messages,
+    pub selection: SelectionState,
 }
 
 impl TuiApp {
@@ -36,6 +38,7 @@ impl TuiApp {
             should_quit: false,
             message: None,
             messages,
+            selection: SelectionState::new(),
         })
     }
 
@@ -93,11 +96,28 @@ impl TuiApp {
             }
             Action::CollapseAll => {
                 self.profile.toggle_all(false);
+                self.selection.clear();
                 self.rebuild_list();
             }
             Action::ExpandAll => {
                 self.profile.toggle_all(true);
+                self.selection.clear();
                 self.rebuild_list();
+            }
+            Action::ToggleSelect => {
+                self.selection.toggle(self.cursor, &self.visible_items);
+            }
+            Action::RangeSelectUp => {
+                let old = self.cursor;
+                self.cursor = list::navigate_up(&self.visible_items, self.cursor);
+                let anchor = self.selection.anchor.unwrap_or(old);
+                self.selection.extend_range(anchor, self.cursor, &self.visible_items);
+            }
+            Action::RangeSelectDown => {
+                let old = self.cursor;
+                self.cursor = list::navigate_down(&self.visible_items, self.cursor);
+                let anchor = self.selection.anchor.unwrap_or(old);
+                self.selection.extend_range(anchor, self.cursor, &self.visible_items);
             }
             Action::Quit => {
                 self.should_quit = true;

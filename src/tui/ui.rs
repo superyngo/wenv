@@ -35,6 +35,7 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
         .enumerate()
         .map(|(i, item)| {
             let is_cursor = i == app.cursor;
+            let is_selected = app.selection.is_selected(i);
             match item {
                 ProfileListItem::FileHeader(fi) => {
                     let file = &app.profile.files[*fi];
@@ -52,11 +53,16 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     let entry = &app.profile.files[*fi].entries[*ei];
                     let type_str = format!("{:8}", entry.entry_type.to_string());
                     let name = &entry.name;
-                    let text = format!("    {} {}", type_str, name);
-                    let style = if is_cursor {
-                        Style::default().bg(Color::DarkGray).fg(Color::White)
-                    } else {
-                        Style::default().fg(Color::Gray)
+                    
+                    // Add selection marker prefix
+                    let prefix = if is_selected { "● " } else { "  " };
+                    let text = format!("  {}{} {}", prefix, type_str, name);
+                    
+                    let style = match (is_cursor, is_selected) {
+                        (true, true) => Style::default().bg(Color::Cyan).fg(Color::Black),      // cursor + selected
+                        (true, false) => Style::default().bg(Color::DarkGray).fg(Color::White), // cursor only
+                        (false, true) => Style::default().bg(Color::Blue).fg(Color::White),     // selected only
+                        (false, false) => Style::default().fg(Color::Gray),                      // normal
                     };
                     ratatui::widgets::ListItem::new(text).style(style)
                 }
@@ -89,7 +95,12 @@ fn draw_status(f: &mut Frame, area: Rect, app: &TuiApp) {
     } else {
         let total = app.profile.total_entries();
         let files = app.profile.files.len();
-        format!(" {} files, {} entries | q:quit ?:help 0/9:collapse/expand", files, total)
+        if app.selection.selected_count() > 0 {
+            format!(" {} selected | {} files, {} entries | q:quit ?:help s:select", 
+                app.selection.selected_count(), files, total)
+        } else {
+            format!(" {} files, {} entries | q:quit ?:help 0/9:collapse/expand", files, total)
+        }
     };
     let text = Paragraph::new(status)
         .style(Style::default().bg(Color::DarkGray).fg(Color::White));
