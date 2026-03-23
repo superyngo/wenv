@@ -16,6 +16,13 @@ use crate::tui::list;
 use crate::tui::state::AppMode;
 use crate::tui::selection::SelectionState;
 
+enum EditorRequest {
+    None,
+    EditFile(usize),           // file index
+    EditEntry(usize, usize),   // file index, entry index
+    AddEntry(usize),           // target file index
+}
+
 pub struct TuiApp {
     pub profile: ShellProfile,
     pub visible_items: Vec<ListItem>,
@@ -69,13 +76,25 @@ impl TuiApp {
                     continue;
                 }
                 let action = keys::map_key(&self.mode, key);
-                self.handle_action(action)?;
+                let request = self.handle_action(action)?;
+                match request {
+                    EditorRequest::EditFile(fi) => {
+                        self.run_edit_file(terminal, fi)?;
+                    }
+                    EditorRequest::EditEntry(fi, ei) => {
+                        self.run_edit_entry(terminal, fi, ei)?;
+                    }
+                    EditorRequest::AddEntry(fi) => {
+                        self.run_add_entry(terminal, fi)?;
+                    }
+                    EditorRequest::None => {}
+                }
             }
         }
         Ok(())
     }
 
-    fn handle_action(&mut self, action: Action) -> Result<()> {
+    fn handle_action(&mut self, action: Action) -> Result<EditorRequest> {
         self.message = None; // Clear message on any action
 
         match action {
@@ -119,14 +138,26 @@ impl TuiApp {
                 let anchor = self.selection.anchor.unwrap_or(old);
                 self.selection.extend_range(anchor, self.cursor, &self.visible_items);
             }
+            Action::Edit => {
+                if let Some(item) = self.visible_items.get(self.cursor) {
+                    match item {
+                        ListItem::FileHeader(fi) => return Ok(EditorRequest::EditFile(*fi)),
+                        ListItem::Entry(fi, ei) => return Ok(EditorRequest::EditEntry(*fi, *ei)),
+                    }
+                }
+            }
+            Action::Add => {
+                let fi = self.current_file_index();
+                return Ok(EditorRequest::AddEntry(fi));
+            }
             Action::Quit => {
                 self.should_quit = true;
             }
             _ => {
-                // Not implemented yet — stubs for Tasks 7-12
+                // Not implemented yet — stubs for Tasks 8-12
             }
         }
-        Ok(())
+        Ok(EditorRequest::None)
     }
 
     fn toggle_at_cursor(&mut self) {
@@ -154,5 +185,165 @@ impl TuiApp {
         if self.cursor >= self.visible_items.len() {
             self.cursor = self.visible_items.len().saturating_sub(1);
         }
+    }
+
+    /// Get the file index for the current cursor position
+    fn current_file_index(&self) -> usize {
+        match self.visible_items.get(self.cursor) {
+            Some(ListItem::FileHeader(fi)) => *fi,
+            Some(ListItem::Entry(fi, _)) => *fi,
+            None => 0,
+        }
+    }
+
+    fn suspend_tui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+        disable_raw_mode()?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+        terminal.show_cursor()?;
+        Ok(())
+    }
+
+    fn resume_tui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+        enable_raw_mode()?;
+        execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+        terminal.hide_cursor()?;
+        terminal.clear()?;
+        Ok(())
+    }
+
+    /// Edit a file: suspend TUI, open in $EDITOR, re-parse, resume
+    fn run_edit_file(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, fi: usize) -> Result<()> {
+        let path = self.profile.files[fi].path.clone();
+        if !self.profile.files[fi].exists {
+            self.message = Some(format!("File does not exist: {}", path.display()));
+            return Ok(());
+        }
+
+        Self::suspend_tui(terminal)?;
+        let modified = crate::tui::editor::edit_file(&path);
+        Self::resume_tui(terminal)?;
+
+        match modified {
+            Ok(true) => {
+                // Re-parse the file
+                let content = std::fs::read_to_string(&path)?;
+                let parser = crate::parser::get_parser(self.profile.shell_type);
+                let result = parser.parse(&content);
+                let file = &mut self.profile.files[fi];
+                file.entries = result.entries.into_iter().map(|mut e| {
+                    e.file_index = fi;
+                    e
+                }).collect();
+                file.content = content;
+                self.rebuild_list();
+                self.message = Some(format!("Reloaded: {}", path.display()));
+            }
+            Ok(false) => {
+                self.message = Some("No changes detected".into());
+            }
+            Err(e) => {
+                self.message = Some(format!("Editor error: {}", e));
+            }
+        }
+        Ok(())
+    }
+
+    /// Edit an entry: write value to temp file, open in $EDITOR, update entry
+    fn run_edit_entry(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, fi: usize, ei: usize) -> Result<()> {
+        let suffix = match self.profile.shell_type {
+            crate::model::ShellType::PowerShell => ".ps1",
+            _ => ".sh",
+        };
+        let value = self.profile.files[fi].entries[ei].value.clone();
+
+        Self::suspend_tui(terminal)?;
+        let result = crate::tui::editor::edit_temp_content(&value, suffix);
+        Self::resume_tui(terminal)?;
+
+        match result {
+            Ok(Some(new_content)) => {
+                let new_content = new_content.trim_end_matches('\n').to_string();
+                if new_content != value {
+                    // Re-parse the edited content to get proper entry type/name
+                    let parser = crate::parser::get_parser(self.profile.shell_type);
+                    let parsed = parser.parse(&new_content);
+                    if let Some(new_entry) = parsed.entries.into_iter().next() {
+                        let entry = &mut self.profile.files[fi].entries[ei];
+                        entry.entry_type = new_entry.entry_type;
+                        entry.name = new_entry.name;
+                        entry.value = new_entry.value;
+                        self.profile.files[fi].dirty = true;
+                        self.rebuild_list();
+                        self.message = Some("Entry updated".into());
+                    } else {
+                        // Content was emptied or unparseable
+                        self.profile.files[fi].entries[ei].value = new_content;
+                        self.profile.files[fi].dirty = true;
+                        self.message = Some("Entry value updated (raw)".into());
+                    }
+                } else {
+                    self.message = Some("No changes".into());
+                }
+            }
+            Ok(None) => {
+                self.message = Some("No changes".into());
+            }
+            Err(e) => {
+                self.message = Some(format!("Editor error: {}", e));
+            }
+        }
+        Ok(())
+    }
+
+    /// Add a new entry: open empty temp file in $EDITOR, parse result, insert
+    fn run_add_entry(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, fi: usize) -> Result<()> {
+        let suffix = match self.profile.shell_type {
+            crate::model::ShellType::PowerShell => ".ps1",
+            _ => ".sh",
+        };
+
+        Self::suspend_tui(terminal)?;
+        let result = crate::tui::editor::edit_temp_content("", suffix);
+        Self::resume_tui(terminal)?;
+
+        match result {
+            Ok(Some(content)) => {
+                let content = content.trim_end_matches('\n').to_string();
+                if !content.is_empty() {
+                    let parser = crate::parser::get_parser(self.profile.shell_type);
+                    let parsed = parser.parse(&content);
+                    let mut new_entries: Vec<_> = parsed.entries.into_iter().map(|mut e| {
+                        e.file_index = fi;
+                        e
+                    }).collect();
+
+                    if !new_entries.is_empty() {
+                        // Insert after current entry position, or at end of file
+                        let insert_pos = match self.visible_items.get(self.cursor) {
+                            Some(ListItem::Entry(_, ei)) => ei + 1,
+                            _ => self.profile.files[fi].entries.len(),
+                        };
+                        let count = new_entries.len();
+                        // Insert entries
+                        for (i, entry) in new_entries.drain(..).enumerate() {
+                            self.profile.files[fi].entries.insert(insert_pos + i, entry);
+                        }
+                        self.profile.files[fi].dirty = true;
+                        self.profile.files[fi].expanded = true;
+                        self.rebuild_list();
+                        self.message = Some(format!("Added {} entries", count));
+                    }
+                } else {
+                    self.message = Some("Empty content, nothing added".into());
+                }
+            }
+            Ok(None) => {
+                self.message = Some("Cancelled".into());
+            }
+            Err(e) => {
+                self.message = Some(format!("Editor error: {}", e));
+            }
+        }
+        Ok(())
     }
 }

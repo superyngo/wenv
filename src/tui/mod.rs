@@ -1,6 +1,7 @@
 //! TUI module for interactive terminal user interface
 
 pub mod app;
+pub mod editor;
 pub mod keys;
 pub mod list;
 pub mod selection;
