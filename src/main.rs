@@ -43,11 +43,7 @@ fn main() -> Result<()> {
         return actions::source::execute(&config, shell_type, messages);
     }
 
-    // Temporary: TUI still uses single-file model, extract first file
+    // Load shell profile and launch TUI
     let profile = model::profile::load_shell_profile(&config, shell_type)?;
-    let first_file = profile.files.iter()
-        .find(|f| f.exists)
-        .map(|f| f.path.clone())
-        .unwrap_or_else(|| shell_type.default_config_path());
-    TuiApp::new(first_file, shell_type, messages)?.run()
+    TuiApp::new(profile, messages)?.run()
 }
