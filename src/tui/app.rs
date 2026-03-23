@@ -13,7 +13,7 @@ use crate::i18n::Messages;
 use crate::model::profile::{ListItem, ShellProfile};
 use crate::tui::keys::{self, Action};
 use crate::tui::list;
-use crate::tui::state::AppMode;
+use crate::tui::state::{AppMode, ClipboardState, UndoSnapshot};
 use crate::tui::selection::SelectionState;
 
 enum EditorRequest {
@@ -32,6 +32,8 @@ pub struct TuiApp {
     pub message: Option<String>,
     pub messages: &'static Messages,
     pub selection: SelectionState,
+    pub clipboard: ClipboardState,
+    pub undo_snapshot: Option<UndoSnapshot>,
 }
 
 impl TuiApp {
@@ -46,6 +48,8 @@ impl TuiApp {
             message: None,
             messages,
             selection: SelectionState::new(),
+            clipboard: ClipboardState::new(),
+            undo_snapshot: None,
         })
     }
 
@@ -150,11 +154,114 @@ impl TuiApp {
                 let fi = self.current_file_index();
                 return Ok(EditorRequest::AddEntry(fi));
             }
+            Action::Delete => {
+                // Collect targets: selected entries, or entry at cursor
+                let targets = self.get_operation_targets();
+                if !targets.is_empty() {
+                    self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                    self.mode = AppMode::ConfirmDelete;
+                    let count = targets.len();
+                    self.message = Some(format!("Delete {} entries? (y/n)", count));
+                }
+            }
+            Action::Cut => {
+                let targets = self.get_operation_targets();
+                if !targets.is_empty() {
+                    self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                    let cut = crate::tui::operations::cut_entries(
+                        &mut self.profile, &self.visible_items, &targets
+                    );
+                    let count = cut.len();
+                    self.clipboard.entries = cut;
+                    self.selection.clear();
+                    self.rebuild_list();
+                    self.message = Some(format!("Cut {} entries", count));
+                }
+            }
+            Action::Paste => {
+                if !self.clipboard.is_empty() {
+                    self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                    crate::tui::operations::paste_entries(
+                        &mut self.profile, &self.visible_items, self.cursor, &self.clipboard.entries
+                    );
+                    self.rebuild_list();
+                    self.message = Some(format!("Pasted {} entries", self.clipboard.entries.len()));
+                } else {
+                    self.message = Some("Clipboard empty".into());
+                }
+            }
+            Action::Undo => {
+                if let Some(snapshot) = self.undo_snapshot.take() {
+                    crate::tui::operations::restore_snapshot(&mut self.profile, snapshot);
+                    self.selection.clear();
+                    self.rebuild_list();
+                    self.message = Some("Undone".into());
+                } else {
+                    self.message = Some("Nothing to undo".into());
+                }
+            }
+            Action::Save => {
+                match crate::tui::operations::save_dirty_files(&mut self.profile) {
+                    Ok(saved) if !saved.is_empty() => {
+                        self.message = Some(format!("Saved: {}", saved.join(", ")));
+                    }
+                    Ok(_) => {
+                        self.message = Some("No unsaved changes".into());
+                    }
+                    Err(e) => {
+                        self.message = Some(format!("Save error: {}", e));
+                    }
+                }
+            }
+            Action::Confirm => {
+                match &self.mode {
+                    AppMode::ConfirmDelete => {
+                        let targets = self.get_operation_targets();
+                        crate::tui::operations::delete_entries(
+                            &mut self.profile, &self.visible_items, &targets
+                        );
+                        self.selection.clear();
+                        self.rebuild_list();
+                        self.mode = AppMode::Normal;
+                        self.message = Some("Deleted".into());
+                    }
+                    AppMode::ConfirmQuit => {
+                        self.should_quit = true;
+                    }
+                    _ => {}
+                }
+            }
+            Action::Cancel => {
+                match &self.mode {
+                    AppMode::ConfirmDelete => {
+                        // Restore snapshot since we took it preemptively
+                        if let Some(_snapshot) = self.undo_snapshot.take() {
+                            // Actually for delete, snapshot was taken but nothing deleted yet
+                            // Just discard the snapshot
+                        }
+                        self.mode = AppMode::Normal;
+                        self.message = Some("Cancelled".into());
+                    }
+                    AppMode::ConfirmQuit => {
+                        self.mode = AppMode::Normal;
+                        self.message = None;
+                    }
+                    _ => {}
+                }
+            }
             Action::Quit => {
-                self.should_quit = true;
+                if self.profile.any_dirty() {
+                    self.mode = AppMode::ConfirmQuit;
+                    let dirty: Vec<_> = self.profile.dirty_files().iter()
+                        .map(|f| f.display_name())
+                        .collect();
+                    self.message = Some(format!("Unsaved changes in: {}. Quit? (y/n)", dirty.join(", ")));
+                } else {
+                    self.should_quit = true;
+                }
             }
             _ => {
-                // Not implemented yet — stubs for Tasks 8-12
+                // Other actions not implemented yet
             }
         }
         Ok(EditorRequest::None)
@@ -193,6 +300,20 @@ impl TuiApp {
             Some(ListItem::FileHeader(fi)) => *fi,
             Some(ListItem::Entry(fi, _)) => *fi,
             None => 0,
+        }
+    }
+
+    /// Get visible-list indices for operation targets.
+    /// Returns selected indices if any, otherwise cursor if on an entry.
+    fn get_operation_targets(&self) -> Vec<usize> {
+        if !self.selection.is_empty() {
+            self.selection.sorted_indices()
+        } else {
+            // Use cursor position if it's on an entry
+            match self.visible_items.get(self.cursor) {
+                Some(ListItem::Entry(_, _)) => vec![self.cursor],
+                _ => vec![],
+            }
         }
     }
 

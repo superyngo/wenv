@@ -4,6 +4,7 @@ pub mod app;
 pub mod editor;
 pub mod keys;
 pub mod list;
+pub mod operations;
 pub mod selection;
 pub mod state;
 pub mod ui;

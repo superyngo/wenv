@@ -3,6 +3,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 use crate::tui::app::TuiApp;
+use crate::tui::state::AppMode;
 use crate::model::profile::ListItem as ProfileListItem;
 
 pub fn draw(f: &mut Frame, app: &TuiApp) {
@@ -18,6 +19,14 @@ pub fn draw(f: &mut Frame, app: &TuiApp) {
     draw_title(f, chunks[0], app);
     draw_list(f, chunks[1], app);
     draw_status(f, chunks[2], app);
+
+    // Draw confirmation popups on top
+    match &app.mode {
+        AppMode::ConfirmDelete | AppMode::ConfirmQuit => {
+            draw_confirm_popup(f, f.size(), app);
+        }
+        _ => {}
+    }
 }
 
 fn draw_title(f: &mut Frame, area: Rect, app: &TuiApp) {
@@ -105,4 +114,33 @@ fn draw_status(f: &mut Frame, area: Rect, app: &TuiApp) {
     let text = Paragraph::new(status)
         .style(Style::default().bg(Color::DarkGray).fg(Color::White));
     f.render_widget(text, area);
+}
+
+fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
+    let msg = app.message.as_deref().unwrap_or("Confirm? (y/n)");
+    
+    // Center a popup
+    let popup_width = (msg.len() as u16 + 4).min(area.width - 4);
+    let popup_height = 3;
+    let x = (area.width.saturating_sub(popup_width)) / 2;
+    let y = (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    // Clear area behind popup
+    f.render_widget(Clear, popup_area);
+
+    let title = match &app.mode {
+        AppMode::ConfirmDelete => " Confirm Delete ",
+        AppMode::ConfirmQuit => " Unsaved Changes ",
+        _ => " Confirm ",
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+    let text = Paragraph::new(msg)
+        .block(block)
+        .alignment(Alignment::Center);
+    f.render_widget(text, popup_area);
 }
