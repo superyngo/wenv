@@ -146,7 +146,16 @@ impl TuiApp {
                 self.cursor = list::navigate_end(&self.visible_items);
             }
             Action::ToggleExpand => {
-                self.toggle_at_cursor();
+                if let Some(item) = self.visible_items.get(self.cursor) {
+                    match item {
+                        ListItem::FileHeader(_) => {
+                            self.toggle_at_cursor();
+                        }
+                        ListItem::Entry(_, _) => {
+                            self.mode = AppMode::ShowingDetail;
+                        }
+                    }
+                }
             }
             Action::CollapseAll => {
                 self.profile.toggle_all(false);
@@ -294,6 +303,9 @@ impl TuiApp {
                     AppMode::ConfirmQuit => {
                         self.should_quit = true;
                     }
+                    AppMode::ShowingDetail | AppMode::ShowingHelp => {
+                        self.mode = AppMode::Normal;
+                    }
                     _ => {}
                 }
             }
@@ -327,6 +339,9 @@ impl TuiApp {
                     AppMode::ConfirmQuit => {
                         self.mode = AppMode::Normal;
                         self.message = None;
+                    }
+                    AppMode::ShowingDetail | AppMode::ShowingHelp => {
+                        self.mode = AppMode::Normal;
                     }
                     _ => {}
                 }
@@ -367,6 +382,9 @@ impl TuiApp {
                         self.navigate_to_search_match();
                     }
                 }
+            }
+            Action::Help => {
+                self.mode = AppMode::ShowingHelp;
             }
             _ => {
                 // Other actions not implemented yet

@@ -43,6 +43,12 @@ pub fn draw(f: &mut Frame, app: &TuiApp) {
         AppMode::ConfirmDelete | AppMode::ConfirmQuit => {
             draw_confirm_popup(f, f.size(), app);
         }
+        AppMode::ShowingDetail => {
+            draw_detail_popup(f, f.size(), app);
+        }
+        AppMode::ShowingHelp => {
+            draw_help_popup(f, f.size(), app);
+        }
         _ => {}
     }
 }
@@ -204,4 +210,112 @@ fn draw_search_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
         let style = Style::default().bg(Color::Black).fg(Color::Yellow);
         f.render_widget(Paragraph::new(text).style(style), area);
     }
+}
+
+fn draw_detail_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
+    // Get the entry at cursor
+    let (fi, ei) = match app.visible_items.get(app.cursor) {
+        Some(ProfileListItem::Entry(fi, ei)) => (*fi, *ei),
+        _ => return,
+    };
+    let file = &app.profile.files[fi];
+    let entry = &file.entries[ei];
+
+    // Build content lines
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled("File: ", Style::default().fg(Color::Yellow)),
+        Span::raw(file.display_name()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Type: ", Style::default().fg(Color::Yellow)),
+        Span::raw(entry.entry_type.to_string()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Name: ", Style::default().fg(Color::Yellow)),
+        Span::raw(&entry.name),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Lines: ", Style::default().fg(Color::Yellow)),
+        Span::raw(match (entry.line_number, entry.end_line) {
+            (Some(start), Some(end)) => format!("{}-{}", start, end),
+            (Some(start), None) => format!("{}", start),
+            _ => "unknown".to_string(),
+        }),
+    ]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("Value:", Style::default().fg(Color::Yellow))));
+    
+    // Split value by \n and show each line
+    for line in entry.value.split('\n') {
+        lines.push(Line::from(Span::raw(format!("  {}", line))));
+    }
+
+    // Size popup to content, max 80% of screen
+    let max_width = (area.width * 4 / 5).max(40);
+    let max_height = (area.height * 4 / 5).max(10);
+    let content_height = (lines.len() as u16 + 2).min(max_height); // +2 for borders
+    let popup_width = max_width;
+    let popup_height = content_height;
+
+    let x = (area.width.saturating_sub(popup_width)) / 2;
+    let y = (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .title(" Entry Detail (Esc to close) ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    
+    let text = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
+    f.render_widget(text, popup_area);
+}
+
+fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
+    let lines = vec![
+        Line::from(Span::styled("Navigation", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from("  ↑/k ↓/j    Navigate up/down"),
+        Line::from("  Home/End    Jump to first/last"),
+        Line::from("  Enter/Space Toggle file / View entry detail"),
+        Line::from("  0/9         Collapse/Expand all files"),
+        Line::from(""),
+        Line::from(Span::styled("Selection", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from("  s           Toggle select entry"),
+        Line::from("  Shift+↑/↓  Range select"),
+        Line::from(""),
+        Line::from(Span::styled("Editing", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from("  e           Edit (file or entry in $EDITOR)"),
+        Line::from("  a           Add new entry via $EDITOR"),
+        Line::from("  d           Delete selected entries"),
+        Line::from("  x           Cut selected entries"),
+        Line::from("  p           Paste entries"),
+        Line::from("  m           Move mode (drag to reposition)"),
+        Line::from("  u           Undo last operation"),
+        Line::from(""),
+        Line::from(Span::styled("Other", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from("  /           Fuzzy search"),
+        Line::from("  w/Ctrl+s    Save all changes"),
+        Line::from("  q           Quit"),
+        Line::from("  ?           Show this help"),
+    ];
+
+    let popup_height = (lines.len() as u16 + 2).min(area.height - 2);
+    let popup_width = 50u16.min(area.width - 4);
+    let x = (area.width.saturating_sub(popup_width)) / 2;
+    let y = (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .title(" Help (Esc to close) ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    
+    let text = Paragraph::new(lines).block(block);
+    f.render_widget(text, popup_area);
 }
