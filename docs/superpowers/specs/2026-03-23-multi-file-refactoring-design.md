@@ -65,7 +65,7 @@ All TUI operations (selection, movement, deletion) work against this flat list, 
 
 ### 2.1 Config Location
 
-All platforms use `~/.config/wenv/config.toml`. The macOS-specific `~/Library/Application Support/wenv/` path is removed.
+All platforms use `~/.config/wenv/config.toml`. The macOS-specific `~/Library/Application Support/wenv/` path is removed. This is an intentional clean break — no migration from the old path is performed. Since the refactoring removes backup, cache, and changes the config structure significantly, existing users effectively start fresh.
 
 ### 2.2 Config Structure
 
@@ -341,7 +341,7 @@ Uses a fuzzy matching library (e.g., `nucleo` or `fuzzy-matcher`) for fzf-style 
 | `parser/builders/` | ~820 | QuotedValue/CommentBlock builders |
 | `model/entry.rs` | ~350 | Add `file_index` field |
 | `model/types.rs` | ~200 | EntryType, ShellType unchanged |
-| `formatter/` | ~1,280 | Used for add-entry template syntax |
+| `formatter/` | ~1,280 | Used for add-entry templates (e.g., generating `alias name=''` skeleton) and reconstructing entry syntax after edits. The format *command* is removed, but formatters remain as the syntax generation layer. |
 | `i18n/` | ~780 | Update message keys, structure unchanged |
 | `utils/strings.rs` | ~100 | String utilities |
 | `utils/path.rs` | ~50 | Path utilities |
