@@ -76,6 +76,8 @@ pub struct Entry {
     pub value: String,
     pub line_number: Option<usize>,
     pub end_line: Option<usize>,
+    #[serde(default)]
+    pub file_index: usize,  // NEW: index into ShellProfile.files
 }
 
 impl Entry {
@@ -86,6 +88,7 @@ impl Entry {
             value,
             line_number: None,
             end_line: None,
+            file_index: 0,
         }
     }
 
@@ -96,6 +99,11 @@ impl Entry {
 
     pub fn with_end_line(mut self, end_line: usize) -> Self {
         self.end_line = Some(end_line);
+        self
+    }
+
+    pub fn with_file_index(mut self, idx: usize) -> Self {
+        self.file_index = idx;
         self
     }
 

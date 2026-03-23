@@ -2,6 +2,7 @@
 
 mod config;
 mod entry;
+pub mod profile;
 mod shell;
 
 pub use config::{Config, FilesConfig, UiConfig};
