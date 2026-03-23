@@ -13,7 +13,7 @@ use crate::i18n::Messages;
 use crate::model::profile::{ListItem, ShellProfile};
 use crate::tui::keys::{self, Action};
 use crate::tui::list;
-use crate::tui::state::{AppMode, ClipboardState, UndoSnapshot};
+use crate::tui::state::{AppMode, ClipboardState, UndoSnapshot, MoveState};
 use crate::tui::selection::SelectionState;
 
 enum EditorRequest {
@@ -34,6 +34,7 @@ pub struct TuiApp {
     pub selection: SelectionState,
     pub clipboard: ClipboardState,
     pub undo_snapshot: Option<UndoSnapshot>,
+    pub move_state: Option<MoveState>,
 }
 
 impl TuiApp {
@@ -50,6 +51,7 @@ impl TuiApp {
             selection: SelectionState::new(),
             clipboard: ClipboardState::new(),
             undo_snapshot: None,
+            move_state: None,
         })
     }
 
@@ -103,10 +105,26 @@ impl TuiApp {
 
         match action {
             Action::NavigateUp => {
-                self.cursor = list::navigate_up(&self.visible_items, self.cursor);
+                if self.mode == AppMode::Moving {
+                    if let Some(ref mut ms) = self.move_state {
+                        if ms.insertion_cursor > 0 {
+                            ms.insertion_cursor -= 1;
+                        }
+                    }
+                } else {
+                    self.cursor = list::navigate_up(&self.visible_items, self.cursor);
+                }
             }
             Action::NavigateDown => {
-                self.cursor = list::navigate_down(&self.visible_items, self.cursor);
+                if self.mode == AppMode::Moving {
+                    if let Some(ref mut ms) = self.move_state {
+                        if ms.insertion_cursor < self.visible_items.len().saturating_sub(1) {
+                            ms.insertion_cursor += 1;
+                        }
+                    }
+                } else {
+                    self.cursor = list::navigate_down(&self.visible_items, self.cursor);
+                }
             }
             Action::Home => {
                 self.cursor = list::navigate_home();
@@ -178,6 +196,32 @@ impl TuiApp {
                     self.message = Some(format!("Cut {} entries", count));
                 }
             }
+            Action::StartMove => {
+                let targets = self.get_operation_targets();
+                if !targets.is_empty() {
+                    // Take snapshot for undo
+                    self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                    
+                    // Collect source (file_index, entry_index) pairs
+                    let source_items: Vec<(usize, usize)> = targets.iter()
+                        .filter_map(|&idx| {
+                            match self.visible_items.get(idx) {
+                                Some(ListItem::Entry(fi, ei)) => Some((*fi, *ei)),
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    
+                    if !source_items.is_empty() {
+                        self.move_state = Some(MoveState {
+                            source_items,
+                            insertion_cursor: self.cursor,
+                        });
+                        self.mode = AppMode::Moving;
+                        self.message = Some(format!("Move mode: ↑↓ to position, Enter to drop, Esc to cancel"));
+                    }
+                }
+            }
             Action::Paste => {
                 if !self.clipboard.is_empty() {
                     self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
@@ -215,6 +259,9 @@ impl TuiApp {
             }
             Action::Confirm => {
                 match &self.mode {
+                    AppMode::Moving => {
+                        self.execute_move();
+                    }
                     AppMode::ConfirmDelete => {
                         let targets = self.get_operation_targets();
                         crate::tui::operations::delete_entries(
@@ -233,6 +280,17 @@ impl TuiApp {
             }
             Action::Cancel => {
                 match &self.mode {
+                    AppMode::Moving => {
+                        // Restore from snapshot
+                        if let Some(snapshot) = self.undo_snapshot.take() {
+                            crate::tui::operations::restore_snapshot(&mut self.profile, snapshot);
+                        }
+                        self.move_state = None;
+                        self.selection.clear();
+                        self.mode = AppMode::Normal;
+                        self.rebuild_list();
+                        self.message = Some("Move cancelled".into());
+                    }
                     AppMode::ConfirmDelete => {
                         // Restore snapshot since we took it preemptively
                         if let Some(_snapshot) = self.undo_snapshot.take() {
@@ -314,6 +372,64 @@ impl TuiApp {
                 Some(ListItem::Entry(_, _)) => vec![self.cursor],
                 _ => vec![],
             }
+        }
+    }
+
+    fn execute_move(&mut self) {
+        if let Some(ms) = self.move_state.take() {
+            // Determine target file and position from insertion_cursor
+            let (target_fi, target_pos) = match self.visible_items.get(ms.insertion_cursor) {
+                Some(ListItem::Entry(fi, ei)) => (*fi, ei + 1),  // Insert after this entry
+                Some(ListItem::FileHeader(fi)) => (*fi, 0),       // Insert at start of file
+                None => {
+                    let fi = self.profile.files.len().saturating_sub(1);
+                    (fi, self.profile.files[fi].entries.len())
+                }
+            };
+
+            // Collect the entries to move (clone them before removing)
+            let mut entries_to_move: Vec<crate::model::Entry> = Vec::new();
+            for &(fi, ei) in &ms.source_items {
+                if fi < self.profile.files.len() && ei < self.profile.files[fi].entries.len() {
+                    entries_to_move.push(self.profile.files[fi].entries[ei].clone());
+                }
+            }
+
+            // Remove source entries (reverse order to preserve indices)
+            // Group by file, sort entry indices descending
+            let mut by_file: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+            for &(fi, ei) in &ms.source_items {
+                by_file.entry(fi).or_default().push(ei);
+            }
+            for (fi, mut indices) in by_file {
+                indices.sort();
+                indices.dedup();
+                for &ei in indices.iter().rev() {
+                    if ei < self.profile.files[fi].entries.len() {
+                        self.profile.files[fi].entries.remove(ei);
+                    }
+                }
+                self.profile.files[fi].dirty = true;
+            }
+
+            // Adjust target_pos if removals in the same file shifted indices
+            // This is tricky — we need to recalculate since entries shifted.
+            // Safest approach: rebuild list, then find position by count.
+            // But simpler: just insert at target file, at min(target_pos, entries.len())
+            let adjusted_pos = target_pos.min(self.profile.files[target_fi].entries.len());
+
+            // Insert at target
+            for (i, mut entry) in entries_to_move.into_iter().enumerate() {
+                entry.file_index = target_fi;
+                self.profile.files[target_fi].entries.insert(adjusted_pos + i, entry);
+            }
+            self.profile.files[target_fi].dirty = true;
+
+            self.selection.clear();
+            self.mode = AppMode::Normal;
+            self.rebuild_list();
+            self.cursor = ms.insertion_cursor.min(self.visible_items.len().saturating_sub(1));
+            self.message = Some("Moved".into());
         }
     }
 

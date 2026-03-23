@@ -45,17 +45,27 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
         .map(|(i, item)| {
             let is_cursor = i == app.cursor;
             let is_selected = app.selection.is_selected(i);
+            let is_move_target = app.mode == AppMode::Moving 
+                && app.move_state.as_ref().map_or(false, |ms| ms.insertion_cursor == i);
+            
             match item {
                 ProfileListItem::FileHeader(fi) => {
                     let file = &app.profile.files[*fi];
                     let icon = if file.expanded { "▼" } else { "▶" };
                     let dirty = if file.dirty { " ●" } else { "" };
                     let text = format!("📜 {} {} [{} entries]{}", icon, file.display_name(), file.entry_count(), dirty);
-                    let style = if is_cursor {
+                    
+                    let mut style = if is_cursor {
                         Style::default().bg(Color::DarkGray).fg(Color::Yellow).add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
                     };
+                    
+                    // Override with move target style
+                    if is_move_target {
+                        style = style.bg(Color::Green).fg(Color::Black);
+                    }
+                    
                     ratatui::widgets::ListItem::new(text).style(style)
                 }
                 ProfileListItem::Entry(fi, ei) => {
@@ -67,12 +77,18 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     let prefix = if is_selected { "● " } else { "  " };
                     let text = format!("  {}{} {}", prefix, type_str, name);
                     
-                    let style = match (is_cursor, is_selected) {
+                    let mut style = match (is_cursor, is_selected) {
                         (true, true) => Style::default().bg(Color::Cyan).fg(Color::Black),      // cursor + selected
                         (true, false) => Style::default().bg(Color::DarkGray).fg(Color::White), // cursor only
                         (false, true) => Style::default().bg(Color::Blue).fg(Color::White),     // selected only
                         (false, false) => Style::default().fg(Color::Gray),                      // normal
                     };
+                    
+                    // Override with move target style
+                    if is_move_target {
+                        style = style.bg(Color::Green).fg(Color::Black);
+                    }
+                    
                     ratatui::widgets::ListItem::new(text).style(style)
                 }
             }

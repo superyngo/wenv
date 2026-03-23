@@ -28,3 +28,8 @@ impl ClipboardState {
 pub struct UndoSnapshot {
     pub file_states: Vec<(std::path::PathBuf, String, Vec<crate::model::Entry>)>,
 }
+
+pub struct MoveState {
+    pub source_items: Vec<(usize, usize)>,  // (file_index, entry_index) of entries being moved
+    pub insertion_cursor: usize,             // visible-list index for drop target
+}
