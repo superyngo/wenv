@@ -14,32 +14,6 @@ impl PowerShellFormatter {
         Self
     }
 
-    #[allow(dead_code)]
-    fn format_alias(&self, entry: &Entry) -> String {
-        format!("Set-Alias {} '{}'", entry.name, entry.value)
-    }
-
-    #[allow(dead_code)]
-    fn format_env(&self, entry: &Entry) -> String {
-        // Use Here-String format for multi-line values
-        if entry.value.contains('\n') {
-            format!("$env:{} = @\"\n{}\n\"@", entry.name, entry.value)
-        } else {
-            // Single-line env vars are always quoted
-            format!("$env:{} = \"{}\"", entry.name, entry.value)
-        }
-    }
-
-    #[allow(dead_code)]
-    fn format_source(&self, entry: &Entry) -> String {
-        format!(". {}", entry.value)
-    }
-
-    #[allow(dead_code)]
-    fn format_function(&self, entry: &Entry) -> String {
-        // With the new architecture, value already contains complete syntax
-        entry.value.clone()
-    }
 }
 
 impl Default for PowerShellFormatter {

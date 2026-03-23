@@ -7,117 +7,11 @@ use crate::model::EntryType;
 use super::Formatter;
 
 /// Bash configuration file formatter
-pub struct BashFormatter {
-    /// Indentation style (e.g., "    " for 4 spaces, "\t" for tab)
-    #[allow(dead_code)]
-    indent_style: String,
-}
+pub struct BashFormatter;
 
 impl BashFormatter {
     pub fn new() -> Self {
-        Self {
-            indent_style: "    ".to_string(), // Default to 4 spaces
-        }
-    }
-
-    /// Create a formatter with a specific indent style
-    pub fn with_indent_style(indent_style: String) -> Self {
-        Self { indent_style }
-    }
-
-    #[allow(dead_code)]
-    fn format_alias(&self, entry: &Entry) -> String {
-        let value = &entry.value;
-
-        // Multi-line values: prefer single quotes (safest Bash multi-line syntax)
-        if value.contains('\n') {
-            if !value.contains('\'') {
-                // No single quotes in value, safe to use single quotes
-                return format!("alias {}='{}'", entry.name, value);
-            }
-            // Value contains single quotes, use double quotes with escaping
-            let escaped = value
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('$', "\\$")
-                .replace('`', "\\`");
-            return format!("alias {}=\"{}\"", entry.name, escaped);
-        }
-
-        // Single-line values: check if quotes are needed
-        if value.contains(' ') || value.contains('$') || value.contains('"') {
-            if value.contains('\'') {
-                format!("alias {}=\"{}\"", entry.name, value.replace('"', "\\\""))
-            } else {
-                format!("alias {}='{}'", entry.name, value)
-            }
-        } else {
-            format!("alias {}='{}'", entry.name, value)
-        }
-    }
-
-    #[allow(dead_code)]
-    fn format_export(&self, entry: &Entry) -> String {
-        let value = &entry.value;
-
-        // Multi-line values: prefer single quotes to match parser (which only detects single-quote multi-line)
-        if value.contains('\n') {
-            if !value.contains('\'') {
-                // No single quotes in value, safe to use single quotes
-                return format!("export {}='{}'", entry.name, value);
-            }
-            // Value contains single quotes, use double quotes with escaping
-            let escaped = value
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('`', "\\`")
-                .replace('$', "\\$"); // Escape $ in multi-line double-quoted strings
-            return format!("export {}=\"{}\"", entry.name, escaped);
-        }
-
-        // Single-line values
-        if value.is_empty() {
-            // Empty value: use single quotes for clarity
-            format!("export {}=''", entry.name)
-        } else if value.contains(' ') || value.contains('$') {
-            format!("export {}=\"{}\"", entry.name, value)
-        } else {
-            format!("export {}={}", entry.name, value)
-        }
-    }
-
-    #[allow(dead_code)]
-    fn format_source(&self, entry: &Entry) -> String {
-        format!("source {}", entry.value)
-    }
-
-    #[allow(dead_code)]
-    fn format_function(&self, entry: &Entry, _indent_style: &str) -> String {
-        // With the new architecture, value already contains complete syntax
-        entry.value.clone()
-    }
-
-    /// Format a raw function definition, applying indentation to the body
-    #[allow(dead_code)]
-    fn format_raw_function(&self, raw: &str, indent_style: &str) -> String {
-        let lines: Vec<&str> = raw.lines().collect();
-
-        if lines.len() <= 2 {
-            // Single line or minimal function, return as-is
-            return raw.to_string();
-        }
-
-        // Extract body (lines between first and last)
-        let body = lines[1..lines.len() - 1].join("\n");
-        let formatted_body = super::indent::format_body_preserve_relative(&body, indent_style);
-
-        // Reconstruct with formatted body
-        format!(
-            "{}\n{}\n{}",
-            lines[0],
-            formatted_body,
-            lines.last().unwrap()
-        )
+        Self
     }
 }
 
