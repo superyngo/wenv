@@ -1574,146 +1574,16 @@ impl TuiApp {
 
     /// Generate format preview
     fn preview_format(&mut self) -> Result<()> {
-        use crate::checker::{check_all, Severity};
-        use crate::utils::path_merge;
-
-        let config = crate::config::load_or_create_config()?;
-
-        // Clone entries and merge PATH if needed
-        let mut entries_to_format = self.entries.clone();
-        let mut path_merge_info: Option<path_merge::PathMergeResult> = None;
-
-        // Check for PATH merging
-        let path_entries: Vec<&Entry> = entries_to_format
-            .iter()
-            .filter(|e| e.entry_type == EntryType::EnvVar && e.name.to_uppercase() == "PATH")
-            .collect();
-
-        if let Some(merge_result) = path_merge::merge_path_definitions(&path_entries) {
-            // Remove all PATH entries and add merged one
-            entries_to_format.retain(|e| {
-                !(e.entry_type == EntryType::EnvVar && e.name.to_uppercase() == "PATH")
-            });
-
-            let merged_entry = Entry::new(
-                EntryType::EnvVar,
-                "PATH".to_string(),
-                merge_result.merged_value.clone(),
-            )
-            .with_line_number(merge_result.source_lines.first().copied().unwrap_or(0));
-
-            entries_to_format.push(merged_entry);
-            path_merge_info = Some(merge_result);
-        }
-
-        let formatter = crate::formatter::get_formatter(self.shell_type);
-        let formatted = formatter.format(&entries_to_format, &config);
-
-        // Build summary
-        let mut summary = Vec::new();
-
-        // 1. Check for duplicates
-        let check_result = check_all(&self.entries);
-        if !check_result.issues.is_empty() {
-            summary.push(format!("⚠ Found {} issues:", check_result.issues.len()));
-            for issue in check_result.issues.iter().take(10) {
-                let prefix = match issue.severity {
-                    Severity::Warning => "  •",
-                    Severity::Error => "  ✗",
-                };
-                summary.push(format!("{} {}", prefix, issue.message));
-            }
-            if check_result.issues.len() > 10 {
-                summary.push(format!("  ... and {} more", check_result.issues.len() - 10));
-            }
-            summary.push(String::new());
-        }
-
-        // 2. Show PATH merging info
-        if let Some(merge_info) = path_merge_info {
-            summary.push(format!(
-                "✓ Merging {} PATH definitions (lines: {})",
-                merge_info.source_lines.len(),
-                merge_info
-                    .source_lines
-                    .iter()
-                    .map(|l| l.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-            summary.push(format!("  → {}", merge_info.merged_value));
-            summary.push(String::new());
-        }
-
-        // 3. Count entries by type
-        let mut alias_count = 0;
-        let mut func_count = 0;
-        let mut env_count = 0;
-        let mut source_count = 0;
-
-        for entry in &self.entries {
-            match entry.entry_type {
-                EntryType::Alias => alias_count += 1,
-                EntryType::Function => func_count += 1,
-                EntryType::EnvVar => env_count += 1,
-                EntryType::Source => source_count += 1,
-                _ => {}
-            }
-        }
-
-        if config.format.sort_alphabetically {
-            if alias_count > 0 {
-                summary.push(
-                    self.messages
-                        .tui_fmt_sorting_aliases
-                        .replace("{}", &alias_count.to_string()),
-                );
-            }
-            if func_count > 0 {
-                summary.push(
-                    self.messages
-                        .tui_fmt_sorting_functions
-                        .replace("{}", &func_count.to_string()),
-                );
-            }
-            if env_count > 0 {
-                summary.push(
-                    self.messages
-                        .tui_fmt_sorting_envvars
-                        .replace("{}", &env_count.to_string()),
-                );
-            }
-            if source_count > 0 {
-                summary.push(
-                    self.messages
-                        .tui_fmt_sorting_sources
-                        .replace("{}", &source_count.to_string()),
-                );
-            }
-        }
-
-        if config.format.group_by_type {
-            summary.push(String::new());
-            summary.push(self.messages.tui_fmt_grouping_entries.to_string());
-        }
-
-        if summary.is_empty() {
-            summary.push(self.messages.tui_fmt_no_changes_needed.to_string());
-        }
-
-        // Create preview and switch to ConfirmFormat mode
-        self.format_preview = Some(FormatPreview::new(summary, formatted));
-        self.mode = AppMode::ConfirmFormat;
-        self.message = Some(self.messages.tui_msg_review_changes.to_string());
-
+        // TODO: This functionality is temporarily removed during refactoring
+        // Will be reimplemented in Task 6
+        self.message = Some("Format preview temporarily unavailable during refactoring".to_string());
+        self.mode = AppMode::Normal;
         Ok(())
     }
 
-    /// Apply the format (after confirmation)
+    /// Apply the format (after confirmation) - temporarily without backup during refactoring
     fn apply_format(&mut self) -> Result<()> {
         if let Some(preview) = self.format_preview.take() {
-            let config = crate::config::load_or_create_config()?;
-
             // Write formatted content to temp file for validation
             std::fs::write(&self.temp_file_path, &preview.formatted_content)?;
 
@@ -1734,11 +1604,7 @@ impl TuiApp {
                 }
             }
 
-            // Create backup before writing
-            let backup_manager = crate::backup::BackupManager::new(self.shell_type, &config);
-            backup_manager.create_backup(&self.file_path)?;
-
-            // Write formatted content
+            // Write formatted content (backup creation temporarily removed)
             std::fs::write(&self.file_path, preview.formatted_content)?;
 
             // Refresh entries
@@ -1759,22 +1625,11 @@ impl TuiApp {
 
     /// Force apply format without validation (after user confirmation)
     fn force_apply_format(&mut self) -> Result<()> {
-        if let Some(preview) = self.format_preview.take() {
-            let config = crate::config::load_or_create_config()?;
-
-            // Create backup before writing
-            let backup_manager = crate::backup::BackupManager::new(self.shell_type, &config);
-            backup_manager.create_backup(&self.file_path)?;
-
-            // Write formatted content
-            std::fs::write(&self.file_path, preview.formatted_content)?;
-
-            // Refresh entries
-            self.refresh()?;
-            self.mode = AppMode::Normal;
-            self.message = Some(self.messages.tui_msg_format_bypassed.to_string());
-        }
-
+        // TODO: This functionality is temporarily removed during refactoring
+        // Will be reimplemented in Task 6
+        self.format_preview = None;
+        self.mode = AppMode::Normal;
+        self.message = Some("Format apply temporarily unavailable during refactoring".to_string());
         Ok(())
     }
 
@@ -2135,7 +1990,7 @@ impl TuiApp {
         Ok(())
     }
 
-    /// Save entries to original file (with backup and validation)
+    /// Save entries to original file (temporarily without backup during refactoring)
     fn save_to_original_file(&mut self) -> Result<()> {
         // Validate with shell first
         match self.validate_with_shell()? {
@@ -2155,12 +2010,7 @@ impl TuiApp {
             }
         }
 
-        // Create backup
-        let config = crate::config::load_or_create_config()?;
-        let backup_manager = crate::backup::BackupManager::new(self.shell_type, &config);
-        backup_manager.create_backup(&self.file_path)?;
-
-        // Generate content and write
+        // Generate content and write (backup creation temporarily removed)
         let content = self.generate_file_content();
         std::fs::write(&self.file_path, &content)?;
 
@@ -2708,14 +2558,9 @@ impl TuiApp {
         }
     }
 
-    /// Save to original file without validation (force save)
+    /// Save to original file without validation (force save, temporarily without backup)
     fn force_save_to_original_file(&mut self) -> Result<()> {
-        // Create backup
-        let config = crate::config::load_or_create_config()?;
-        let backup_manager = crate::backup::BackupManager::new(self.shell_type, &config);
-        backup_manager.create_backup(&self.file_path)?;
-
-        // Generate content and write
+        // Generate content and write (backup creation temporarily removed)
         let content = self.generate_file_content();
         std::fs::write(&self.file_path, &content)?;
 

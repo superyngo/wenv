@@ -16,37 +16,13 @@ pub struct Cli {
     #[arg(short, long)]
     pub shell: Option<ShellArg>,
 
-    /// Import entries from file or URL
-    #[arg(short, long, value_name = "SOURCE", group = "action")]
-    pub import: Option<String>,
-
-    /// Conflict handling strategy (for import)
-    #[arg(long, default_value = "ask")]
-    pub on_conflict: ConflictStrategy,
-
-    /// Export entries to file
-    #[arg(short, long, value_name = "OUTPUT", group = "action")]
-    pub export: Option<PathBuf>,
-
     /// Open source file in $EDITOR (same as "wenv .")
     #[arg(long, group = "action")]
     pub source: bool,
 
-    /// Skip confirmation prompts (for import)
-    #[arg(short, long)]
-    pub yes: bool,
-
-    /// Clear cached shell paths
-    #[arg(long, group = "action")]
-    pub clear_cache: bool,
-
     /// Open wenv config file in $EDITOR
     #[arg(short = 'c', long, group = "action")]
     pub config: bool,
-
-    /// Filter by entry type (for export)
-    #[arg(short, long)]
-    pub r#type: Option<EntryTypeArg>,
 
     /// Positional argument: "." to open editor, or file path
     #[arg(value_name = "PATH_OR_DOT")]
@@ -97,12 +73,4 @@ impl From<EntryTypeArg> for crate::model::EntryType {
             EntryTypeArg::Comment => crate::model::EntryType::Comment,
         }
     }
-}
-
-#[derive(Clone, Copy, ValueEnum, Default)]
-pub enum ConflictStrategy {
-    #[default]
-    Ask,
-    Skip,
-    Overwrite,
 }

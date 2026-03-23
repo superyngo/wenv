@@ -34,19 +34,6 @@ remove_prompt = "移除此條目？"
 invalid_alias_format = "別名格式無效。請使用：NAME=VALUE"
 invalid_env_format = "環境變數格式無效。請使用：NAME=VALUE"
 
-# === Backup ===
-backup_created = "已建立備份：{}"
-backup_restored = "已從備份還原：{}"
-no_backups_found = "找不到備份。"
-backup_list_header = "可用的備份："
-
-# === Format ===
-msg_file_formatted = "檔案格式化成功"
-
-# === Import/Export ===
-imported_entries = "已匯入 {} 個條目"
-exported_entries = "已匯出 {} 個條目到 {}"
-
 # === Reload Hint ===
 reload_hint = "執行 '{}' 以套用變更"
 

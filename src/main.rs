@@ -10,13 +10,6 @@ use wenv::tui::TuiApp;
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Handle --clear-cache early (doesn't require config file)
-    if cli.clear_cache {
-        wenv::cache::PathCache::clear()?;
-        println!("Cache cleared successfully.");
-        return Ok(());
-    }
-
     // Handle --config early (opens wenv config file in editor)
     if cli.config {
         let config_path = wenv::Config::config_path();
@@ -53,12 +46,6 @@ fn main() -> Result<()> {
     }
 
     // Quick actions: execute and exit
-    if let Some(source) = &cli.import {
-        return actions::import::execute(&ctx, source, cli.yes);
-    }
-    if let Some(output) = &cli.export {
-        return actions::export::execute(&ctx, cli.r#type, output);
-    }
     if cli.command.as_deref() == Some(".") || cli.source {
         return actions::source::execute(&ctx);
     }

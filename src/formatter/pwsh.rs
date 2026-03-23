@@ -2,7 +2,6 @@
 
 use crate::formatter::find_attached_comments;
 use crate::model::{Config, Entry, EntryType, ShellType};
-use crate::utils::dependency;
 
 use super::Formatter;
 
@@ -94,21 +93,12 @@ impl Formatter for PowerShellFormatter {
             }
 
             // Sort grouped entries
-            for (entry_type, type_entries) in grouped.iter_mut() {
+            for (_entry_type, type_entries) in grouped.iter_mut() {
                 if config.format.sort_alphabetically {
-                    if *entry_type == EntryType::EnvVar {
-                        // Use topological sort for environment variables to respect dependencies
-                        let sorted = dependency::topological_sort(type_entries, true);
-                        *type_entries = sorted;
-                    } else {
-                        // Simple alphabetical sort for other types
-                        type_entries.sort_by(|a, b| a.name.cmp(&b.name));
-                    }
-                } else if *entry_type == EntryType::EnvVar {
-                    // Even without alphabetical sorting, preserve dependency order
-                    let sorted = dependency::topological_sort(type_entries, false);
-                    *type_entries = sorted;
+                    // Simple alphabetical sort for all types (dependency sorting temporarily removed)
+                    type_entries.sort_by(|a, b| a.name.cmp(&b.name));
                 }
+                // Note: Dependency-based sorting temporarily removed during refactoring
             }
 
             // Build type order from config

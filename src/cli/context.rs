@@ -4,7 +4,7 @@ use anyhow::Result;
 use colored::Colorize;
 use std::path::PathBuf;
 
-use crate::cli::args::{Cli, ConflictStrategy};
+use crate::cli::args::Cli;
 use crate::i18n::{init_messages, Messages};
 use crate::model::{Config, ShellType};
 use crate::utils::shell_detect::get_shell_type;
@@ -14,7 +14,6 @@ pub struct Context {
     pub config: Config,
     pub shell_type: ShellType,
     pub config_file: PathBuf,
-    pub on_conflict: ConflictStrategy,
     pub messages: &'static Messages,
 }
 
@@ -38,7 +37,6 @@ impl Context {
             config,
             shell_type,
             config_file,
-            on_conflict: cli.on_conflict,
             messages,
         })
     }

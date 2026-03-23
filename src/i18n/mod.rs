@@ -44,19 +44,6 @@ pub struct Messages {
     pub invalid_alias_format: &'static str,
     pub invalid_env_format: &'static str,
 
-    // === Backup ===
-    pub backup_created: &'static str,
-    pub backup_restored: &'static str,
-    pub no_backups_found: &'static str,
-    pub backup_list_header: &'static str,
-
-    // === Format ===
-    pub msg_file_formatted: &'static str,
-
-    // === Import/Export ===
-    pub imported_entries: &'static str,
-    pub exported_entries: &'static str,
-
     // === Reload Hint ===
     pub reload_hint: &'static str,
 
@@ -279,19 +266,6 @@ struct MessagesToml {
     remove_prompt: String,
     invalid_alias_format: String,
     invalid_env_format: String,
-
-    // === Backup ===
-    backup_created: String,
-    backup_restored: String,
-    no_backups_found: String,
-    backup_list_header: String,
-
-    // === Format ===
-    msg_file_formatted: String,
-
-    // === Import/Export ===
-    imported_entries: String,
-    exported_entries: String,
 
     // === Reload Hint ===
     reload_hint: String,
@@ -522,19 +496,6 @@ impl From<MessagesToml> for Messages {
             remove_prompt: leak!(toml.remove_prompt),
             invalid_alias_format: leak!(toml.invalid_alias_format),
             invalid_env_format: leak!(toml.invalid_env_format),
-
-            // === Backup ===
-            backup_created: leak!(toml.backup_created),
-            backup_restored: leak!(toml.backup_restored),
-            no_backups_found: leak!(toml.no_backups_found),
-            backup_list_header: leak!(toml.backup_list_header),
-
-            // === Format ===
-            msg_file_formatted: leak!(toml.msg_file_formatted),
-
-            // === Import/Export ===
-            imported_entries: leak!(toml.imported_entries),
-            exported_entries: leak!(toml.exported_entries),
 
             // === Reload Hint ===
             reload_hint: leak!(toml.reload_hint),
