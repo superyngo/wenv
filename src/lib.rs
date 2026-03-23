@@ -22,5 +22,5 @@ pub mod tui;
 pub mod utils;
 
 pub use formatter::{get_formatter, Formatter};
-pub use model::{Config, Entry, EntryType, ParseResult, ShellType};
+pub use model::{Config, Entry, EntryType, FilesConfig, ParseResult, ShellType, UiConfig};
 pub use parser::{get_parser, Parser};

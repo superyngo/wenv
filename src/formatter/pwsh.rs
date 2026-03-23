@@ -1,7 +1,8 @@
 //! PowerShell configuration file formatter
 
-use crate::formatter::find_attached_comments;
-use crate::model::{Config, Entry, EntryType, ShellType};
+use crate::model::{Config, Entry, ShellType};
+#[cfg(test)]
+use crate::model::EntryType;
 
 use super::Formatter;
 
@@ -48,175 +49,11 @@ impl Default for PowerShellFormatter {
 }
 
 impl Formatter for PowerShellFormatter {
-    fn format(&self, entries: &[Entry], config: &Config) -> String {
-        let mut output = String::new();
-
-        if !config.format.group_by_type {
-            let mut sorted_entries: Vec<_> = entries.iter().collect();
-            sorted_entries.sort_by_key(|e| e.line_number.unwrap_or(0));
-
-            for entry in sorted_entries {
-                if entry.entry_type == EntryType::Code && entry.value.is_empty() {
-                    if let (Some(start), Some(end)) = (entry.line_number, entry.end_line) {
-                        for _ in 0..(end - start + 1) {
-                            output.push('\n');
-                        }
-                    } else {
-                        output.push('\n');
-                    }
-                } else {
-                    output.push_str(&self.format_entry(entry));
-                    output.push('\n');
-                }
-            }
-        } else {
-            // Group entries by type (for format command with grouping enabled)
-            // Strategy: Output types in configured order, keep Comment/Code in original positions
-
-            // Find comments attached to entries
-            let attached_comments = find_attached_comments(entries);
-
-            // Group parseable entries by type
-            let mut grouped: std::collections::HashMap<EntryType, Vec<&Entry>> =
-                std::collections::HashMap::new();
-
-            for entry in entries {
-                match entry.entry_type {
-                    EntryType::Alias
-                    | EntryType::EnvVar
-                    | EntryType::Source
-                    | EntryType::Function => {
-                        grouped.entry(entry.entry_type).or_default().push(entry);
-                    }
-                    _ => {}
-                }
-            }
-
-            // Sort grouped entries
-            for (_entry_type, type_entries) in grouped.iter_mut() {
-                if config.format.sort_alphabetically {
-                    // Simple alphabetical sort for all types (dependency sorting temporarily removed)
-                    type_entries.sort_by(|a, b| a.name.cmp(&b.name));
-                }
-                // Note: Dependency-based sorting temporarily removed during refactoring
-            }
-
-            // Build type order from config
-            let type_order: Vec<EntryType> = config
-                .format
-                .order
-                .types
-                .iter()
-                .filter_map(|s| s.parse::<EntryType>().ok())
-                .collect();
-
-            // Collect Comment/Code entries for output in original order
-            let mut code_comments: Vec<&Entry> = entries
-                .iter()
-                .filter(|e| e.entry_type == EntryType::Code || e.entry_type == EntryType::Comment)
-                .filter(|e| {
-                    // Skip comments attached to other entries
-                    if e.entry_type == EntryType::Comment {
-                        let entry_line = e.line_number.unwrap_or(0);
-                        !attached_comments.values().any(|comments| {
-                            comments.iter().any(|c| c.line_number == Some(entry_line))
-                        })
-                    } else {
-                        true
-                    }
-                })
-                .collect();
-            code_comments.sort_by_key(|e| e.line_number.unwrap_or(0));
-
-            // Output Code/Comment entries that appear before any structured entries
-            let first_structured_line = entries
-                .iter()
-                .filter(|e| {
-                    matches!(
-                        e.entry_type,
-                        EntryType::Alias
-                            | EntryType::EnvVar
-                            | EntryType::Source
-                            | EntryType::Function
-                    )
-                })
-                .filter_map(|e| e.line_number)
-                .min()
-                .unwrap_or(usize::MAX);
-
-            for entry in &code_comments {
-                let line = entry.line_number.unwrap_or(0);
-                if line < first_structured_line {
-                    if entry.entry_type == EntryType::Code && entry.value.is_empty() {
-                        if let (Some(start), Some(end)) = (entry.line_number, entry.end_line) {
-                            for _ in 0..(end - start + 1) {
-                                output.push('\n');
-                            }
-                        } else {
-                            output.push('\n');
-                        }
-                    } else {
-                        output.push_str(&self.format_entry(entry));
-                        output.push('\n');
-                    }
-                }
-            }
-
-            // Output structured entries by configured type order
-            let blank_lines = config.format.blank_lines_between_groups;
-            let mut first_group = true;
-
-            for entry_type in &type_order {
-                if let Some(type_entries) = grouped.get(entry_type) {
-                    if !type_entries.is_empty() {
-                        // Add blank lines between groups
-                        if !first_group {
-                            for _ in 0..blank_lines {
-                                output.push('\n');
-                            }
-                        }
-                        first_group = false;
-
-                        for grouped_entry in type_entries {
-                            // Output attached comments before the entry
-                            if let Some(comments) =
-                                attached_comments.get(&grouped_entry.line_number.unwrap_or(0))
-                            {
-                                for comment in comments {
-                                    output.push_str(&self.format_entry(comment));
-                                    output.push('\n');
-                                }
-                            }
-
-                            output.push_str(&self.format_entry(grouped_entry));
-                            output.push('\n');
-                        }
-                    }
-                }
-            }
-
-            // Output remaining Code/Comment entries (those not before first structured entry)
-            // These are output after all structured entries have been grouped
-            for entry in &code_comments {
-                let line = entry.line_number.unwrap_or(0);
-                if line >= first_structured_line {
-                    if entry.entry_type == EntryType::Code && entry.value.is_empty() {
-                        if let (Some(start), Some(end)) = (entry.line_number, entry.end_line) {
-                            for _ in 0..(end - start + 1) {
-                                output.push('\n');
-                            }
-                        } else {
-                            output.push('\n');
-                        }
-                    } else {
-                        output.push_str(&self.format_entry(entry));
-                        output.push('\n');
-                    }
-                }
-            }
-        }
-
-        output
+    fn format(&self, entries: &[Entry], _config: &Config) -> String {
+        entries.iter()
+            .map(|e| self.format_entry(e))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     fn format_entry(&self, entry: &Entry) -> String {

@@ -122,6 +122,15 @@ impl ShellType {
             ShellType::PowerShell => "pwsh",
         }
     }
+
+    /// Key used in config.toml [files.<key>] sections.
+    pub fn config_key(&self) -> &'static str {
+        match self {
+            ShellType::Bash => "bash",
+            ShellType::Zsh => "zsh",
+            ShellType::PowerShell => "powershell",
+        }
+    }
 }
 
 impl std::fmt::Display for ShellType {
