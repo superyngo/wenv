@@ -61,20 +61,64 @@ This release represents a complete refactoring from single-file to multi-file sh
 
 ---
 
-## [Unreleased]
+## [v0.10.0] - 2026-03-25
 
-### Fixed
-- **2026-02-02**: Fixed PATH environment variable merging to correctly parse and merge entries with complete export syntax
+### 🚨 BREAKING CHANGES
+
+**Complete Multi-File Architecture Refactoring**
+
+This release represents a complete architectural overhaul to support multi-file shell configuration management through a modern TUI interface.
+
+**Removed Features:**
+- Single-file management (TUI now manages multiple files simultaneously)
+- Legacy CLI flags simplified to essential flags only
+
+### ✨ NEW FEATURES
+
+- **Multi-File Tree View TUI**: Interactive terminal interface with expandable/collapsible file tree for managing multiple config files
+- **Cross-File Operations**: Cut, paste, and move entries between different configuration files
+- **Fuzzy Search with Real-Time Matching**: Search across all expanded files with per-character highlighting in name and value fields
+- **Advanced Selection System**: Support for single selection, multi-selection (Space), and range selection (Shift+Arrow) with visual indicators
+- **Full Undo/Redo**: Complete undo support for all operations (delete, cut, paste, edit) that restores all files atomically
+- **External $EDITOR Integration**: Edit entries directly with your configured editor (vim, nano, VS Code, etc.)
+- **Drag-Style Move Across Files**: Move entries to different files by targeting file headers or specific entry positions
+- **Entry Detail Popup**: Press '?' to view detailed information about selected entries
+- **Enhanced Search Navigation**: Home/End/PageUp/PageDown keys in search mode with match wrapping
+- **Config-Based File Lists**: Define which files to manage in `~/.config/wenv/config.toml` with `[files.*]` sections
+
+### 🔧 CHANGED
+
+- **CLI Interface**: Simplified to only `--shell`, `--source`, `--config` flags
+- **Configuration Format**: Multi-file configuration with `[files.bash]`, `[files.zsh]`, `[files.powershell]` sections
+- **Selection UX**: Fixed shift-anchor for range selection, commits ranges on non-shift operations
+- **Search UX**: Improved with Home/End navigation, per-character highlighting, better visual feedback
+- **Undo Preservation**: Undo snapshots now preserve dirty state for all files
+- **Entry Value Architecture**: All entry types store complete raw syntax including keywords, options, quotes
+- **TUI Key Bindings**: Comprehensive key mapping with help screen showing all shortcuts
+
+### 🗂️ CODEBASE CHANGES
+
+- **New TUI Modules**: app, ui, keys, state, selection, operations, editor, search, list modules
+- **Data Model**: New `ShellProfile`, `ProfileFile`, `ListItem` structures for multi-file support
+- **Removed ~5900 LOC**: Eliminated checker, backup, cache, import/export, unused utilities modules
+- **Simplified Formatters**: Direct entry.value usage without syntax reconstruction
+- **Test Coverage**: Added 11 comprehensive TUI logic tests
+
+### 📝 DOCUMENTATION
+
+- **CLAUDE.md**: Updated for new architecture, multi-file data model, TUI operations
+- **README.md**: Complete rewrite with usage examples, key bindings, configuration format
+
+### 🐛 FIXED
+
+- **PATH Entry Merging**: Correctly parse and merge PATH entries with complete export syntax
   - Root cause: `merge_path_definitions()` was directly splitting `entry.value` (which contains complete syntax like `export PATH="/usr/bin:$PATH"`) instead of extracting the value part first
-  - This caused incorrect merging like `export PATH="/dir1:$PATH":export PATH="/dir2":"$PATH"` instead of proper path concatenation
-  - Solution: Added `extract_path_value()` helper function to extract value from various export formats:
-    - `export PATH="/value"` (double quotes)
-    - `export PATH='value'` (single quotes)
-    - `export PATH=value` (unquoted)
-    - `export PATH="/part1":"$PATH"` (concatenated quoted strings)
-  - Now correctly merges to: `export PATH="/dir1:/dir2:$PATH"`
-  - Added comprehensive test coverage for all quote styles and concatenation cases
-  - All 227 tests passing
+  - Solution: Added `extract_path_value()` helper function to extract value from various export formats (quoted/unquoted/concatenated)
+  - Now correctly merges: `export PATH="/dir1:/dir2:$PATH"`
+
+---
+
+## [Unreleased]
 
 ## [0.9.0] - 2026-01-27
 
