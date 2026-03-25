@@ -6,6 +6,8 @@ use crate::tui::state::AppMode;
 pub enum Action {
     NavigateUp,
     NavigateDown,
+    PageUp,
+    PageDown,
     Home,
     End,
     ToggleExpand,
@@ -37,6 +39,7 @@ pub fn map_key(mode: &AppMode, key: KeyEvent) -> Action {
         AppMode::Normal => map_normal_key(key),
         AppMode::Moving => map_moving_key(key),
         AppMode::Searching => map_search_key(key),
+        AppMode::ShowingDetail => map_detail_key(key),
         _ => map_popup_key(key),
     }
 }
@@ -59,6 +62,8 @@ fn map_normal_key(key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => Action::NavigateUp,
         KeyCode::Down | KeyCode::Char('j') => Action::NavigateDown,
+        KeyCode::PageUp => Action::PageUp,
+        KeyCode::PageDown => Action::PageDown,
         KeyCode::Home => Action::Home,
         KeyCode::End => Action::End,
         KeyCode::Enter | KeyCode::Char(' ') => Action::ToggleExpand,
@@ -85,6 +90,8 @@ fn map_moving_key(key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => Action::NavigateUp,
         KeyCode::Down | KeyCode::Char('j') => Action::NavigateDown,
+        KeyCode::PageUp => Action::PageUp,
+        KeyCode::PageDown => Action::PageDown,
         KeyCode::Enter => Action::Confirm,
         KeyCode::Esc => Action::Cancel,
         _ => Action::Noop,
@@ -94,11 +101,29 @@ fn map_moving_key(key: KeyEvent) -> Action {
 fn map_search_key(key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Esc => Action::Cancel,
-        KeyCode::Enter => Action::Confirm,
         KeyCode::Backspace => Action::SearchBackspace,
-        KeyCode::Char(c) => Action::SearchInput(c),
         KeyCode::Up => Action::NavigateUp,
         KeyCode::Down => Action::NavigateDown,
+        // Toggle info popup
+        KeyCode::Enter | KeyCode::Char(' ') => Action::ToggleExpand,
+        // Editing operations supported in search mode
+        KeyCode::Char('e') => Action::Edit,
+        KeyCode::Char('a') => Action::Add,
+        KeyCode::Char('d') => Action::Delete,
+        KeyCode::Char('x') => Action::Cut,
+        KeyCode::Char('p') => Action::Paste,
+        KeyCode::Char('u') => Action::Undo,
+        // Regular search input for other characters
+        KeyCode::Char(c) => Action::SearchInput(c),
+        _ => Action::Noop,
+    }
+}
+
+fn map_detail_key(key: KeyEvent) -> Action {
+    match key.code {
+        // Toggle: Enter/Space close the detail popup
+        KeyCode::Enter | KeyCode::Char(' ') => Action::ToggleExpand,
+        KeyCode::Esc | KeyCode::Char('q') => Action::Cancel,
         _ => Action::Noop,
     }
 }

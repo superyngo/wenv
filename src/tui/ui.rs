@@ -2,12 +2,44 @@
 
 use ratatui::prelude::*;
 use ratatui::widgets::*;
+use crate::model::EntryType;
 use crate::tui::app::TuiApp;
 use crate::tui::state::AppMode;
 use crate::model::profile::ListItem as ProfileListItem;
 
+/// Map entry type to its display color (replicating pre-redesign scheme)
+fn type_color(et: &EntryType) -> Color {
+    match et {
+        EntryType::Alias => Color::Green,
+        EntryType::Function => Color::LightBlue,
+        EntryType::EnvVar => Color::Yellow,
+        EntryType::Source => Color::Magenta,
+        EntryType::Code => Color::Cyan,
+        EntryType::Comment => Color::White,
+    }
+}
+
+/// Format line number display
+fn format_line_info(entry: &crate::model::Entry) -> String {
+    match (entry.line_number, entry.end_line) {
+        (Some(start), Some(end)) if end > start => format!("{}-{}", start, end),
+        (Some(line), _) => format!("{}", line),
+        (None, _) => "-".to_string(),
+    }
+}
+
+/// Truncate and sanitise value for single-line display
+fn format_value_display(value: &str) -> String {
+    let v = value.replace('\n', "\\n");
+    if v.chars().count() > 100 {
+        format!("{}...", v.chars().take(97).collect::<String>())
+    } else {
+        v
+    }
+}
+
 pub fn draw(f: &mut Frame, app: &TuiApp) {
-    let has_search = app.mode == AppMode::Searching;
+    let has_search = app.search.is_some();
     let constraints = if has_search {
         vec![
             Constraint::Length(1),  // title bar
@@ -62,6 +94,34 @@ fn draw_title(f: &mut Frame, area: Rect, app: &TuiApp) {
 }
 
 fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
+    // Reserve rows for fixed header (1) + separator (1)
+    let header_height: u16 = 2;
+    if area.height <= header_height {
+        return;
+    }
+
+    let header_area = Rect::new(area.x, area.y, area.width, header_height);
+    let list_area = Rect::new(area.x, area.y + header_height, area.width, area.height - header_height);
+
+    // --- Fixed column header ---
+    let header_line = Line::from(vec![
+        Span::raw("  "),  // indent to match entry prefix
+        Span::styled(format!("{:<20}", "NAME"), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::raw(" "),
+        Span::styled(format!("{:<10}", "TYPE"), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::raw(" "),
+        Span::styled(format!("{:<10}", "LINE"), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::raw(" "),
+        Span::styled("VALUE", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+    ]);
+    let separator_line = Line::from(Span::styled(
+        "─".repeat(area.width as usize),
+        Style::default().fg(Color::DarkGray),
+    ));
+    let header_widget = Paragraph::new(vec![header_line, separator_line]);
+    f.render_widget(header_widget, header_area);
+
+    // --- Entry list ---
     let items: Vec<ratatui::widgets::ListItem> = app
         .visible_items
         .iter()
@@ -85,7 +145,6 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
                     };
                     
-                    // Override with move target style
                     if is_move_target {
                         style = style.bg(Color::Green).fg(Color::Black);
                     }
@@ -94,44 +153,54 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                 }
                 ProfileListItem::Entry(fi, ei) => {
                     let entry = &app.profile.files[*fi].entries[*ei];
-                    let type_str = format!("{:8}", entry.entry_type.to_string());
-                    let name = &entry.name;
-                    
-                    // Add selection marker prefix
+
+                    // Build four-column spans
                     let prefix = if is_selected { "● " } else { "  " };
-                    let text = format!("  {}{} {}", prefix, type_str, name);
-                    
-                    // When rendering an Entry, check if it's a search match
+                    let name_str = format!("{:<20}", entry.name);
+                    let type_str = format!("{:<10}", entry.entry_type.to_string());
+                    let line_str = format!("{:<10}", format_line_info(entry));
+                    let value_str = format_value_display(&entry.value);
+                    let tc = type_color(&entry.entry_type);
+
+                    let line = Line::from(vec![
+                        Span::raw(prefix.to_string()),
+                        Span::styled(name_str, Style::default().fg(Color::White)),
+                        Span::raw(" "),
+                        Span::styled(type_str, Style::default().fg(tc).add_modifier(Modifier::BOLD)),
+                        Span::raw(" "),
+                        Span::styled(line_str, Style::default().fg(Color::Gray)),
+                        Span::raw(" "),
+                        Span::styled(value_str, Style::default().fg(Color::Gray)),
+                    ]);
+
+                    // Search mode styling
                     let is_search_match = app.search.as_ref()
                         .is_some_and(|s| s.is_match(*fi, *ei));
                     let is_search_selected = app.search.as_ref()
                         .is_some_and(|s| s.is_selected_match(*fi, *ei));
 
-                    // Adjust the style based on search state
                     let mut style = if app.mode == AppMode::Searching {
                         if is_search_selected {
-                            Style::default().bg(Color::Yellow).fg(Color::Black)  // Highlighted match
+                            Style::default().bg(Color::Rgb(40, 40, 0)).fg(Color::White).add_modifier(Modifier::BOLD)
                         } else if is_search_match {
-                            Style::default().fg(Color::White)  // Match but not selected
+                            Style::default().fg(Color::White)
                         } else {
-                            Style::default().fg(Color::DarkGray)  // Non-match (dimmed)
+                            Style::default().fg(Color::DarkGray)
                         }
                     } else {
-                        // Existing style logic (cursor, selection)
                         match (is_cursor, is_selected) {
-                            (true, true) => Style::default().bg(Color::Cyan).fg(Color::Black),      // cursor + selected
-                            (true, false) => Style::default().bg(Color::DarkGray).fg(Color::White), // cursor only
-                            (false, true) => Style::default().bg(Color::Blue).fg(Color::White),     // selected only
-                            (false, false) => Style::default().fg(Color::Gray),                      // normal
+                            (true, true) => Style::default().bg(Color::Blue).fg(Color::White).add_modifier(Modifier::BOLD),
+                            (true, false) => Style::default().bg(Color::Blue).fg(Color::White).add_modifier(Modifier::BOLD),
+                            (false, true) => Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                            (false, false) => Style::default(),
                         }
                     };
                     
-                    // Override with move target style
                     if is_move_target {
                         style = style.bg(Color::Green).fg(Color::Black);
                     }
                     
-                    ratatui::widgets::ListItem::new(text).style(style)
+                    ratatui::widgets::ListItem::new(line).style(style)
                 }
             }
         })
@@ -141,7 +210,7 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
         .block(Block::default().borders(Borders::NONE));
 
     // Calculate scroll offset to keep cursor visible
-    let visible_height = area.height as usize;
+    let visible_height = list_area.height as usize;
     let offset = if app.cursor >= visible_height {
         app.cursor - visible_height + 1
     } else {
@@ -150,10 +219,9 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
 
     let mut list_state = ratatui::widgets::ListState::default();
     list_state.select(Some(app.cursor));
-    // Use offset to handle scrolling
     *list_state.offset_mut() = offset;
 
-    f.render_stateful_widget(list, area, &mut list_state);
+    f.render_stateful_widget(list, list_area, &mut list_state);
 }
 
 fn draw_status(f: &mut Frame, area: Rect, app: &TuiApp) {
@@ -279,6 +347,7 @@ fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
     let lines = vec![
         Line::from(Span::styled("Navigation", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
         Line::from("  ↑/k ↓/j    Navigate up/down"),
+        Line::from("  PgUp/PgDn  Jump half page"),
         Line::from("  Home/End    Jump to first/last"),
         Line::from("  Enter/Space Toggle file / View entry detail"),
         Line::from("  0/9         Collapse/Expand all files"),

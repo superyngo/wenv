@@ -27,3 +27,4 @@ node_modules/
 
 # Claude 本地设定
 .claude/
+.superpowers/

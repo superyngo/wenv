@@ -29,6 +29,7 @@ pub struct TuiApp {
     pub visible_items: Vec<ListItem>,
     pub cursor: usize,
     pub mode: AppMode,
+    pub previous_mode: Option<AppMode>,
     pub should_quit: bool,
     pub message: Option<String>,
     pub messages: &'static Messages,
@@ -37,6 +38,7 @@ pub struct TuiApp {
     pub undo_snapshot: Option<UndoSnapshot>,
     pub move_state: Option<MoveState>,
     pub search: Option<SearchState>,
+    pub list_visible_height: usize,
 }
 
 impl TuiApp {
@@ -47,6 +49,7 @@ impl TuiApp {
             visible_items,
             cursor: 0,
             mode: AppMode::Normal,
+            previous_mode: None,
             should_quit: false,
             message: None,
             messages,
@@ -55,6 +58,7 @@ impl TuiApp {
             undo_snapshot: None,
             move_state: None,
             search: None,
+            list_visible_height: 20,
         })
     }
 
@@ -77,7 +81,13 @@ impl TuiApp {
 
     fn event_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         while !self.should_quit {
-            terminal.draw(|f| crate::tui::ui::draw(f, self))?;
+            terminal.draw(|f| {
+                // Update list_visible_height before drawing (area height minus title, status, search bar, header+separator)
+                let total_height = f.size().height as usize;
+                let chrome = if self.search.is_some() { 4 } else { 3 }; // title + status + search? + header/separator
+                self.list_visible_height = total_height.saturating_sub(chrome);
+                crate::tui::ui::draw(f, self);
+            })?;
 
             if let Event::Key(key) = event::read()? {
                 // Ignore key release events on Windows
@@ -89,12 +99,21 @@ impl TuiApp {
                 match request {
                     EditorRequest::EditFile(fi) => {
                         self.run_edit_file(terminal, fi)?;
+                        if self.mode == AppMode::Searching {
+                            self.update_search_and_navigate();
+                        }
                     }
                     EditorRequest::EditEntry(fi, ei) => {
                         self.run_edit_entry(terminal, fi, ei)?;
+                        if self.mode == AppMode::Searching {
+                            self.update_search_and_navigate();
+                        }
                     }
                     EditorRequest::AddEntry(fi) => {
                         self.run_add_entry(terminal, fi)?;
+                        if self.mode == AppMode::Searching {
+                            self.update_search_and_navigate();
+                        }
                     }
                     EditorRequest::None => {}
                 }
@@ -139,6 +158,27 @@ impl TuiApp {
                     self.cursor = list::navigate_down(&self.visible_items, self.cursor);
                 }
             }
+            Action::PageUp => {
+                let half = (self.list_visible_height / 2).max(1);
+                if self.mode == AppMode::Moving {
+                    if let Some(ref mut ms) = self.move_state {
+                        ms.insertion_cursor = ms.insertion_cursor.saturating_sub(half);
+                    }
+                } else {
+                    self.cursor = self.cursor.saturating_sub(half);
+                }
+            }
+            Action::PageDown => {
+                let half = (self.list_visible_height / 2).max(1);
+                let max_idx = self.visible_items.len().saturating_sub(1);
+                if self.mode == AppMode::Moving {
+                    if let Some(ref mut ms) = self.move_state {
+                        ms.insertion_cursor = (ms.insertion_cursor + half).min(max_idx);
+                    }
+                } else {
+                    self.cursor = (self.cursor + half).min(max_idx);
+                }
+            }
             Action::Home => {
                 self.cursor = list::navigate_home();
             }
@@ -149,10 +189,19 @@ impl TuiApp {
                 if let Some(item) = self.visible_items.get(self.cursor) {
                     match item {
                         ListItem::FileHeader(_) => {
-                            self.toggle_at_cursor();
+                            if self.mode != AppMode::Searching {
+                                self.toggle_at_cursor();
+                            }
                         }
                         ListItem::Entry(_, _) => {
-                            self.mode = AppMode::ShowingDetail;
+                            if self.mode == AppMode::ShowingDetail {
+                                // Toggle close: return to previous mode
+                                self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+                            } else {
+                                // Toggle open: save current mode and show detail
+                                self.previous_mode = Some(self.mode.clone());
+                                self.mode = AppMode::ShowingDetail;
+                            }
                         }
                     }
                 }
@@ -195,10 +244,10 @@ impl TuiApp {
                 return Ok(EditorRequest::AddEntry(fi));
             }
             Action::Delete => {
-                // Collect targets: selected entries, or entry at cursor
                 let targets = self.get_operation_targets();
                 if !targets.is_empty() {
                     self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                    self.previous_mode = Some(self.mode.clone());
                     self.mode = AppMode::ConfirmDelete;
                     let count = targets.len();
                     self.message = Some(format!("Delete {} entries? (y/n)", count));
@@ -215,16 +264,25 @@ impl TuiApp {
                     self.clipboard.entries = cut;
                     self.selection.clear();
                     self.rebuild_list();
+                    if self.mode == AppMode::Searching {
+                        self.update_search_and_navigate();
+                    }
                     self.message = Some(format!("Cut {} entries", count));
                 }
             }
             Action::StartMove => {
                 let targets = self.get_operation_targets();
                 if !targets.is_empty() {
-                    // Take snapshot for undo
                     self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
                     
-                    // Collect source (file_index, entry_index) pairs
+                    let has_selection = !self.selection.is_empty();
+                    
+                    // If from multi-selection, jump cursor to first selected row
+                    if has_selection {
+                        let first = self.selection.sorted_indices()[0];
+                        self.cursor = first;
+                    }
+                    
                     let source_items: Vec<(usize, usize)> = targets.iter()
                         .filter_map(|&idx| {
                             match self.visible_items.get(idx) {
@@ -238,6 +296,7 @@ impl TuiApp {
                         self.move_state = Some(MoveState {
                             source_items,
                             insertion_cursor: self.cursor,
+                            from_selection: has_selection,
                         });
                         self.mode = AppMode::Moving;
                         self.message = Some("Move mode: ↑↓ to position, Enter to drop, Esc to cancel".into());
@@ -251,6 +310,9 @@ impl TuiApp {
                         &mut self.profile, &self.visible_items, self.cursor, &self.clipboard.entries
                     );
                     self.rebuild_list();
+                    if self.mode == AppMode::Searching {
+                        self.update_search_and_navigate();
+                    }
                     self.message = Some(format!("Pasted {} entries", self.clipboard.entries.len()));
                 } else {
                     self.message = Some("Clipboard empty".into());
@@ -261,6 +323,9 @@ impl TuiApp {
                     crate::tui::operations::restore_snapshot(&mut self.profile, snapshot);
                     self.selection.clear();
                     self.rebuild_list();
+                    if self.mode == AppMode::Searching {
+                        self.update_search_and_navigate();
+                    }
                     self.message = Some("Undone".into());
                 } else {
                     self.message = Some("Nothing to undo".into());
@@ -296,15 +361,20 @@ impl TuiApp {
                             &mut self.profile, &self.visible_items, &targets
                         );
                         self.selection.clear();
+                        let return_to_search = matches!(self.previous_mode, Some(AppMode::Searching));
+                        self.mode = if return_to_search { AppMode::Searching } else { AppMode::Normal };
+                        self.previous_mode = None;
                         self.rebuild_list();
-                        self.mode = AppMode::Normal;
+                        if return_to_search {
+                            self.update_search_and_navigate();
+                        }
                         self.message = Some("Deleted".into());
                     }
                     AppMode::ConfirmQuit => {
                         self.should_quit = true;
                     }
                     AppMode::ShowingDetail | AppMode::ShowingHelp => {
-                        self.mode = AppMode::Normal;
+                        self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
                     }
                     _ => {}
                 }
@@ -317,23 +387,27 @@ impl TuiApp {
                         self.message = None;
                     }
                     AppMode::Moving => {
+                        let from_sel = self.move_state.as_ref()
+                            .is_some_and(|ms| ms.from_selection);
                         // Restore from snapshot
                         if let Some(snapshot) = self.undo_snapshot.take() {
                             crate::tui::operations::restore_snapshot(&mut self.profile, snapshot);
                         }
                         self.move_state = None;
-                        self.selection.clear();
                         self.mode = AppMode::Normal;
                         self.rebuild_list();
-                        self.message = Some("Move cancelled".into());
+                        if from_sel {
+                            // First Esc: keep selection, user can Esc again to clear
+                            self.message = Some("Move cancelled (Esc again to clear selection)".into());
+                        } else {
+                            self.selection.clear();
+                            self.message = Some("Move cancelled".into());
+                        }
                     }
                     AppMode::ConfirmDelete => {
-                        // Restore snapshot since we took it preemptively
                         if let Some(_snapshot) = self.undo_snapshot.take() {
-                            // Actually for delete, snapshot was taken but nothing deleted yet
-                            // Just discard the snapshot
                         }
-                        self.mode = AppMode::Normal;
+                        self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
                         self.message = Some("Cancelled".into());
                     }
                     AppMode::ConfirmQuit => {
@@ -341,9 +415,15 @@ impl TuiApp {
                         self.message = None;
                     }
                     AppMode::ShowingDetail | AppMode::ShowingHelp => {
-                        self.mode = AppMode::Normal;
+                        self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
                     }
-                    _ => {}
+                    AppMode::Normal => {
+                        // In Normal mode, Esc clears multi-selection if any
+                        if !self.selection.is_empty() {
+                            self.selection.clear();
+                            self.message = Some("Selection cleared".into());
+                        }
+                    }
                 }
             }
             Action::Quit => {
@@ -365,23 +445,19 @@ impl TuiApp {
             Action::SearchInput(c) => {
                 if let Some(ref mut search) = self.search {
                     search.input_char(c);
-                    search.update_matches(&self.profile);
-                    // Navigate to first match
-                    self.navigate_to_search_match();
                 }
+                self.update_search_and_navigate();
             }
             Action::SearchBackspace => {
                 if let Some(ref mut search) = self.search {
                     search.backspace();
                     if search.query.is_empty() {
-                        // If query emptied, exit search
                         self.search = None;
                         self.mode = AppMode::Normal;
-                    } else {
-                        search.update_matches(&self.profile);
-                        self.navigate_to_search_match();
+                        return Ok(EditorRequest::None);
                     }
                 }
+                self.update_search_and_navigate();
             }
             Action::Help => {
                 self.mode = AppMode::ShowingHelp;
@@ -445,6 +521,26 @@ impl TuiApp {
                 }
             }
         }
+    }
+
+    /// Expand files with search matches, collapse files without
+    fn toggle_files_by_search(&mut self) {
+        if let Some(ref search) = self.search {
+            let matched_files = search.matched_file_indices();
+            for (i, file) in self.profile.files.iter_mut().enumerate() {
+                file.expanded = matched_files.contains(&i);
+            }
+            self.rebuild_list();
+        }
+    }
+
+    /// Combined: update search matches, toggle files, navigate to match
+    fn update_search_and_navigate(&mut self) {
+        if let Some(ref mut search) = self.search {
+            search.update_matches(&self.profile);
+        }
+        self.toggle_files_by_search();
+        self.navigate_to_search_match();
     }
 
     /// Get visible-list indices for operation targets.
