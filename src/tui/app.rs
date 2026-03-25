@@ -99,21 +99,12 @@ impl TuiApp {
                 match request {
                     EditorRequest::EditFile(fi) => {
                         self.run_edit_file(terminal, fi)?;
-                        if self.mode == AppMode::Searching {
-                            self.update_search_and_navigate();
-                        }
                     }
                     EditorRequest::EditEntry(fi, ei) => {
                         self.run_edit_entry(terminal, fi, ei)?;
-                        if self.mode == AppMode::Searching {
-                            self.update_search_and_navigate();
-                        }
                     }
                     EditorRequest::AddEntry(fi) => {
                         self.run_add_entry(terminal, fi)?;
-                        if self.mode == AppMode::Searching {
-                            self.update_search_and_navigate();
-                        }
                     }
                     EditorRequest::None => {}
                 }
@@ -264,9 +255,6 @@ impl TuiApp {
                     self.clipboard.entries = cut;
                     self.selection.clear();
                     self.rebuild_list();
-                    if self.mode == AppMode::Searching {
-                        self.update_search_and_navigate();
-                    }
                     self.message = Some(format!("Cut {} entries", count));
                 }
             }
@@ -310,9 +298,6 @@ impl TuiApp {
                         &mut self.profile, &self.visible_items, self.cursor, &self.clipboard.entries
                     );
                     self.rebuild_list();
-                    if self.mode == AppMode::Searching {
-                        self.update_search_and_navigate();
-                    }
                     self.message = Some(format!("Pasted {} entries", self.clipboard.entries.len()));
                 } else {
                     self.message = Some("Clipboard empty".into());
@@ -323,9 +308,6 @@ impl TuiApp {
                     crate::tui::operations::restore_snapshot(&mut self.profile, snapshot);
                     self.selection.clear();
                     self.rebuild_list();
-                    if self.mode == AppMode::Searching {
-                        self.update_search_and_navigate();
-                    }
                     self.message = Some("Undone".into());
                 } else {
                     self.message = Some("Nothing to undo".into());

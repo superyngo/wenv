@@ -106,14 +106,6 @@ fn map_search_key(key: KeyEvent) -> Action {
         KeyCode::Down => Action::NavigateDown,
         // Toggle info popup
         KeyCode::Enter | KeyCode::Char(' ') => Action::ToggleExpand,
-        // Editing operations supported in search mode
-        KeyCode::Char('e') => Action::Edit,
-        KeyCode::Char('a') => Action::Add,
-        KeyCode::Char('d') => Action::Delete,
-        KeyCode::Char('x') => Action::Cut,
-        KeyCode::Char('p') => Action::Paste,
-        KeyCode::Char('u') => Action::Undo,
-        // Regular search input for other characters
         KeyCode::Char(c) => Action::SearchInput(c),
         _ => Action::Noop,
     }
