@@ -2,67 +2,48 @@
 
 use anyhow::Result;
 use clap::Parser;
-use dialoguer::Confirm;
 
-use wenv::cli::{actions, Cli, Context};
+use wenv::cli::args::Cli;
+use wenv::cli::actions;
+use wenv::i18n;
+use wenv::model;
 use wenv::tui::TuiApp;
+use wenv::utils::shell_detect::get_shell_type;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Handle --clear-cache early (doesn't require config file)
-    if cli.clear_cache {
-        wenv::cache::PathCache::clear()?;
-        println!("Cache cleared successfully.");
-        return Ok(());
-    }
-
-    // Handle --config early (opens wenv config file in editor)
+    // Early exit: open wenv config in $EDITOR
     if cli.config {
         let config_path = wenv::Config::config_path();
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
-            if cfg!(windows) {
-                "notepad".to_string()
-            } else {
-                "vi".to_string()
-            }
+            if cfg!(windows) { "notepad".to_string() } else { "vi".to_string() }
         });
-        std::process::Command::new(&editor)
-            .arg(&config_path)
-            .status()?;
+        std::process::Command::new(&editor).arg(&config_path).status()?;
         return Ok(());
     }
 
-    let ctx = Context::from_cli(&cli)?;
+    // Determine shell type (runtime decision, no config dependency)
+    let shell_type = get_shell_type(cli.shell.map(|s| s.into()), None);
 
-    // Check if config file exists, prompt to create if missing
-    if !ctx.config_file.exists() {
-        if Confirm::new()
-            .with_prompt(format!(
-                "Config file '{}' not found. Create it?",
-                ctx.config_file.display()
-            ))
-            .default(true)
-            .interact()?
-        {
-            wenv::utils::path::write_file(&ctx.config_file, "")?;
-            ctx.print_success(&format!("Created: {}", ctx.config_file.display()));
-        } else {
-            anyhow::bail!("Config file not found. Use --file to specify a different path.");
-        }
+    // Load or create config
+    let mut config = wenv::config::load_or_create_config()?;
+    let shell_key = shell_type.config_key();
+
+    // Ensure file list exists for this shell
+    if !config.files.contains_key(shell_key) {
+        wenv::config::ensure_shell_files(&mut config, shell_key)?;
     }
 
-    // Quick actions: execute and exit
-    if let Some(source) = &cli.import {
-        return actions::import::execute(&ctx, source, cli.yes);
-    }
-    if let Some(output) = &cli.export {
-        return actions::export::execute(&ctx, cli.r#type, output);
-    }
-    if cli.command.as_deref() == Some(".") || cli.source {
-        return actions::source::execute(&ctx);
+    let messages = i18n::init_messages(&config.ui.language);
+
+    // Source mode: file selection menu
+    let is_source = cli.source || cli.command.as_deref() == Some(".");
+    if is_source {
+        return actions::source::execute(&config, shell_type, messages);
     }
 
-    // Default: launch TUI
-    TuiApp::new(ctx.config_file, ctx.shell_type, ctx.messages)?.run()
+    // Load shell profile and launch TUI
+    let profile = model::profile::load_shell_profile(&config, shell_type)?;
+    TuiApp::new(profile, messages)?.run()
 }

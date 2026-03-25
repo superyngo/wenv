@@ -1,407 +1,179 @@
 # wenv
 
-A cross-platform CLI tool for managing shell configuration files.  
-跨平台 Shell 配置文件管理工具。
+A cross-platform Terminal User Interface (TUI) for managing multiple shell configuration files.
 
----
+[![Crate](https://img.shields.io/crates/v/wenv.svg)](https://crates.io/crates/wenv)
+[![API](https://docs.rs/wenv/badge.svg)](https://docs.rs/wenv)
+![License](https://img.shields.io/crates/l/wenv.svg)
 
-## Features / 功能特点
+## Features
 
-- ✅ **Cross-platform support** / **跨平台支持** (Linux, Windows, macOS)
-- ✅ **Multi-shell parser** / **多 Shell 解析器** (Bash, PowerShell)
-- ✅ **Entry management** / **条目管理** (aliases, functions, environment variables, source statements)
-- ✅ **Duplicate detection** / **重复检查**
-- ✅ **Syntax validation** / **语法验证**
-- ✅ **Automatic backups** / **自动备份**
-- ✅ **TUI interface** / **终端用户界面**
-- ✅ **Multi-language support** / **多语言支持** (English, 繁體中文)
+- 🌳 **Multi-file tree view** - Manage multiple .bashrc, .zshrc, PowerShell profiles in one interface
+- ✏️ **External editor integration** - Edit entries with your `$EDITOR` (vim, nano, VS Code, etc.)
+- 🔍 **Fuzzy search** - Filter entries across all files with real-time search
+- ✂️ **Cross-file operations** - Cut, copy, paste entries between different configuration files  
+- ↩️ **Undo support** - Undo any operation to restore previous state
+- 📁 **Config-based file lists** - Define which files to manage in `~/.config/wenv/config.toml`
+- 🎯 **Smart parsing** - Recognizes aliases, functions, environment variables, source statements
+- 💾 **Safe editing** - Only saves changes when you confirm
 
----
+## Installation
 
-## Installation / 安装
-
-### Quick Install (One-Line Command) / 快速安装
-
-#### Windows (PowerShell)
-
-```powershell
-$env:APP_NAME="wenv"; $env:REPO="superyngo/wenv"; irm https://gist.githubusercontent.com/superyngo/a6b786af38b8b4c2ce15a70ae5387bd7/raw/gpinstall.ps1 | iex
-```
-
-**Uninstall / 卸载:**
-```powershell
-$env:APP_NAME="wenv"; $env:REPO="superyngo/wenv"; $env:UNINSTALL="true"; irm https://gist.githubusercontent.com/superyngo/a6b786af38b8b4c2ce15a70ae5387bd7/raw/gpinstall.ps1 | iex
-```
-
-#### Linux / macOS (Bash)
+### From Cargo
 
 ```bash
-curl -fsSL https://gist.githubusercontent.com/superyngo/a6b786af38b8b4c2ce15a70ae5387bd7/raw/gpinstall.sh | APP_NAME="wenv" REPO="superyngo/wenv" bash
+cargo install wenv
 ```
 
-**Uninstall / 卸载:**
-```bash
-curl -fsSL https://gist.githubusercontent.com/superyngo/a6b786af38b8b4c2ce15a70ae5387bd7/raw/gpinstall.sh | APP_NAME="wenv" REPO="superyngo/wenv" bash -s uninstall
-```
+### From Precompiled Binaries
 
-The installation script will: / 安装脚本将：
-- Automatically detect your OS and architecture / 自动检测操作系统和架构
-- Download the latest precompiled binary from GitHub Releases / 从 GitHub Releases 下载最新预编译二进制文件
-- Install to: / 安装到：
-  - Windows: `%LOCALAPPDATA%\Programs\wenv`
-  - Linux/macOS: `~/.local/bin`
-- Add the installation directory to your PATH (if needed) / 将安装目录添加到 PATH（如有需要）
+Download the latest release for your platform from the [Releases](https://github.com/superyngo/wenv/releases) page.
 
-**Supported Platforms / 支持的平台:**
-- Windows (x86_64, i686)
-- Linux (x86_64, i686, aarch64, armv7) - both GNU and musl
-- macOS (x86_64, Apple Silicon)
-
----
-
-### Manual Installation / 手动安装
-
-#### From Precompiled Binaries / 使用预编译二进制文件
-
-Download the latest release for your platform from the [Releases](https://github.com/superyngo/wenv/releases) page.  
-从 [Releases](https://github.com/superyngo/wenv/releases) 页面下载适合您平台的最新版本。
-
-**Windows:**
-```powershell
-# Extract the downloaded file and move wenv.exe to a directory in your PATH
-# 解压下载的文件并将 wenv.exe 移动到 PATH 中的目录
-move wenv.exe %LOCALAPPDATA%\Programs\wenv\
-```
-
-**Linux/macOS:**
-```bash
-# Extract the downloaded tar.gz file and move wenv to a directory in your PATH
-# 解压下载的 tar.gz 文件并将 wenv 移动到 PATH 中的目录
-tar -xzf wenv-*.tar.gz
-chmod +x wenv
-mv wenv ~/.local/bin/
-```
-
----
-
-#### From Source / 从源代码编译
-
-If you prefer to build from source, ensure you have [Rust](https://rustup.rs/) installed:  
-如果您希望从源代码编译，请确保已安装 [Rust](https://rustup.rs/)：
+### From Source
 
 ```bash
-# Clone the repository / 克隆仓库
 git clone https://github.com/superyngo/wenv.git
 cd wenv
-
-# Build release binary / 构建 Release 版本
 cargo build --release
-
-# The binary will be available at: / 二进制文件将位于：
-# - Windows: target\release\wenv.exe
-# - Linux/macOS: target/release/wenv
-
-# Install manually / 手动安装
-# Windows:
-copy target\release\wenv.exe %LOCALAPPDATA%\Programs\wenv\
-
-# Linux/macOS:
-cp target/release/wenv ~/.local/bin/
-chmod +x ~/.local/bin/wenv
 ```
 
----
+## Usage
 
-## Usage / 使用方式
-
-### Basic Usage / 基本使用
+### Basic Commands
 
 ```bash
-# Launch TUI (default) / 启动 TUI 交互界面（默认）
+# Launch TUI (default mode)
 wenv
 
-# Specify shell configuration file / 指定 shell 配置文件
-wenv --file ~/.bashrc          # Bash
-wenv --file $PROFILE           # PowerShell
-
-# Specify shell type explicitly / 明确指定 shell 类型
-wenv --shell bash --file ~/.custom_rc
-wenv --shell pwsh --file custom_profile.ps1
-```
-
-### TUI Interface / TUI 交互界面
-
-The default TUI interface provides:  
-默认的 TUI 界面提供：
-
-- **Browse** / **浏览**: View all parsed entries (aliases, functions, env vars, source statements)
-- **Search** / **搜索**: Filter entries by name or type
-- **Edit** / **编辑**: Modify entries directly
-- **Add** / **添加**: Create new entries
-- **Delete** / **删除**: Remove unwanted entries
-- **Copy/Paste** / **复制/粘贴**: Copy entries with Ctrl+C and paste with Ctrl+V
-- **Undo/Redo** / **复原/重做**: Undo changes with Ctrl+Z and redo with Ctrl+Y (up to 50 operations)
-- **Format** / **格式化**: Auto-format with preview and confirmation
-- **Save** / **保存**: Apply changes to configuration file (with automatic backup)
-
-### Format Operation / 格式化操作
-
-The format function (press `f` in TUI) performs the following operations with a preview before applying:  
-格式化功能（TUI 中按 `f`）在应用前提供预览，执行以下操作：
-
-| Operation / 操作 | Description / 说明 |
-|------------------|-------------------|
-| **Preview changes** / **预览变更** | Shows a summary of all changes before applying / 在应用前显示所有变更摘要 |
-| **Duplicate detection** / **重复检测** | Warns about duplicate entries / 警告重复条目 |
-| **PATH merging** / **PATH 合并** | Merges multiple PATH definitions into one / 将多个 PATH 定义合并为一个 |
-| **Group by type** / **按类型分组** | Groups entries at their first occurrence position / 在首次出现位置对条目分组 |
-| **Alphabetical sort** / **字母排序** | Sorts entries within groups / 组内条目按字母顺序排序 |
-| **Dependency ordering** / **依赖排序** | Sorts environment variables by dependency (topological sort) / 环境变量按依赖关系排序 |
-
-**Usage / 使用方法:**
-1. Press `f` in TUI to start format / 在 TUI 中按 `f` 开始格式化
-2. Review the preview showing all changes / 查看显示所有变更的预览
-3. Press `y` to apply or `n` to cancel / 按 `y` 应用或 `n` 取消
-
-### Quick Actions / 快速操作
-
-For non-interactive operations, use these flags:  
-对于非交互操作，使用以下参数：
-
-```bash
-# Import entries from file or URL / 从文件或 URL 导入条目
-wenv --import /path/to/aliases.sh
-wenv --import https://example.com/my-aliases.sh
-
-# Import with conflict handling / 导入时处理冲突
-wenv --import aliases.sh --on-conflict skip      # Skip duplicates / 跳过重复项
-wenv --import aliases.sh --on-conflict overwrite # Overwrite existing / 覆盖现有项
-wenv --import aliases.sh --yes                   # Skip confirmation / 跳过确认
-
-# Export entries to file / 导出条目到文件
-wenv --export my-backup.sh
-
-# Export specific entry types / 导出特定类型的条目
-wenv --export aliases-only.sh --type alias
-wenv --export functions.sh --type func
-
-# Open source file in $EDITOR / 在 $EDITOR 中打开源文件
+# Launch TUI with file selection prompt
+wenv .
 wenv --source
-wenv --file ~/.bashrc --source
 
-# Show help / 显示帮助
-wenv --help
+# Force specific shell type
+wenv --shell bash
+wenv --shell zsh  
+wenv --shell powershell
 
-# Show version / 显示版本
-wenv --version
+# Open configuration file in editor
+wenv --config
 ```
 
----
+### Configuration
 
-## Command-Line Options / 命令行选项
+On first run, wenv creates `~/.config/wenv/config.toml` where you define which files to manage:
 
-| Option / 选项 | Description / 说明 |
-|---------------|-------------------|
-| (no args) | Launch TUI interface / 启动 TUI 交互界面 |
-| `-f, --file <FILE>` | Specify configuration file path / 指定配置文件路径 |
-| `-S, --shell <SHELL>` | Specify shell type (bash, pwsh) / 指定 shell 类型 |
-| `-i, --import <SOURCE>` | Import entries from file or URL / 从文件或 URL 导入条目 |
-| `-e, --export <OUTPUT>` | Export entries to file / 导出条目到文件 |
-| `-s, --source` | Open source file in $EDITOR / 在 $EDITOR 中打开源文件 |
-| `-t, --type <TYPE>` | Filter by entry type (for export) / 按条目类型过滤（用于导出） |
-| `--on-conflict <STRATEGY>` | Conflict handling (ask/skip/overwrite) / 冲突处理策略 |
-| `-y, --yes` | Skip confirmation prompts / 跳过确认提示 |
-| `-h, --help` | Print help / 显示帮助 |
-| `-V, --version` | Print version / 显示版本 |
+```toml
+[ui]
+language = "en"
 
-**Entry Types / 条目类型:**
-- `alias` - Command alias / 命令别名
-- `func` - Shell function / Shell 函数
-- `env` - Environment variable / 环境变量
-- `source` - Source statement / Source 语句
-- `code` - Code block / 代码块
-- `comment` - Comment / 注释
+[files.bash]
+paths = [
+    "~/.bashrc",
+    "~/.bash_aliases", 
+    "~/.profile"
+]
 
----
+[files.zsh]
+paths = [
+    "~/.zshrc",
+    "~/.zsh_aliases"
+]
 
-## Shell Support / Shell 支持
-
-### Bash
-
-Supported configuration files / 支持的配置文件:
-- `~/.bashrc`
-- `~/.bash_profile`
-- `~/.profile`
-
-Supported entry types / 支持的条目类型:
-- Aliases: `alias name='value'`
-- Functions: `function_name() { ... }`
-- Environment variables: `export VAR=value`
-- Source statements: `source /path/to/file`
-
-### Zsh
-
-**Zsh is supported through Bash syntax compatibility** / **Zsh 透過 Bash 語法相容性支援**
-
-Supported configuration files / 支持的配置文件:
-- `~/.zshrc`
-- `~/.zprofile`
-- `~/.zshenv`
-
-Usage / 使用方式:
-```bash
-# Specify shell type as bash for zsh files / 對 zsh 檔案指定 shell 類型為 bash
-wenv --shell bash --file ~/.zshrc
+[files.powershell]
+paths = [
+    "$PROFILE",
+    "~/profile-extra.ps1"
+]
 ```
 
-> **Note**: Zsh shares most syntax with Bash for aliases, functions, and environment variables. The Bash parser can handle most common zsh configurations. Zsh-specific features (e.g., advanced parameter expansion, zsh-only functions) may not be fully supported.
->
-> **注意**: Zsh 在別名、函數和環境變數方面與 Bash 共享大部分語法。Bash 解析器可以處理大多數常見的 zsh 配置。Zsh 特定功能（如進階參數擴展、zsh 專用函數）可能無法完全支援。
+### TUI Key Bindings
+
+| Key | Action |
+|-----|--------|
+| `j`/`k`, `↑`/`↓` | Navigate entries |
+| `Space` | Toggle selection |
+| `Shift+↑`/`↓` | Extend selection range |
+| `Enter` | Edit entry with $EDITOR |
+| `a` | Add new entry with $EDITOR |
+| `d` | Delete selected entries |
+| `x` | Cut selected entries |
+| `p` | Paste clipboard entries |
+| `m` | Enter move mode |
+| `Tab` | Toggle file expanded/collapsed |
+| `Shift+Tab` | Toggle all files |
+| `u` | Undo last operation |
+| `/` | Search/filter entries |
+| `Esc` | Clear selection/exit modes |
+| `r` | Refresh from disk |
+| `s` | Save all changes |
+| `?` | Show help |
+| `q` | Quit (confirms if unsaved) |
+
+## Shell Support
+
+### Bash/Zsh
+
+Supports:
+- Aliases: `alias ll='ls -la'`
+- Functions: `greet() { echo hello $1; }`
+- Environment variables: `export PATH="/usr/bin:$PATH"`
+- Source statements: `source ~/.profile`
 
 ### PowerShell
 
-Supported configuration files / 支持的配置文件:
-- `$PROFILE` (CurrentUserCurrentHost)
-- `$PROFILE.CurrentUserAllHosts`
-- `$PROFILE.AllUsersCurrentHost`
-- `$PROFILE.AllUsersAllHosts`
+Supports:
+- Aliases: `Set-Alias ll Get-ChildItem`
+- Functions: `function greet { Write-Host "Hello $args" }`
+- Environment variables: `$env:PATH = "/usr/bin;$env:PATH"`
+- Source statements: `. ~/.profile.ps1`
 
-Supported entry types / 支持的条目类型:
-- Aliases: `Set-Alias name value`
-- Functions: `function Name { ... }`
-- Environment variables: `$env:VAR = "value"`
-- Source statements: `. /path/to/file.ps1`
+## Multi-File Operations
 
----
+### Cross-File Cut/Paste
 
-## Development / 开发
+1. Select entries with `Space` 
+2. Cut with `x`
+3. Navigate to target file/position
+4. Paste with `p`
 
-### Build / 构建
+Entries are automatically updated with the correct file_index.
 
-```bash
-cargo build              # Debug build / 调试构建
-cargo build --release    # Release build / 发布构建
-cargo check              # Fast syntax check / 快速语法检查
-```
+### Undo System
 
-### Test / 测试
+- Press `u` to undo any operation
+- Restores all files to their previous state
+- Handles multi-file operations atomically
 
-```bash
-cargo test               # Run all tests / 运行所有测试
-cargo test --lib         # Library tests only / 仅库测试
-cargo test --test integration  # Integration tests / 集成测试
-```
+### Search & Filter
 
-### Lint and Format / 代码检查和格式化
+- Press `/` to enter search mode
+- Type to filter entries across all expanded files
+- Press `Enter` to go to first match
+- Press `Esc` to clear filter
 
-```bash
-cargo fmt                # Format code / 格式化代码
-cargo clippy             # Lint with clippy / Clippy 检查
-cargo fmt -- --check     # Check formatting / 检查格式
-```
+## Development
 
-### Run / 运行
+### Build Commands
 
 ```bash
-cargo run -- list                    # Run with subcommand / 运行子命令
-cargo run -- --file ~/.bashrc list   # Specify config file / 指定配置文件
-cargo run -- --help                  # Show help / 显示帮助
+cargo build              # Debug build
+cargo build --release    # Release build
+cargo check              # Fast syntax check
+cargo test               # Run all tests
+cargo test tui_logic_tests # Run TUI logic tests
+cargo clippy             # Linting
+cargo fmt                # Format code
 ```
 
-For more details, see [AGENTS.md](AGENTS.md).  
-更多详情请参见 [AGENTS.md](AGENTS.md)。
+### Testing
 
----
+```bash
+cargo test               # All tests
+cargo test --lib         # Library tests only
+cargo test --test integration # Integration tests
+cargo test tui_logic_tests # TUI operations tests
+```
 
-## Architecture / 架构
+## License
 
-wenv follows a trait-based design for extensibility:  
-wenv 采用基于 trait 的设计以实现可扩展性：
-
-- **Parser** - Shell-specific parsers (Bash, PowerShell) / Shell 特定解析器
-- **Formatter** - Shell-specific output formatting / Shell 特定输出格式化
-- **Checker** - Validation rules (duplicates, syntax) / 验证规则（重复、语法）
-
-For architecture details, see [AGENTS.md](AGENTS.md).  
-架构详情请参见 [AGENTS.md](AGENTS.md)。
-
----
-
-## Configuration and Data Directories / 設定檔與資料目錄
-
-### wenv Configuration File / wenv 設定檔
-
-wenv stores its configuration in a platform-specific location:
-wenv 將設定檔儲存在對應平台的路徑：
-
-| Platform / 平台 | Path / 路徑 |
-|-----------------|------------|
-| Linux | `~/.config/wenv/config.toml` |
-| macOS | `~/Library/Application Support/wenv/config.toml` |
-| Windows | `%APPDATA%\wenv\config.toml` |
-
-### i18n Language Files / i18n 語言包
-
-Custom language files can be placed in the i18n directory:
-自訂語言檔案可放置在 i18n 目錄：
-
-| Platform / 平台 | Path / 路徑 |
-|-----------------|------------|
-| Linux | `~/.config/wenv/i18n/{lang}.toml` |
-| macOS | `~/Library/Application Support/wenv/i18n/{lang}.toml` |
-| Windows | `%APPDATA%\wenv\i18n\{lang}.toml` |
-
-**Installation Steps / 安裝步驟:**
-
-1. Download a language file (example: [`languages/zh-TW.toml`](languages/zh-TW.toml)) / 下載語言檔（範例：[`languages/zh-TW.toml`](languages/zh-TW.toml)）
-2. Place it in the i18n directory for your platform / 放置到對應平台的 i18n 目錄
-3. Set the language in `config.toml`: / 在 `config.toml` 中設定語言：
-   ```toml
-   [ui]
-   language = "zh-TW"
-   ```
-
-### Backup Directory / 備份目錄
-
-wenv automatically creates backups before modifying configuration files:
-wenv 在修改配置文件前自動創建備份：
-
-| Platform / 平台 | Path / 路徑 |
-|-----------------|------------|
-| Linux | `~/.config/wenv/backups/<shell>/` |
-| macOS | `~/Library/Application Support/wenv/backups/<shell>/` |
-| Windows | `%APPDATA%\wenv\backups\<shell>\` |
-
-- **Naming format / 命名格式:** `<original_filename>.<timestamp>.bak`
-- **Auto-backup / 自動備份:** Triggered whenever you save changes in TUI mode / 在 TUI 模式中保存變更時自動觸發
-
-Backups are managed automatically - no manual commands needed.
-備份自動管理 - 無需手動命令。
-
----
-
-## License / 许可证
-
-MIT License
-
----
-
-## Contributing / 贡献
-
-Contributions are welcome! Please feel free to submit a Pull Request.  
-欢迎贡献！请随时提交 Pull Request。
-
----
-
-## Acknowledgments / 致谢
-
-Built with ❤️ using:
-- [clap](https://github.com/clap-rs/clap) - CLI argument parsing / CLI 参数解析
-- [ratatui](https://github.com/ratatui-org/ratatui) - TUI framework / TUI 框架
-- [regex](https://github.com/rust-lang/regex) - Regular expressions / 正则表达式
-- [anyhow](https://github.com/dtolnay/anyhow) - Error handling / 错误处理
-
----
-
-**For detailed documentation, see [AGENTS.md](AGENTS.md).**  
-**详细文档请参见 [AGENTS.md](AGENTS.md)。**
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

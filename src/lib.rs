@@ -12,9 +12,6 @@
 //! - Format configuration files
 //! - Automatic backups
 
-pub mod backup;
-pub mod cache;
-pub mod checker;
 pub mod cli;
 pub mod config;
 pub mod formatter;
@@ -24,7 +21,6 @@ pub mod parser;
 pub mod tui;
 pub mod utils;
 
-pub use checker::check_all;
 pub use formatter::{get_formatter, Formatter};
-pub use model::{Config, Entry, EntryType, ParseResult, ShellType};
+pub use model::{Config, Entry, EntryType, FilesConfig, ParseResult, ShellType, UiConfig};
 pub use parser::{get_parser, Parser};

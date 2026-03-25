@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2024-12-19
+
+### 🚨 BREAKING CHANGES
+
+**Architecture Refactoring - Multi-File Support**
+
+This release represents a complete refactoring from single-file to multi-file shell configuration management. Many CLI flags and features have been removed or changed.
+
+**Removed Features:**
+- Import/export functionality (`--import`, `--export`, `-i`, `-e` flags)
+- Backup system (automatic backups removed)
+- Cache management (`--clear-cache` flag)
+- File type validation (`--check` command)
+- Format/sort operations (`--format`, `--sort` flags) 
+- Single-file flags (`-f`/`--file`, `-t`/`--type`)
+- Batch operation flags (`--on-conflict`, `-y`/`--yes`)
+
+**Changed Configuration:**
+- Config path unified to `~/.config/wenv/` on all platforms (previously macOS used `~/Library/Application Support/`)
+- Config format changed from single shell file paths to `[files.bash]`, `[files.zsh]`, `[files.powershell]` sections with path lists
+- Removed `[format]`, `[backup]`, `[cache]` config sections
+
+### ✨ NEW FEATURES
+
+- **Multi-File Tree View**: Interactive TUI with expandable/collapsible file tree
+- **Cross-File Operations**: Cut, copy, paste entries between different configuration files  
+- **Undo System**: Full undo support for all operations (restores all files atomically)
+- **External Editor Integration**: Edit entries with your `$EDITOR` (vim, nano, VS Code, etc.)
+- **Fuzzy Search**: Real-time search/filter across all expanded files
+- **Config-Based File Lists**: Define which files to manage in `~/.config/wenv/config.toml`
+- **Multi-Selection**: Select multiple entries with visual indicators
+- **Source Mode**: File selection prompt with `wenv .` or `wenv --source`
+
+### 🔧 CHANGED
+
+- **CLI Interface**: Simplified to only `--shell`, `--source`, `--config` flags
+- **Usage**: `wenv` (TUI), `wenv .` (source mode), `wenv -s bash` (force shell), `wenv --config` (open config)
+- **TUI Navigation**: Added extensive key bindings for tree navigation, selection, editing
+- **Shell Detection**: Runtime-only detection (no config-based shell preference)
+- **Data Model**: New `ShellProfile`, `ProfileFile`, `ListItem` structures for multi-file support
+
+### 📝 DOCUMENTATION
+
+- **CLAUDE.md**: Updated for new architecture, TUI operations, multi-file model
+- **README.md**: Completely rewritten with usage examples, TUI key bindings, configuration format
+- **Tests**: Added `tests/tui_logic_tests.rs` with 10 comprehensive TUI operation tests
+
+### 🗂️ CODEBASE CHANGES
+
+- **Removed ~2500 LOC**: Eliminated checker, backup, cache, import/export, unused utilities
+- **Added TUI modules**: app, ui, keys, state, selection, operations, editor, search, list
+- **Simplified CLI**: Reduced from 15+ flags to 3 essential flags
+- **Entry Model**: Added `file_index` field for multi-file tracking
+
+---
+
 ## [Unreleased]
 
 ### Fixed
