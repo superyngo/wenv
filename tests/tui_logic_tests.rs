@@ -1,7 +1,7 @@
 //! TUI operations logic tests (without rendering)
 
+use wenv::model::profile::{ListItem, ProfileFile, ShellProfile};
 use wenv::model::{Entry, EntryType, ShellType};
-use wenv::model::profile::{ShellProfile, ProfileFile, ListItem};
 use wenv::tui::operations;
 use wenv::tui::selection::SelectionState;
 
@@ -22,7 +22,12 @@ fn make_test_profile() -> ShellProfile {
         vec![
             make_test_entry("ll", "alias ll='ls -la'", EntryType::Alias, 0),
             make_test_entry("gs", "alias gs='git status'", EntryType::Alias, 0),
-            make_test_entry("PATH", "export PATH=\"/usr/bin:$PATH\"", EntryType::EnvVar, 0),
+            make_test_entry(
+                "PATH",
+                "export PATH=\"/usr/bin:$PATH\"",
+                EntryType::EnvVar,
+                0,
+            ),
         ],
         true,
     );
@@ -99,7 +104,7 @@ fn test_cut_and_paste() {
     let items = profile.build_visible_list();
     // items[0] = FileHeader(0), items[1] = Entry(0,0), items[2] = Entry(0,1), items[3] = Entry(0,2)
     // items[4] = FileHeader(1), items[5] = Entry(1,0), items[6] = Entry(1,1)
-    
+
     // Cut entry at index 1 (file0/entry0 = "ll")
     let cut = operations::cut_entries(&mut profile, &items, &[1]);
     assert_eq!(cut.len(), 1);
@@ -107,10 +112,10 @@ fn test_cut_and_paste() {
     assert_eq!(profile.files[0].entries.len(), 2); // file0 now has 2 entries
 
     // After cutting, rebuild list:
-    // items[0] = FileHeader(0), items[1] = Entry(0,0), items[2] = Entry(0,1) 
+    // items[0] = FileHeader(0), items[1] = Entry(0,0), items[2] = Entry(0,1)
     // items[3] = FileHeader(1), items[4] = Entry(1,0), items[5] = Entry(1,1)
     let items = profile.build_visible_list();
-    
+
     // Now index 3 is FileHeader(1), paste there to insert at position 0 in file1
     operations::paste_entries(&mut profile, &items, 3, &cut);
     assert_eq!(profile.files[1].entries.len(), 3);
@@ -125,8 +130,8 @@ fn test_paste_at_entry_position() {
     let items = profile.build_visible_list();
     // Cut entry at index 1 (file0/entry0 = "ll")
     let cut = operations::cut_entries(&mut profile, &items, &[1]);
-    
-    // After cutting, rebuild list and paste at first entry in file1 
+
+    // After cutting, rebuild list and paste at first entry in file1
     let items = profile.build_visible_list();
     // items[4] should be Entry(1,0)="greet", paste there to insert after it
     operations::paste_entries(&mut profile, &items, 4, &cut);
@@ -180,7 +185,9 @@ fn test_selection_range() {
     let mut sel = SelectionState::new();
 
     // Range select from 1 to 3 (entries in file 0)
-    sel.extend_range(1, 3, &items);
+    // set_range is called multiple times: first sets anchor, second extends to cursor
+    sel.set_range(1, &items); // Set anchor at 1
+    sel.set_range(3, &items); // Extend to 3
     assert!(sel.is_selected(1));
     assert!(sel.is_selected(2));
     assert!(sel.is_selected(3));
