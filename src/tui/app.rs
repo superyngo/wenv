@@ -130,6 +130,7 @@ impl TuiApp {
                         }
                     }
                 } else {
+                    self.selection.commit_range();
                     self.cursor = list::navigate_up(&self.visible_items, self.cursor);
                 }
             }
@@ -146,6 +147,7 @@ impl TuiApp {
                         }
                     }
                 } else {
+                    self.selection.commit_range();
                     self.cursor = list::navigate_down(&self.visible_items, self.cursor);
                 }
             }
@@ -156,6 +158,7 @@ impl TuiApp {
                         ms.insertion_cursor = ms.insertion_cursor.saturating_sub(half);
                     }
                 } else {
+                    self.selection.commit_range();
                     self.cursor = self.cursor.saturating_sub(half);
                 }
             }
@@ -167,14 +170,31 @@ impl TuiApp {
                         ms.insertion_cursor = (ms.insertion_cursor + half).min(max_idx);
                     }
                 } else {
+                    self.selection.commit_range();
                     self.cursor = (self.cursor + half).min(max_idx);
                 }
             }
             Action::Home => {
-                self.cursor = list::navigate_home();
+                if self.mode == AppMode::Searching {
+                    if let Some(ref mut search) = self.search {
+                        search.select_first();
+                    }
+                    self.navigate_to_search_match();
+                } else {
+                    self.selection.commit_range();
+                    self.cursor = list::navigate_home();
+                }
             }
             Action::End => {
-                self.cursor = list::navigate_end(&self.visible_items);
+                if self.mode == AppMode::Searching {
+                    if let Some(ref mut search) = self.search {
+                        search.select_last();
+                    }
+                    self.navigate_to_search_match();
+                } else {
+                    self.selection.commit_range();
+                    self.cursor = list::navigate_end(&self.visible_items);
+                }
             }
             Action::ToggleExpand => {
                 if let Some(item) = self.visible_items.get(self.cursor) {
@@ -211,16 +231,14 @@ impl TuiApp {
                 self.selection.toggle(self.cursor, &self.visible_items);
             }
             Action::RangeSelectUp => {
-                let old = self.cursor;
+                self.selection.set_range(self.cursor, &self.visible_items);
                 self.cursor = list::navigate_up(&self.visible_items, self.cursor);
-                let anchor = self.selection.anchor.unwrap_or(old);
-                self.selection.extend_range(anchor, self.cursor, &self.visible_items);
+                self.selection.set_range(self.cursor, &self.visible_items);
             }
             Action::RangeSelectDown => {
-                let old = self.cursor;
+                self.selection.set_range(self.cursor, &self.visible_items);
                 self.cursor = list::navigate_down(&self.visible_items, self.cursor);
-                let anchor = self.selection.anchor.unwrap_or(old);
-                self.selection.extend_range(anchor, self.cursor, &self.visible_items);
+                self.selection.set_range(self.cursor, &self.visible_items);
             }
             Action::Edit => {
                 if let Some(item) = self.visible_items.get(self.cursor) {
@@ -665,6 +683,7 @@ impl TuiApp {
             Ok(Some(new_content)) => {
                 let new_content = new_content.trim_end_matches('\n').to_string();
                 if new_content != value {
+                    self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
                     // Re-parse the edited content to get proper entry type/name
                     let parser = crate::parser::get_parser(self.profile.shell_type);
                     let parsed = parser.parse(&new_content);
@@ -719,6 +738,7 @@ impl TuiApp {
                     }).collect();
 
                     if !new_entries.is_empty() {
+                        self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
                         // Insert after current entry position, or at end of file
                         let insert_pos = match self.visible_items.get(self.cursor) {
                             Some(ListItem::Entry(_, ei)) => ei + 1,

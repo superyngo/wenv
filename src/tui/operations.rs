@@ -4,23 +4,23 @@ use crate::model::profile::{ShellProfile, ListItem};
 use crate::model::Entry;
 use crate::tui::state::UndoSnapshot;
 
-/// Take an undo snapshot of all files
+/// Take an undo snapshot of all files (including dirty state)
 pub fn take_snapshot(profile: &ShellProfile) -> UndoSnapshot {
     UndoSnapshot {
         file_states: profile.files.iter().map(|f| {
-            (f.path.clone(), f.content.clone(), f.entries.clone())
+            (f.path.clone(), f.content.clone(), f.entries.clone(), f.dirty)
         }).collect(),
     }
 }
 
-/// Restore from an undo snapshot
+/// Restore from an undo snapshot (preserving original dirty state)
 pub fn restore_snapshot(profile: &mut ShellProfile, snapshot: UndoSnapshot) {
-    for (i, (path, content, entries)) in snapshot.file_states.into_iter().enumerate() {
+    for (i, (path, content, entries, dirty)) in snapshot.file_states.into_iter().enumerate() {
         if i < profile.files.len() {
             profile.files[i].path = path;
             profile.files[i].content = content;
             profile.files[i].entries = entries;
-            profile.files[i].dirty = false;
+            profile.files[i].dirty = dirty;
         }
     }
 }

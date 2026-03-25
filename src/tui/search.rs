@@ -8,6 +8,7 @@ pub struct SearchMatch {
     pub file_index: usize,
     pub entry_index: usize,
     pub score: i64,
+    pub indices: Vec<usize>, // matched character positions in "{name} {value}" haystack
 }
 
 pub struct SearchState {
@@ -43,11 +44,12 @@ impl SearchState {
         for (fi, file) in profile.files.iter().enumerate() {
             for (ei, entry) in file.entries.iter().enumerate() {
                 let haystack = format!("{} {}", entry.name, entry.value);
-                if let Some((score, _indices)) = self.matcher.fuzzy_indices(&haystack, &self.query) {
+                if let Some((score, indices)) = self.matcher.fuzzy_indices(&haystack, &self.query) {
                     self.matches.push(SearchMatch {
                         file_index: fi,
                         entry_index: ei,
                         score,
+                        indices,
                     });
                 }
             }
@@ -72,17 +74,33 @@ impl SearchState {
         self.query.pop();
     }
 
-    /// Move to next match in file-position order
+    /// Move to next match in file-position order (wraps around)
     pub fn select_next(&mut self) {
         if !self.position_order.is_empty() {
-            self.selected = (self.selected + 1).min(self.position_order.len() - 1);
+            self.selected = (self.selected + 1) % self.position_order.len();
         }
     }
 
-    /// Move to previous match in file-position order
+    /// Move to previous match in file-position order (wraps around)
     pub fn select_prev(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
+        if !self.position_order.is_empty() {
+            if self.selected == 0 {
+                self.selected = self.position_order.len() - 1;
+            } else {
+                self.selected -= 1;
+            }
+        }
+    }
+
+    /// Jump to first match in file-position order
+    pub fn select_first(&mut self) {
+        self.selected = 0;
+    }
+
+    /// Jump to last match in file-position order
+    pub fn select_last(&mut self) {
+        if !self.position_order.is_empty() {
+            self.selected = self.position_order.len() - 1;
         }
     }
 
@@ -107,5 +125,26 @@ impl SearchState {
     /// Return set of file indices that have at least one match
     pub fn matched_file_indices(&self) -> std::collections::HashSet<usize> {
         self.matches.iter().map(|m| m.file_index).collect()
+    }
+
+    /// Get matched character indices for a given (file_index, entry_index).
+    /// Returns indices split into (name_indices, value_indices) relative to
+    /// the entry's name and value strings respectively.
+    pub fn matched_char_indices(&self, fi: usize, ei: usize, name_len: usize) -> Option<(Vec<usize>, Vec<usize>)> {
+        self.matches.iter()
+            .find(|m| m.file_index == fi && m.entry_index == ei)
+            .map(|m| {
+                let mut name_indices = Vec::new();
+                let mut value_indices = Vec::new();
+                let separator = name_len; // index of the space between name and value
+                for &idx in &m.indices {
+                    if idx < name_len {
+                        name_indices.push(idx);
+                    } else if idx > separator {
+                        value_indices.push(idx - separator - 1);
+                    }
+                }
+                (name_indices, value_indices)
+            })
     }
 }

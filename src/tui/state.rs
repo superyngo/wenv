@@ -32,7 +32,7 @@ impl ClipboardState {
 }
 
 pub struct UndoSnapshot {
-    pub file_states: Vec<(std::path::PathBuf, String, Vec<crate::model::Entry>)>,
+    pub file_states: Vec<(std::path::PathBuf, String, Vec<crate::model::Entry>, bool)>, // (path, content, entries, dirty)
 }
 
 pub struct MoveState {

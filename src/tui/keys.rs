@@ -102,8 +102,10 @@ fn map_search_key(key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Esc => Action::Cancel,
         KeyCode::Backspace => Action::SearchBackspace,
-        KeyCode::Up => Action::NavigateUp,
-        KeyCode::Down => Action::NavigateDown,
+        KeyCode::Up | KeyCode::PageUp => Action::NavigateUp,
+        KeyCode::Down | KeyCode::PageDown => Action::NavigateDown,
+        KeyCode::Home => Action::Home,
+        KeyCode::End => Action::End,
         // Toggle info popup
         KeyCode::Enter | KeyCode::Char(' ') => Action::ToggleExpand,
         KeyCode::Char(c) => Action::SearchInput(c),

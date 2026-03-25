@@ -38,6 +38,44 @@ fn format_value_display(value: &str) -> String {
     }
 }
 
+/// Build spans for a string with highlighted character positions.
+/// Characters at `highlight_indices` get `hl_style`, others get `normal_style`.
+fn build_highlighted_spans<'a>(
+    text: &str,
+    highlight_indices: &[usize],
+    normal_style: Style,
+    hl_style: Style,
+) -> Vec<Span<'a>> {
+    if highlight_indices.is_empty() {
+        return vec![Span::styled(text.to_string(), normal_style)];
+    }
+
+    let hl_set: std::collections::HashSet<usize> = highlight_indices.iter().copied().collect();
+    let mut spans = Vec::new();
+    let mut current = String::new();
+    let mut current_is_hl = false;
+
+    for (i, ch) in text.chars().enumerate() {
+        let is_hl = hl_set.contains(&i);
+        if i == 0 {
+            current_is_hl = is_hl;
+        }
+        if is_hl != current_is_hl {
+            if !current.is_empty() {
+                let style = if current_is_hl { hl_style } else { normal_style };
+                spans.push(Span::styled(std::mem::take(&mut current), style));
+            }
+            current_is_hl = is_hl;
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        let style = if current_is_hl { hl_style } else { normal_style };
+        spans.push(Span::styled(current, style));
+    }
+    spans
+}
+
 pub fn draw(f: &mut Frame, app: &TuiApp) {
     let has_search = app.search.is_some();
     let constraints = if has_search {
@@ -154,7 +192,6 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                 ProfileListItem::Entry(fi, ei) => {
                     let entry = &app.profile.files[*fi].entries[*ei];
 
-                    // Build four-column spans
                     let prefix = if is_selected { "● " } else { "  " };
                     let name_str = format!("{:<20}", entry.name);
                     let type_str = format!("{:<10}", entry.entry_type.to_string());
@@ -162,28 +199,49 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     let value_str = format_value_display(&entry.value);
                     let tc = type_color(&entry.entry_type);
 
-                    let line = Line::from(vec![
-                        Span::raw(prefix.to_string()),
-                        Span::styled(name_str, Style::default().fg(Color::White)),
-                        Span::raw(" "),
-                        Span::styled(type_str, Style::default().fg(tc).add_modifier(Modifier::BOLD)),
-                        Span::raw(" "),
-                        Span::styled(line_str, Style::default().fg(Color::Gray)),
-                        Span::raw(" "),
-                        Span::styled(value_str, Style::default().fg(Color::Gray)),
-                    ]);
-
                     // Search mode styling
                     let is_search_match = app.search.as_ref()
                         .is_some_and(|s| s.is_match(*fi, *ei));
                     let is_search_selected = app.search.as_ref()
                         .is_some_and(|s| s.is_selected_match(*fi, *ei));
 
+                    // Build line with per-character highlighting for search matches
+                    let line = if app.mode == AppMode::Searching && is_search_match {
+                        let hl_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+                        let char_indices = app.search.as_ref()
+                            .and_then(|s| s.matched_char_indices(*fi, *ei, entry.name.len()));
+                        let (name_hl, value_hl) = char_indices.unwrap_or_default();
+
+                        let name_normal = Style::default().fg(Color::White);
+                        let value_normal = Style::default().fg(Color::Gray);
+
+                        let mut spans = vec![Span::raw(prefix.to_string())];
+                        spans.extend(build_highlighted_spans(&name_str, &name_hl, name_normal, hl_style));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled(type_str, Style::default().fg(tc).add_modifier(Modifier::BOLD)));
+                        spans.push(Span::raw(" "));
+                        spans.push(Span::styled(line_str, Style::default().fg(Color::Gray)));
+                        spans.push(Span::raw(" "));
+                        spans.extend(build_highlighted_spans(&value_str, &value_hl, value_normal, hl_style));
+                        Line::from(spans)
+                    } else {
+                        Line::from(vec![
+                            Span::raw(prefix.to_string()),
+                            Span::styled(name_str, Style::default().fg(Color::White)),
+                            Span::raw(" "),
+                            Span::styled(type_str, Style::default().fg(tc).add_modifier(Modifier::BOLD)),
+                            Span::raw(" "),
+                            Span::styled(line_str, Style::default().fg(Color::Gray)),
+                            Span::raw(" "),
+                            Span::styled(value_str, Style::default().fg(Color::Gray)),
+                        ])
+                    };
+
                     let mut style = if app.mode == AppMode::Searching {
                         if is_search_selected {
-                            Style::default().bg(Color::Rgb(40, 40, 0)).fg(Color::White).add_modifier(Modifier::BOLD)
+                            Style::default().bg(Color::Rgb(80, 80, 0)).fg(Color::White).add_modifier(Modifier::BOLD)
                         } else if is_search_match {
-                            Style::default().fg(Color::White)
+                            Style::default().bg(Color::Rgb(50, 50, 90))
                         } else {
                             Style::default().fg(Color::DarkGray)
                         }
