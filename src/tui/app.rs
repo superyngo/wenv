@@ -600,51 +600,36 @@ impl TuiApp {
                     AppMode::ConfirmRemoveFile => {
                         if let Some(fi) = self.pending_remove_fi.take() {
                             let path = self.profile.files[fi].path.clone();
-
                             let shell_key = self.shell_key.clone();
-                            if let Some(files_config) = self.config.files.get_mut(&shell_key) {
-                                // Find all files affected by the matching config pattern
-                                let affected_paths: Vec<std::path::PathBuf> = files_config
-                                    .paths
-                                    .iter()
-                                    .filter(|p| {
-                                        let resolved =
-                                            crate::config::path_resolver::resolve_paths(&[
-                                                p.to_string()
-                                            ]);
-                                        resolved.iter().any(|(rp, _)| *rp == path)
-                                    })
-                                    .flat_map(|p| {
-                                        crate::config::path_resolver::resolve_paths(
-                                            &[p.to_string()],
-                                        )
-                                        .into_iter()
-                                        .map(|(rp, _)| rp)
-                                    })
-                                    .collect();
 
+                            // Use helper to find matching pattern and all affected paths
+                            let match_result =
+                                crate::tui::operations::find_matching_config_pattern(
+                                    &self.config,
+                                    &shell_key,
+                                    &path,
+                                );
+
+                            let (raw_pattern, affected_paths) = match match_result {
+                                Some((pat, paths)) => (Some(pat), paths),
+                                None => (None, vec![path.clone()]),
+                            };
+
+                            if let Some(files_config) = self.config.files.get_mut(&shell_key) {
                                 // Remove the matching pattern from config
-                                files_config.paths.retain(|p| {
-                                    let resolved = crate::config::path_resolver::resolve_paths(&[
-                                        p.to_string(),
-                                    ]);
-                                    !resolved.iter().any(|(rp, _)| *rp == path)
-                                });
+                                if let Some(ref pat) = raw_pattern {
+                                    files_config.paths.retain(|p| p != pat);
+                                }
 
                                 if let Err(e) = self.config.save() {
                                     self.message = Some(format!("Config save error: {}", e));
                                 } else {
                                     // Remove ALL affected files from profile
-                                    let removed_count = if affected_paths.is_empty() {
-                                        self.profile.files.remove(fi);
-                                        1
-                                    } else {
-                                        let before = self.profile.files.len();
-                                        self.profile
-                                            .files
-                                            .retain(|f| !affected_paths.contains(&f.path));
-                                        before - self.profile.files.len()
-                                    };
+                                    let before = self.profile.files.len();
+                                    self.profile
+                                        .files
+                                        .retain(|f| !affected_paths.contains(&f.path));
+                                    let removed_count = before - self.profile.files.len();
 
                                     // Recalculate file_index for remaining entries
                                     for (new_fi, file) in self.profile.files.iter_mut().enumerate()

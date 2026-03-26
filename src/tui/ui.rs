@@ -122,8 +122,10 @@ pub fn draw(f: &mut Frame, app: &TuiApp) {
 
     // Draw confirmation popups on top
     match &app.mode {
-        AppMode::ConfirmDelete | AppMode::ConfirmQuit 
-        | AppMode::ConfirmRemoveFile | AppMode::ConfirmCreateFile => {
+        AppMode::ConfirmDelete
+        | AppMode::ConfirmQuit
+        | AppMode::ConfirmRemoveFile
+        | AppMode::ConfirmCreateFile => {
             draw_confirm_popup(f, f.size(), app);
         }
         AppMode::ShowingDetail => {
@@ -428,14 +430,15 @@ fn draw_status(f: &mut Frame, area: Rect, app: &TuiApp) {
 fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     let msg = app.message.as_deref().unwrap_or("Confirm? (y/n)");
 
-    // Center a popup
-    let popup_width = (msg.len() as u16 + 4).min(area.width - 4);
-    let popup_height = 3;
+    let lines: Vec<&str> = msg.split('\n').collect();
+    let max_line_width = lines.iter().map(|l| l.len()).max().unwrap_or(20);
+
+    let popup_width = ((max_line_width as u16) + 4).min(area.width - 4);
+    let popup_height = ((lines.len() as u16) + 2).min(area.height - 2);
     let x = (area.width.saturating_sub(popup_width)) / 2;
     let y = (area.height.saturating_sub(popup_height)) / 2;
     let popup_area = Rect::new(x, y, popup_width, popup_height);
 
-    // Clear area behind popup
     f.render_widget(Clear, popup_area);
 
     let title = match &app.mode {
@@ -448,7 +451,9 @@ fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
         .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Red));
-    let text = Paragraph::new(msg)
+
+    let text_lines: Vec<Line> = lines.iter().map(|l| Line::from(*l)).collect();
+    let text = Paragraph::new(text_lines)
         .block(block)
         .alignment(Alignment::Center);
     f.render_widget(text, popup_area);
@@ -576,7 +581,8 @@ fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
         Line::from("  c           Copy selected entries"),
         Line::from("  v           Paste entries"),
         Line::from("  m           Move entry/file (drag to reposition)"),
-        Line::from("  z           Undo last operation"),
+        Line::from("  z           Undo (multi-step)"),
+        Line::from("  y           Redo"),
         Line::from("  r           Toggle remark"),
         Line::from("  a           Add file path"),
         Line::from(""),
