@@ -154,6 +154,7 @@ impl Parser for PowerShellParser {
                                 name: None,
                                 value: None,
                                 comment_count: 0,
+                                has_absorbed_blanks: false,
                             });
                         }
                     }
@@ -191,6 +192,7 @@ impl Parser for PowerShellParser {
                                 name: None,
                                 value: None,
                                 comment_count: pending.comment_count,
+                                has_absorbed_blanks: false,
                             });
                         } else {
                             // Flush non-mergeable pending
@@ -305,6 +307,7 @@ impl Parser for PowerShellParser {
                         name: Some(name),
                         value: None,
                         comment_count: 0,
+                        has_absorbed_blanks: false,
                     });
                     continue;
                 }

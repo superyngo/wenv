@@ -106,6 +106,10 @@ pub struct PendingBlock {
     /// Number of pure comment lines (excluding blank lines).
     /// Used to decide merge behavior: single comment merges down, multiple don't.
     pub comment_count: usize,
+
+    /// Whether this block has absorbed blank lines.
+    /// Used by CodeWithBlanks to decide if adjacent code should merge or start a new entry.
+    pub has_absorbed_blanks: bool,
 }
 
 impl PendingBlock {
@@ -120,6 +124,7 @@ impl PendingBlock {
             name: None,
             value: None,
             comment_count: 0,
+            has_absorbed_blanks: false,
         }
     }
 

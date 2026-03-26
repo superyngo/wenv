@@ -92,6 +92,7 @@ impl BashParser {
             name: Some(entry.name),
             value: None, // Don't set value - let build_entry_from_pending use raw_content
             comment_count: 0,
+            has_absorbed_blanks: false,
         }
     }
 
@@ -345,6 +346,7 @@ impl Parser for BashParser {
                                 name: None,
                                 value: None,
                                 comment_count: 0,
+                                has_absorbed_blanks: false,
                             });
                         }
                     }
@@ -382,6 +384,7 @@ impl Parser for BashParser {
                                 name: None,
                                 value: None,
                                 comment_count: pending.comment_count,
+                                has_absorbed_blanks: false,
                             });
                         } else {
                             // Flush non-mergeable pending
@@ -407,6 +410,10 @@ impl Parser for BashParser {
                     Some(pending) if pending.can_absorb_blank() => {
                         // Comment, BlankLines, or CodeWithBlanks absorbs blank
                         pending.add_line(line, line_number);
+                        // Track that this CodeWithBlanks block has absorbed blanks
+                        if pending.merge_type() == Some(MergeType::CodeWithBlanks) {
+                            pending.has_absorbed_blanks = true;
+                        }
                     }
                     Some(_) => {
                         // Other pending types: flush and start new blank
@@ -499,6 +506,7 @@ impl Parser for BashParser {
                         name: Some(name),
                         value: None,
                         comment_count: 0,
+                        has_absorbed_blanks: false,
                     });
                     continue;
                 }
@@ -554,6 +562,7 @@ impl Parser for BashParser {
                         name: Some(name),
                         value: None,
                         comment_count: 0,
+                        has_absorbed_blanks: false,
                     });
                     continue;
                 }
@@ -644,6 +653,7 @@ impl Parser for BashParser {
                         name: Some(name),
                         value: None,
                         comment_count: 0,
+                        has_absorbed_blanks: false,
                     };
                     active_block = Some(func_block);
                 }
@@ -685,6 +695,7 @@ impl Parser for BashParser {
                     name: None,
                     value: None,
                     comment_count: 0,
+                    has_absorbed_blanks: false,
                 };
                 active_block = Some(paren_block);
                 continue;
@@ -709,11 +720,18 @@ impl Parser for BashParser {
                     }
                 }
                 Some(pending) if pending.entry_hint == Some(EntryType::Code) => {
-                    // Non-blank Code pending + new non-blank Code → flush pending, new pending
-                    if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(entry);
+                    if pending.merge_type() == Some(MergeType::CodeWithBlanks)
+                        && !pending.has_absorbed_blanks
+                    {
+                        // Adjacent code line with no blank gap → merge into pending
+                        pending.add_line(line, line_number);
+                    } else {
+                        // Code with absorbed blanks or other Code pending → flush and start new
+                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
+                            result.add_entry(entry);
+                        }
+                        pending_entry = Some(PendingBlock::code(line_number, line));
                     }
-                    pending_entry = Some(PendingBlock::code(line_number, line));
                 }
                 Some(_) => {
                     // Flush pending, start new pending Code
@@ -1417,5 +1435,56 @@ mod tests {
         // Next alias starts at L6
         assert_eq!(result.entries[1].entry_type, EntryType::Alias);
         assert_eq!(result.entries[1].line_number, Some(6));
+    }
+
+    // === Tests for adjacent code merging ===
+
+    #[test]
+    fn test_adjacent_code_lines_merged() {
+        let parser = BashParser::new();
+        let input = "echo hello\necho world\n";
+        let result = parser.parse(input);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+        assert_eq!(result.entries[0].value, "echo hello\necho world");
+    }
+
+    #[test]
+    fn test_code_lines_split_by_blank() {
+        let parser = BashParser::new();
+        let input = "echo hello\n\necho world\n";
+        let result = parser.parse(input);
+
+        // Blank line separates: first code+blank entry, then second code entry
+        assert!(result.entries.len() >= 2);
+        // First entry should contain "echo hello" and trailing blank
+        assert!(result.entries[0].value.contains("echo hello"));
+        // Last entry should be "echo world"
+        let last = result.entries.last().unwrap();
+        assert!(last.value.contains("echo world"));
+    }
+
+    #[test]
+    fn test_three_adjacent_code_lines_merged() {
+        let parser = BashParser::new();
+        let input = "echo a\necho b\necho c\n";
+        let result = parser.parse(input);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].value, "echo a\necho b\necho c");
+    }
+
+    #[test]
+    fn test_code_then_blank_then_code_separate() {
+        let parser = BashParser::new();
+        let input = "echo a\necho b\n\necho c\n";
+        let result = parser.parse(input);
+
+        // First entry: "echo a\necho b" + trailing blank
+        // Second entry: "echo c"
+        assert!(result.entries.len() >= 2);
+        let last = result.entries.last().unwrap();
+        assert_eq!(last.value, "echo c");
     }
 }
