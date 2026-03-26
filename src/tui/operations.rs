@@ -22,16 +22,25 @@ pub fn take_snapshot(profile: &ShellProfile) -> UndoSnapshot {
     }
 }
 
-/// Restore from an undo snapshot (preserving original dirty state)
+/// Restore from an undo snapshot, fully replacing the file list.
+/// Preserves UI-state fields (writable, expanded, exists) from matching files.
 pub fn restore_snapshot(profile: &mut ShellProfile, snapshot: UndoSnapshot) {
-    for (i, (path, content, entries, dirty)) in snapshot.file_states.into_iter().enumerate() {
-        if i < profile.files.len() {
-            profile.files[i].path = path;
-            profile.files[i].content = content;
-            profile.files[i].entries = entries;
-            profile.files[i].dirty = dirty;
-        }
-    }
+    let old_files = std::mem::take(&mut profile.files);
+    profile.files = snapshot
+        .file_states
+        .into_iter()
+        .map(|(path, content, entries, dirty)| {
+            // Carry over UI-state from matching old file if it exists
+            let old = old_files.iter().find(|f| f.path == path);
+            let mut file = ProfileFile::new(path, old.map_or(true, |f| f.exists));
+            file.content = content;
+            file.entries = entries;
+            file.dirty = dirty;
+            file.expanded = old.map_or(true, |f| f.expanded);
+            file.writable = old.map_or(true, |f| f.writable);
+            file
+        })
+        .collect();
 }
 
 /// Delete entries identified by visible-list indices.
