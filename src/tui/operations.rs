@@ -1,8 +1,26 @@
 //! Entry manipulation operations
 
+use std::collections::VecDeque;
+
 use crate::model::profile::{ListItem, ProfileFile, ShellProfile};
 use crate::model::Entry;
 use crate::tui::state::UndoSnapshot;
+
+pub const MAX_UNDO_HISTORY: usize = 20;
+
+/// Push an undo snapshot onto the stack, clearing redo history.
+/// If the stack exceeds MAX_UNDO_HISTORY, the oldest snapshot is discarded.
+pub fn push_undo(
+    undo_stack: &mut VecDeque<UndoSnapshot>,
+    redo_stack: &mut Vec<UndoSnapshot>,
+    snapshot: UndoSnapshot,
+) {
+    if undo_stack.len() >= MAX_UNDO_HISTORY {
+        undo_stack.pop_front();
+    }
+    undo_stack.push_back(snapshot);
+    redo_stack.clear();
+}
 
 /// Take an undo snapshot of all files (including dirty state)
 pub fn take_snapshot(profile: &ShellProfile) -> UndoSnapshot {

@@ -7,6 +7,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
+use std::collections::VecDeque;
 use std::io;
 
 use crate::i18n::Messages;
@@ -15,7 +16,7 @@ use crate::tui::keys::{self, Action};
 use crate::tui::list;
 use crate::tui::search::SearchState;
 use crate::tui::selection::SelectionState;
-use crate::tui::state::{AppMode, ClipboardState, FileMovingState, MoveState, UndoSnapshot};
+use crate::tui::state::{AppMode, ClipboardState, FileMovingState, MoveState};
 
 enum EditorRequest {
     None,
@@ -35,7 +36,8 @@ pub struct TuiApp {
     pub messages: &'static Messages,
     pub selection: SelectionState,
     pub clipboard: ClipboardState,
-    pub undo_snapshot: Option<UndoSnapshot>,
+    pub undo_stack: VecDeque<crate::tui::state::UndoSnapshot>,
+    pub redo_stack: Vec<crate::tui::state::UndoSnapshot>,
     pub move_state: Option<MoveState>,
     pub search: Option<SearchState>,
     pub list_visible_height: usize,
@@ -66,7 +68,8 @@ impl TuiApp {
             messages,
             selection: SelectionState::new(),
             clipboard: ClipboardState::new(),
-            undo_snapshot: None,
+            undo_stack: VecDeque::new(),
+            redo_stack: Vec::new(),
             move_state: None,
             search: None,
             list_visible_height: 20,
@@ -336,7 +339,8 @@ impl TuiApp {
                     }
                     let targets = self.get_operation_targets();
                     if !targets.is_empty() {
-                        self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                        let snapshot = crate::tui::operations::take_snapshot(&self.profile);
+                        crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
                         self.previous_mode = Some(self.mode.clone());
                         self.mode = AppMode::ConfirmDelete;
                         let count = targets.len();
@@ -351,7 +355,8 @@ impl TuiApp {
                 }
                 let targets = self.get_operation_targets();
                 if !targets.is_empty() {
-                    self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                    let snapshot = crate::tui::operations::take_snapshot(&self.profile);
+                    crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
                     let cut = crate::tui::operations::cut_entries(
                         &mut self.profile,
                         &self.visible_items,
@@ -417,7 +422,8 @@ impl TuiApp {
                 }
                 let targets = self.get_operation_targets();
                 if !targets.is_empty() {
-                    self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                    let snapshot = crate::tui::operations::take_snapshot(&self.profile);
+                    crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
 
                     let has_selection = !self.selection.is_empty();
 
@@ -453,7 +459,8 @@ impl TuiApp {
                     return Ok(EditorRequest::None);
                 }
                 if !self.clipboard.is_empty() {
-                    self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                    let snapshot = crate::tui::operations::take_snapshot(&self.profile);
+                    crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
                     crate::tui::operations::paste_entries(
                         &mut self.profile,
                         &self.visible_items,
@@ -467,13 +474,32 @@ impl TuiApp {
                 }
             }
             Action::Undo => {
-                if let Some(snapshot) = self.undo_snapshot.take() {
+                if let Some(snapshot) = self.undo_stack.pop_back() {
+                    let current = crate::tui::operations::take_snapshot(&self.profile);
+                    self.redo_stack.push(current);
                     crate::tui::operations::restore_snapshot(&mut self.profile, snapshot);
                     self.selection.clear();
                     self.rebuild_list();
-                    self.message = Some("Undone".into());
+                    let remaining = self.undo_stack.len();
+                    self.message = Some(format!("Undone ({remaining} left)"));
                 } else {
                     self.message = Some("Nothing to undo".into());
+                }
+            }
+            Action::Redo => {
+                if let Some(snapshot) = self.redo_stack.pop() {
+                    let current = crate::tui::operations::take_snapshot(&self.profile);
+                    self.undo_stack.push_back(current);
+                    if self.undo_stack.len() > crate::tui::operations::MAX_UNDO_HISTORY {
+                        self.undo_stack.pop_front();
+                    }
+                    crate::tui::operations::restore_snapshot(&mut self.profile, snapshot);
+                    self.selection.clear();
+                    self.rebuild_list();
+                    let remaining = self.redo_stack.len();
+                    self.message = Some(format!("Redone ({remaining} left)"));
+                } else {
+                    self.message = Some("Nothing to redo".into());
                 }
             }
             Action::Save => match crate::tui::operations::save_dirty_files(&mut self.profile) {
@@ -632,8 +658,8 @@ impl TuiApp {
                     }
                     AppMode::Moving => {
                         let from_sel = self.move_state.as_ref().is_some_and(|ms| ms.from_selection);
-                        // Restore from snapshot
-                        if let Some(snapshot) = self.undo_snapshot.take() {
+                        // Pop the pre-emptive undo snapshot and restore from it
+                        if let Some(snapshot) = self.undo_stack.pop_back() {
                             crate::tui::operations::restore_snapshot(&mut self.profile, snapshot);
                         }
                         self.move_state = None;
@@ -649,7 +675,7 @@ impl TuiApp {
                         }
                     }
                     AppMode::ConfirmDelete => {
-                        if let Some(_snapshot) = self.undo_snapshot.take() {}
+                        self.undo_stack.pop_back(); // Discard pre-emptive snapshot
                         self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
                         self.message = Some("Cancelled".into());
                     }
@@ -774,8 +800,8 @@ impl TuiApp {
                 });
 
                 // Take undo snapshot
-                self.undo_snapshot =
-                    Some(crate::tui::operations::take_snapshot(&self.profile));
+                let snapshot = crate::tui::operations::take_snapshot(&self.profile);
+                crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
 
                 // Track original range for selection restoration
                 let first_visible = targets[0];
@@ -1397,7 +1423,8 @@ impl TuiApp {
             Ok(Some(new_content)) => {
                 let new_content = new_content.trim_end_matches('\n').to_string();
                 if new_content != value {
-                    self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                    let snapshot = crate::tui::operations::take_snapshot(&self.profile);
+                    crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
                     let parser = crate::parser::get_parser(self.profile.shell_type);
                     let parsed = parser.parse(&new_content);
                     let new_entries: Vec<_> = parsed
@@ -1475,8 +1502,8 @@ impl TuiApp {
                         .collect();
 
                     if !new_entries.is_empty() {
-                        self.undo_snapshot =
-                            Some(crate::tui::operations::take_snapshot(&self.profile));
+                        let snapshot = crate::tui::operations::take_snapshot(&self.profile);
+                        crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
                         // Insert after current entry position, or at end of file
                         let insert_pos = match self.visible_items.get(self.cursor) {
                             Some(ListItem::Entry(_, ei)) => ei + 1,
