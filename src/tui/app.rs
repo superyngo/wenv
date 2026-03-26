@@ -824,6 +824,7 @@ impl TuiApp {
                         // Insert after current entry position, or at end of file
                         let insert_pos = match self.visible_items.get(self.cursor) {
                             Some(ListItem::Entry(_, ei)) => ei + 1,
+                            Some(ListItem::FileHeader(_)) => 0,  // Insert at beginning
                             _ => self.profile.files[fi].entries.len(),
                         };
                         let count = new_entries.len();

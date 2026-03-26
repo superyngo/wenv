@@ -143,6 +143,24 @@ fn test_paste_at_entry_position() {
 }
 
 #[test]
+fn test_paste_at_file_header_inserts_at_beginning() {
+    let mut profile = make_test_profile();
+    let items = profile.build_visible_list();
+
+    // Find first FileHeader index
+    let header_idx = items
+        .iter()
+        .position(|item| matches!(item, ListItem::FileHeader(_)))
+        .unwrap();
+
+    let new_entry = make_test_entry("new", "alias new='cmd'", EntryType::Alias, 0);
+    operations::paste_entries(&mut profile, &items, header_idx, &[new_entry]);
+
+    // The new entry should be at position 0 in the file
+    assert_eq!(profile.files[0].entries[0].name, "new");
+}
+
+#[test]
 fn test_snapshot_and_restore() {
     let mut profile = make_test_profile();
     let snapshot = operations::take_snapshot(&profile);
