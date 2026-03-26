@@ -503,7 +503,10 @@ impl TuiApp {
             Action::AddFile => {
                 self.message = Some("Add file: not yet implemented".into());
             }
-            Action::TextInputChar(_) | Action::TextInputBackspace | Action::TextInputLeft | Action::TextInputRight => {}
+            Action::TextInputChar(_)
+            | Action::TextInputBackspace
+            | Action::TextInputLeft
+            | Action::TextInputRight => {}
             _ => {
                 // Other actions not implemented yet
             }
@@ -654,7 +657,8 @@ impl TuiApp {
             self.profile.files[target_fi].dirty = true;
 
             // Recalculate line numbers for affected files
-            let mut affected_files: std::collections::HashSet<usize> = source_files.into_iter().collect();
+            let mut affected_files: std::collections::HashSet<usize> =
+                source_files.into_iter().collect();
             affected_files.insert(target_fi);
             for fi in affected_files {
                 if fi < self.profile.files.len() {
@@ -754,25 +758,37 @@ impl TuiApp {
                 let new_content = new_content.trim_end_matches('\n').to_string();
                 if new_content != value {
                     self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
-                    // Re-parse the edited content to get proper entry type/name
                     let parser = crate::parser::get_parser(self.profile.shell_type);
                     let parsed = parser.parse(&new_content);
-                    if let Some(new_entry) = parsed.entries.into_iter().next() {
-                        let entry = &mut self.profile.files[fi].entries[ei];
-                        entry.entry_type = new_entry.entry_type;
-                        entry.name = new_entry.name;
-                        entry.value = new_entry.value;
+                    let new_entries: Vec<_> = parsed
+                        .entries
+                        .into_iter()
+                        .map(|mut e| {
+                            e.file_index = fi;
+                            e
+                        })
+                        .collect();
+
+                    if new_entries.is_empty() {
+                        // Empty edit = delete entry
+                        self.profile.files[fi].entries.remove(ei);
                         self.profile.files[fi].dirty = true;
                         self.profile.files[fi].recalculate_line_numbers();
                         self.rebuild_list();
-                        self.message = Some("Entry updated".into());
+                        self.message = Some("Entry deleted (empty content)".into());
                     } else {
-                        // Content was emptied or unparseable
-                        self.profile.files[fi].entries[ei].value = new_content;
-                        self.profile.files[fi].dirty = true;
-                        self.profile.files[fi].recalculate_line_numbers();
+                        let count = crate::tui::operations::replace_entry_with_parsed(
+                            &mut self.profile.files[fi],
+                            ei,
+                            new_entries,
+                            fi,
+                        );
                         self.rebuild_list();
-                        self.message = Some("Entry value updated (raw)".into());
+                        self.message = Some(if count == 1 {
+                            "Entry updated".into()
+                        } else {
+                            format!("Entry replaced with {} entries", count)
+                        });
                     }
                 } else {
                     self.message = Some("No changes".into());
@@ -824,7 +840,7 @@ impl TuiApp {
                         // Insert after current entry position, or at end of file
                         let insert_pos = match self.visible_items.get(self.cursor) {
                             Some(ListItem::Entry(_, ei)) => ei + 1,
-                            Some(ListItem::FileHeader(_)) => 0,  // Insert at beginning
+                            Some(ListItem::FileHeader(_)) => 0, // Insert at beginning
                             _ => self.profile.files[fi].entries.len(),
                         };
                         let count = new_entries.len();

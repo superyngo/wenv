@@ -333,7 +333,10 @@ fn test_copy_entries() {
     let items = profile.build_visible_list();
 
     // Find an entry index (first Entry in visible_items)
-    let entry_idx = items.iter().position(|item| matches!(item, ListItem::Entry(_, _))).unwrap();
+    let entry_idx = items
+        .iter()
+        .position(|item| matches!(item, ListItem::Entry(_, _)))
+        .unwrap();
 
     // Copy the entry
     let copied: Vec<Entry> = vec![entry_idx]
