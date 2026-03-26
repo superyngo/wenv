@@ -5,13 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased Update] - 2026-03-26
+## [Unreleased]
+
+## [v0.11.0] - 2026-03-26
 
 ### ✨ NEW FEATURES
 
+- Multi-step undo (z) and redo (y) with 20-operation history
+- Enhanced delete prompt shows raw config pattern and affected file paths
+- Remark toggle (r key) for single entry and multi-selection
+- Add file path to config with 'a' key (interactive file browser)
+- Remove file from config with 'd' key on FileHeader
+- Startup file validation with readonly mode for missing/unreadable files
 - Display version number in TUI title bar (right-aligned, gray color)
+- Edit entry produces multiple entries from parsed content
+- Merge adjacent code entries in parser
+- Expand $PROFILE by querying PowerShell on Windows
+- Insert new entry at file beginning when on FileHeader
+- Rebound keys and added copy operation
+- Line number auto-recalculation after mutations
+- FileHeader move mode with detail popup e/r, remark selection fix, move skip blocked
 
-## [1.0.0] - 2024-12-19
+### 📝 DOCUMENTATION
+
+- Update help text with multi-step undo and redo
+- Add implementation plan for undo/redo & config delete prompt
+- Add multi-step undo/redo & config delete prompt design spec
+- Add TUI enhancements batch 2 design spec
+- Update CLAUDE.md key bindings
+- Fix undo restore for file count changes
+
+### 🧪 TESTING
+
+- Add multi-step undo/redo integration tests (29 test cases)
+
+## [v1.0.0] - 2024-12-19
 
 ### 🚨 BREAKING CHANGES
 
