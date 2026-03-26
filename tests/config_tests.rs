@@ -54,3 +54,12 @@ fn test_resolve_nonexistent_path() {
     assert_eq!(results.len(), 1);
     assert!(!results[0].1);
 }
+
+#[test]
+fn test_expand_env_vars_unknown_var_unchanged() {
+    // When an env var is not set and has no special handling, it stays as-is
+    std::env::remove_var("NONEXISTENT_VAR_XYZ");
+    let result = path_resolver::expand_env_vars("$NONEXISTENT_VAR_XYZ/foo");
+    // Should remain unchanged since var doesn't exist
+    assert_eq!(result, "$NONEXISTENT_VAR_XYZ/foo");
+}

@@ -18,9 +18,32 @@ pub fn expand_env_vars(path: &str) -> String {
         let var_name = &cap[1];
         if let Ok(val) = std::env::var(var_name) {
             result = result.replace(&cap[0], &val);
+        } else if var_name == "PROFILE" {
+            if let Some(val) = query_powershell_profile() {
+                result = result.replace(&cap[0], &val);
+            }
         }
     }
     result
+}
+
+/// Query PowerShell for the $PROFILE path when not available as env var.
+/// Tries `pwsh` first (cross-platform), then `powershell` (Windows-only).
+fn query_powershell_profile() -> Option<String> {
+    for cmd in &["pwsh", "powershell"] {
+        if let Ok(output) = std::process::Command::new(cmd)
+            .args(["-NoProfile", "-Command", "echo $PROFILE"])
+            .output()
+        {
+            if output.status.success() {
+                let val = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !val.is_empty() {
+                    return Some(val);
+                }
+            }
+        }
+    }
+    None
 }
 
 pub fn resolve_paths(patterns: &[String]) -> Vec<(PathBuf, bool)> {
