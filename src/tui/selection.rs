@@ -1,13 +1,13 @@
 //! Selection state management for TUI
 
-use std::collections::HashSet;
 use crate::model::profile::ListItem;
+use std::collections::HashSet;
 
 pub struct SelectionState {
-    pub selected_indices: HashSet<usize>,   // manually toggled (Space)
-    range_indices: HashSet<usize>,          // shift-arrow range selection
-    pub anchor: Option<usize>,              // anchor for Space toggle
-    shift_anchor: Option<usize>,            // fixed anchor for shift-arrow range
+    pub selected_indices: HashSet<usize>, // manually toggled (Space)
+    range_indices: HashSet<usize>,        // shift-arrow range selection
+    pub anchor: Option<usize>,            // anchor for Space toggle
+    shift_anchor: Option<usize>,          // fixed anchor for shift-arrow range
 }
 
 impl Default for SelectionState {
@@ -57,7 +57,11 @@ impl SelectionState {
         }
         let anchor = self.shift_anchor.unwrap();
         self.range_indices.clear();
-        let (start, end) = if anchor <= cursor { (anchor, cursor) } else { (cursor, anchor) };
+        let (start, end) = if anchor <= cursor {
+            (anchor, cursor)
+        } else {
+            (cursor, anchor)
+        };
         for i in start..=end {
             if matches!(items.get(i), Some(ListItem::Entry(_, _))) {
                 self.range_indices.insert(i);
@@ -95,7 +99,11 @@ impl SelectionState {
 
     /// Return selected indices sorted ascending (both manual and range)
     pub fn sorted_indices(&self) -> Vec<usize> {
-        let mut indices: Vec<usize> = self.selected_indices.union(&self.range_indices).copied().collect();
+        let mut indices: Vec<usize> = self
+            .selected_indices
+            .union(&self.range_indices)
+            .copied()
+            .collect();
         indices.sort();
         indices
     }

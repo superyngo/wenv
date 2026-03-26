@@ -77,7 +77,7 @@ pub struct Entry {
     pub line_number: Option<usize>,
     pub end_line: Option<usize>,
     #[serde(default)]
-    pub file_index: usize,  // NEW: index into ShellProfile.files
+    pub file_index: usize, // NEW: index into ShellProfile.files
 }
 
 impl Entry {

@@ -1,7 +1,7 @@
 //! Key event to action mapping
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::tui::state::AppMode;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 pub enum Action {
     NavigateUp,

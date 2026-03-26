@@ -26,12 +26,16 @@ pub struct FilesConfig {
     pub paths: Vec<String>,
 }
 
-fn default_language() -> String { "en".to_string() }
+fn default_language() -> String {
+    "en".to_string()
+}
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            ui: UiConfig { language: default_language() },
+            ui: UiConfig {
+                language: default_language(),
+            },
             files: HashMap::new(),
         }
     }
@@ -39,7 +43,9 @@ impl Default for Config {
 
 impl Default for UiConfig {
     fn default() -> Self {
-        Self { language: default_language() }
+        Self {
+            language: default_language(),
+        }
     }
 }
 

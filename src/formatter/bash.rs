@@ -1,8 +1,8 @@
 //! Bash configuration file formatter
 
-use crate::model::{Config, Entry, ShellType};
 #[cfg(test)]
 use crate::model::EntryType;
+use crate::model::{Config, Entry, ShellType};
 
 use super::Formatter;
 
@@ -23,7 +23,8 @@ impl Default for BashFormatter {
 
 impl Formatter for BashFormatter {
     fn format(&self, entries: &[Entry], _config: &Config) -> String {
-        entries.iter()
+        entries
+            .iter()
             .map(|e| self.format_entry(e))
             .collect::<Vec<_>>()
             .join("\n")

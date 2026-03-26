@@ -1,18 +1,20 @@
-use wenv::model::profile::{ShellProfile, ProfileFile, ListItem};
-use wenv::model::{Entry, EntryType, ShellType};
 use std::path::PathBuf;
+use wenv::model::profile::{ListItem, ProfileFile, ShellProfile};
+use wenv::model::{Entry, EntryType, ShellType};
 
 #[test]
 fn test_build_visible_list_collapsed() {
     let profile = ShellProfile {
         shell_type: ShellType::Bash,
-        files: vec![
-            ProfileFile::new_with_entries(
-                PathBuf::from("/etc/profile"),
-                vec![Entry::new(EntryType::Alias, "ll".into(), "alias ll='ls -la'".into())],
-                false, // collapsed
-            ),
-        ],
+        files: vec![ProfileFile::new_with_entries(
+            PathBuf::from("/etc/profile"),
+            vec![Entry::new(
+                EntryType::Alias,
+                "ll".into(),
+                "alias ll='ls -la'".into(),
+            )],
+            false, // collapsed
+        )],
     };
     let list = profile.build_visible_list();
     assert_eq!(list.len(), 1); // only file header, entries hidden
@@ -23,16 +25,18 @@ fn test_build_visible_list_collapsed() {
 fn test_build_visible_list_expanded() {
     let profile = ShellProfile {
         shell_type: ShellType::Bash,
-        files: vec![
-            ProfileFile::new_with_entries(
-                PathBuf::from("~/.bashrc"),
-                vec![
-                    Entry::new(EntryType::Alias, "ll".into(), "alias ll='ls -la'".into()),
-                    Entry::new(EntryType::Function, "greet".into(), "greet() { echo hi; }".into()),
-                ],
-                true, // expanded
-            ),
-        ],
+        files: vec![ProfileFile::new_with_entries(
+            PathBuf::from("~/.bashrc"),
+            vec![
+                Entry::new(EntryType::Alias, "ll".into(), "alias ll='ls -la'".into()),
+                Entry::new(
+                    EntryType::Function,
+                    "greet".into(),
+                    "greet() { echo hi; }".into(),
+                ),
+            ],
+            true, // expanded
+        )],
     };
     let list = profile.build_visible_list();
     assert_eq!(list.len(), 3); // header + 2 entries
@@ -48,12 +52,20 @@ fn test_build_visible_list_multiple_files() {
         files: vec![
             ProfileFile::new_with_entries(
                 PathBuf::from("/etc/profile"),
-                vec![Entry::new(EntryType::EnvVar, "PATH".into(), "export PATH=/usr/bin".into())],
+                vec![Entry::new(
+                    EntryType::EnvVar,
+                    "PATH".into(),
+                    "export PATH=/usr/bin".into(),
+                )],
                 true,
             ),
             ProfileFile::new_with_entries(
                 PathBuf::from("~/.bashrc"),
-                vec![Entry::new(EntryType::Alias, "ll".into(), "alias ll='ls -la'".into())],
+                vec![Entry::new(
+                    EntryType::Alias,
+                    "ll".into(),
+                    "alias ll='ls -la'".into(),
+                )],
                 false, // collapsed
             ),
         ],
@@ -84,9 +96,11 @@ fn test_toggle_all() {
 fn test_any_dirty() {
     let mut profile = ShellProfile {
         shell_type: ShellType::Bash,
-        files: vec![
-            ProfileFile::new_with_entries(PathBuf::from("~/.bashrc"), vec![], true),
-        ],
+        files: vec![ProfileFile::new_with_entries(
+            PathBuf::from("~/.bashrc"),
+            vec![],
+            true,
+        )],
     };
     assert!(!profile.any_dirty());
     profile.files[0].dirty = true;

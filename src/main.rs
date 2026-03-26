@@ -3,8 +3,8 @@
 use anyhow::Result;
 use clap::Parser;
 
-use wenv::cli::args::Cli;
 use wenv::cli::actions;
+use wenv::cli::args::Cli;
 use wenv::i18n;
 use wenv::model;
 use wenv::tui::TuiApp;
@@ -17,9 +17,15 @@ fn main() -> Result<()> {
     if cli.config {
         let config_path = wenv::Config::config_path();
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
-            if cfg!(windows) { "notepad".to_string() } else { "vi".to_string() }
+            if cfg!(windows) {
+                "notepad".to_string()
+            } else {
+                "vi".to_string()
+            }
         });
-        std::process::Command::new(&editor).arg(&config_path).status()?;
+        std::process::Command::new(&editor)
+            .arg(&config_path)
+            .status()?;
         return Ok(());
     }
 

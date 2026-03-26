@@ -1,8 +1,8 @@
 //! Fuzzy search state and matching
 
-use fuzzy_matcher::FuzzyMatcher;
-use fuzzy_matcher::skim::SkimMatcherV2;
 use crate::model::profile::ShellProfile;
+use fuzzy_matcher::skim::SkimMatcherV2;
+use fuzzy_matcher::FuzzyMatcher;
 
 pub struct SearchMatch {
     pub file_index: usize,
@@ -15,7 +15,7 @@ pub struct SearchState {
     pub query: String,
     matcher: SkimMatcherV2,
     pub matches: Vec<SearchMatch>,
-    pub selected: usize,  // index into position_order for navigation
+    pub selected: usize, // index into position_order for navigation
     /// Indices into `matches` sorted by file position (for sequential navigation)
     position_order: Vec<usize>,
 }
@@ -39,7 +39,9 @@ impl SearchState {
 
     pub fn update_matches(&mut self, profile: &ShellProfile) {
         self.matches.clear();
-        if self.query.is_empty() { return; }
+        if self.query.is_empty() {
+            return;
+        }
 
         for (fi, file) in profile.files.iter().enumerate() {
             for (ei, entry) in file.entries.iter().enumerate() {
@@ -106,14 +108,17 @@ impl SearchState {
 
     /// Returns (file_index, entry_index) of the currently selected match (position-ordered)
     pub fn current_match(&self) -> Option<(usize, usize)> {
-        self.position_order.get(self.selected)
+        self.position_order
+            .get(self.selected)
             .and_then(|&idx| self.matches.get(idx))
             .map(|m| (m.file_index, m.entry_index))
     }
 
     /// Check if a given (file_index, entry_index) is in the match set
     pub fn is_match(&self, fi: usize, ei: usize) -> bool {
-        self.matches.iter().any(|m| m.file_index == fi && m.entry_index == ei)
+        self.matches
+            .iter()
+            .any(|m| m.file_index == fi && m.entry_index == ei)
     }
 
     /// Check if a given (file_index, entry_index) is the currently selected match
@@ -130,8 +135,14 @@ impl SearchState {
     /// Get matched character indices for a given (file_index, entry_index).
     /// Returns indices split into (name_indices, value_indices) relative to
     /// the entry's name and value strings respectively.
-    pub fn matched_char_indices(&self, fi: usize, ei: usize, name_len: usize) -> Option<(Vec<usize>, Vec<usize>)> {
-        self.matches.iter()
+    pub fn matched_char_indices(
+        &self,
+        fi: usize,
+        ei: usize,
+        name_len: usize,
+    ) -> Option<(Vec<usize>, Vec<usize>)> {
+        self.matches
+            .iter()
             .find(|m| m.file_index == fi && m.entry_index == ei)
             .map(|m| {
                 let mut name_indices = Vec::new();

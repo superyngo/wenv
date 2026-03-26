@@ -1,15 +1,24 @@
 //! Entry manipulation operations
 
-use crate::model::profile::{ShellProfile, ListItem};
+use crate::model::profile::{ListItem, ShellProfile};
 use crate::model::Entry;
 use crate::tui::state::UndoSnapshot;
 
 /// Take an undo snapshot of all files (including dirty state)
 pub fn take_snapshot(profile: &ShellProfile) -> UndoSnapshot {
     UndoSnapshot {
-        file_states: profile.files.iter().map(|f| {
-            (f.path.clone(), f.content.clone(), f.entries.clone(), f.dirty)
-        }).collect(),
+        file_states: profile
+            .files
+            .iter()
+            .map(|f| {
+                (
+                    f.path.clone(),
+                    f.content.clone(),
+                    f.entries.clone(),
+                    f.dirty,
+                )
+            })
+            .collect(),
     }
 }
 
@@ -27,7 +36,11 @@ pub fn restore_snapshot(profile: &mut ShellProfile, snapshot: UndoSnapshot) {
 
 /// Delete entries identified by visible-list indices.
 /// Returns the deleted entries.
-pub fn delete_entries(profile: &mut ShellProfile, items: &[ListItem], indices: &[usize]) -> Vec<Entry> {
+pub fn delete_entries(
+    profile: &mut ShellProfile,
+    items: &[ListItem],
+    indices: &[usize],
+) -> Vec<Entry> {
     // Collect (file_index, entry_index) pairs, skip FileHeaders
     let mut targets: Vec<(usize, usize)> = Vec::new();
     for &idx in indices {
@@ -37,7 +50,8 @@ pub fn delete_entries(profile: &mut ShellProfile, items: &[ListItem], indices: &
     }
 
     // Group by file_index
-    let mut by_file: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    let mut by_file: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
     for (fi, ei) in &targets {
         by_file.entry(*fi).or_default().push(*ei);
     }
@@ -61,7 +75,11 @@ pub fn delete_entries(profile: &mut ShellProfile, items: &[ListItem], indices: &
 }
 
 /// Cut entries: delete and return them in order.
-pub fn cut_entries(profile: &mut ShellProfile, items: &[ListItem], indices: &[usize]) -> Vec<Entry> {
+pub fn cut_entries(
+    profile: &mut ShellProfile,
+    items: &[ListItem],
+    indices: &[usize],
+) -> Vec<Entry> {
     delete_entries(profile, items, indices)
 }
 

@@ -22,9 +22,12 @@ paths = ["~/.bashrc", "~/.profile"]
 #[test]
 fn test_config_roundtrip() {
     let mut config = wenv::Config::default();
-    config.files.insert("bash".to_string(), wenv::FilesConfig {
-        paths: vec!["~/.bashrc".to_string(), "/etc/profile".to_string()],
-    });
+    config.files.insert(
+        "bash".to_string(),
+        wenv::FilesConfig {
+            paths: vec!["~/.bashrc".to_string(), "/etc/profile".to_string()],
+        },
+    );
     let serialized = toml::to_string_pretty(&config).unwrap();
     let deserialized: wenv::Config = toml::from_str(&serialized).unwrap();
     assert_eq!(deserialized.files.get("bash").unwrap().paths.len(), 2);

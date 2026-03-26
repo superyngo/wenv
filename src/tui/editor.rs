@@ -5,15 +5,17 @@ use std::path::Path;
 
 pub fn get_editor() -> String {
     std::env::var("EDITOR").unwrap_or_else(|_| {
-        if cfg!(windows) { "notepad".into() } else { "vi".into() }
+        if cfg!(windows) {
+            "notepad".into()
+        } else {
+            "vi".into()
+        }
     })
 }
 
 /// Launch editor on a file. Returns Ok(true) if the file was modified.
 pub fn edit_file(path: &Path) -> anyhow::Result<bool> {
-    let before = std::fs::metadata(path)
-        .ok()
-        .and_then(|m| m.modified().ok());
+    let before = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
 
     let editor = get_editor();
     let status = std::process::Command::new(&editor).arg(path).status()?;
@@ -21,9 +23,7 @@ pub fn edit_file(path: &Path) -> anyhow::Result<bool> {
         return Err(anyhow::anyhow!("Editor exited with error"));
     }
 
-    let after = std::fs::metadata(path)
-        .ok()
-        .and_then(|m| m.modified().ok());
+    let after = std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
     Ok(before != after)
 }
 

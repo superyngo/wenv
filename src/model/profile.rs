@@ -1,13 +1,13 @@
 //! Multi-file profile model
 
-use std::path::PathBuf;
 use crate::model::{Entry, ShellType};
+use std::path::PathBuf;
 
 /// Item in the flat visible list for TUI navigation
 #[derive(Debug, Clone, PartialEq)]
 pub enum ListItem {
-    FileHeader(usize),        // index into ShellProfile.files
-    Entry(usize, usize),      // (file_index, entry_index)
+    FileHeader(usize),   // index into ShellProfile.files
+    Entry(usize, usize), // (file_index, entry_index)
 }
 
 /// A single configuration file with its parsed entries
@@ -99,15 +99,14 @@ impl ShellProfile {
 }
 
 use crate::config::path_resolver;
-use crate::parser::get_parser;
 use crate::model::Config;
+use crate::parser::get_parser;
 
-pub fn load_shell_profile(
-    config: &Config,
-    shell_type: ShellType,
-) -> anyhow::Result<ShellProfile> {
+pub fn load_shell_profile(config: &Config, shell_type: ShellType) -> anyhow::Result<ShellProfile> {
     let shell_key = shell_type.config_key();
-    let file_configs = config.files.get(shell_key)
+    let file_configs = config
+        .files
+        .get(shell_key)
         .ok_or_else(|| anyhow::anyhow!("No file list for {}", shell_key))?;
 
     let resolved = path_resolver::resolve_paths(&file_configs.paths);

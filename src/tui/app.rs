@@ -1,6 +1,5 @@
 //! TUI application core
 
-use std::io;
 use anyhow::Result;
 use crossterm::{
     event::{self, Event},
@@ -8,20 +7,21 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
+use std::io;
 
 use crate::i18n::Messages;
 use crate::model::profile::{ListItem, ShellProfile};
 use crate::tui::keys::{self, Action};
 use crate::tui::list;
 use crate::tui::search::SearchState;
-use crate::tui::state::{AppMode, ClipboardState, UndoSnapshot, MoveState};
 use crate::tui::selection::SelectionState;
+use crate::tui::state::{AppMode, ClipboardState, MoveState, UndoSnapshot};
 
 enum EditorRequest {
     None,
-    EditFile(usize),           // file index
-    EditEntry(usize, usize),   // file index, entry index
-    AddEntry(usize),           // target file index
+    EditFile(usize),         // file index
+    EditEntry(usize, usize), // file index, entry index
+    AddEntry(usize),         // target file index
 }
 
 pub struct TuiApp {
@@ -267,7 +267,9 @@ impl TuiApp {
                 if !targets.is_empty() {
                     self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
                     let cut = crate::tui::operations::cut_entries(
-                        &mut self.profile, &self.visible_items, &targets
+                        &mut self.profile,
+                        &self.visible_items,
+                        &targets,
                     );
                     let count = cut.len();
                     self.clipboard.entries = cut;
@@ -280,24 +282,23 @@ impl TuiApp {
                 let targets = self.get_operation_targets();
                 if !targets.is_empty() {
                     self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
-                    
+
                     let has_selection = !self.selection.is_empty();
-                    
+
                     // If from multi-selection, jump cursor to first selected row
                     if has_selection {
                         let first = self.selection.sorted_indices()[0];
                         self.cursor = first;
                     }
-                    
-                    let source_items: Vec<(usize, usize)> = targets.iter()
-                        .filter_map(|&idx| {
-                            match self.visible_items.get(idx) {
-                                Some(ListItem::Entry(fi, ei)) => Some((*fi, *ei)),
-                                _ => None,
-                            }
+
+                    let source_items: Vec<(usize, usize)> = targets
+                        .iter()
+                        .filter_map(|&idx| match self.visible_items.get(idx) {
+                            Some(ListItem::Entry(fi, ei)) => Some((*fi, *ei)),
+                            _ => None,
                         })
                         .collect();
-                    
+
                     if !source_items.is_empty() {
                         self.move_state = Some(MoveState {
                             source_items,
@@ -305,7 +306,8 @@ impl TuiApp {
                             from_selection: has_selection,
                         });
                         self.mode = AppMode::Moving;
-                        self.message = Some("Move mode: ↑↓ to position, Enter to drop, Esc to cancel".into());
+                        self.message =
+                            Some("Move mode: ↑↓ to position, Enter to drop, Esc to cancel".into());
                     }
                 }
             }
@@ -313,7 +315,10 @@ impl TuiApp {
                 if !self.clipboard.is_empty() {
                     self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
                     crate::tui::operations::paste_entries(
-                        &mut self.profile, &self.visible_items, self.cursor, &self.clipboard.entries
+                        &mut self.profile,
+                        &self.visible_items,
+                        self.cursor,
+                        &self.clipboard.entries,
                     );
                     self.rebuild_list();
                     self.message = Some(format!("Pasted {} entries", self.clipboard.entries.len()));
@@ -331,19 +336,17 @@ impl TuiApp {
                     self.message = Some("Nothing to undo".into());
                 }
             }
-            Action::Save => {
-                match crate::tui::operations::save_dirty_files(&mut self.profile) {
-                    Ok(saved) if !saved.is_empty() => {
-                        self.message = Some(format!("Saved: {}", saved.join(", ")));
-                    }
-                    Ok(_) => {
-                        self.message = Some("No unsaved changes".into());
-                    }
-                    Err(e) => {
-                        self.message = Some(format!("Save error: {}", e));
-                    }
+            Action::Save => match crate::tui::operations::save_dirty_files(&mut self.profile) {
+                Ok(saved) if !saved.is_empty() => {
+                    self.message = Some(format!("Saved: {}", saved.join(", ")));
                 }
-            }
+                Ok(_) => {
+                    self.message = Some("No unsaved changes".into());
+                }
+                Err(e) => {
+                    self.message = Some(format!("Save error: {}", e));
+                }
+            },
             Action::Confirm => {
                 match &self.mode {
                     AppMode::Searching => {
@@ -358,11 +361,18 @@ impl TuiApp {
                     AppMode::ConfirmDelete => {
                         let targets = self.get_operation_targets();
                         crate::tui::operations::delete_entries(
-                            &mut self.profile, &self.visible_items, &targets
+                            &mut self.profile,
+                            &self.visible_items,
+                            &targets,
                         );
                         self.selection.clear();
-                        let return_to_search = matches!(self.previous_mode, Some(AppMode::Searching));
-                        self.mode = if return_to_search { AppMode::Searching } else { AppMode::Normal };
+                        let return_to_search =
+                            matches!(self.previous_mode, Some(AppMode::Searching));
+                        self.mode = if return_to_search {
+                            AppMode::Searching
+                        } else {
+                            AppMode::Normal
+                        };
                         self.previous_mode = None;
                         self.rebuild_list();
                         if return_to_search {
@@ -387,8 +397,7 @@ impl TuiApp {
                         self.message = None;
                     }
                     AppMode::Moving => {
-                        let from_sel = self.move_state.as_ref()
-                            .is_some_and(|ms| ms.from_selection);
+                        let from_sel = self.move_state.as_ref().is_some_and(|ms| ms.from_selection);
                         // Restore from snapshot
                         if let Some(snapshot) = self.undo_snapshot.take() {
                             crate::tui::operations::restore_snapshot(&mut self.profile, snapshot);
@@ -398,15 +407,15 @@ impl TuiApp {
                         self.rebuild_list();
                         if from_sel {
                             // First Esc: keep selection, user can Esc again to clear
-                            self.message = Some("Move cancelled (Esc again to clear selection)".into());
+                            self.message =
+                                Some("Move cancelled (Esc again to clear selection)".into());
                         } else {
                             self.selection.clear();
                             self.message = Some("Move cancelled".into());
                         }
                     }
                     AppMode::ConfirmDelete => {
-                        if let Some(_snapshot) = self.undo_snapshot.take() {
-                        }
+                        if let Some(_snapshot) = self.undo_snapshot.take() {}
                         self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
                         self.message = Some("Cancelled".into());
                     }
@@ -429,10 +438,16 @@ impl TuiApp {
             Action::Quit => {
                 if self.profile.any_dirty() {
                     self.mode = AppMode::ConfirmQuit;
-                    let dirty: Vec<_> = self.profile.dirty_files().iter()
+                    let dirty: Vec<_> = self
+                        .profile
+                        .dirty_files()
+                        .iter()
                         .map(|f| f.display_name())
                         .collect();
-                    self.message = Some(format!("Unsaved changes in: {}. Quit? (y/n)", dirty.join(", ")));
+                    self.message = Some(format!(
+                        "Unsaved changes in: {}. Quit? (y/n)",
+                        dirty.join(", ")
+                    ));
                 } else {
                     self.should_quit = true;
                 }
@@ -561,8 +576,8 @@ impl TuiApp {
         if let Some(ms) = self.move_state.take() {
             // Determine target file and position from insertion_cursor
             let (target_fi, target_pos) = match self.visible_items.get(ms.insertion_cursor) {
-                Some(ListItem::Entry(fi, ei)) => (*fi, ei + 1),  // Insert after this entry
-                Some(ListItem::FileHeader(fi)) => (*fi, 0),       // Insert at start of file
+                Some(ListItem::Entry(fi, ei)) => (*fi, ei + 1), // Insert after this entry
+                Some(ListItem::FileHeader(fi)) => (*fi, 0),     // Insert at start of file
                 None => {
                     let fi = self.profile.files.len().saturating_sub(1);
                     (fi, self.profile.files[fi].entries.len())
@@ -579,7 +594,8 @@ impl TuiApp {
 
             // Remove source entries (reverse order to preserve indices)
             // Group by file, sort entry indices descending
-            let mut by_file: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+            let mut by_file: std::collections::HashMap<usize, Vec<usize>> =
+                std::collections::HashMap::new();
             for &(fi, ei) in &ms.source_items {
                 by_file.entry(fi).or_default().push(ei);
             }
@@ -603,14 +619,18 @@ impl TuiApp {
             // Insert at target
             for (i, mut entry) in entries_to_move.into_iter().enumerate() {
                 entry.file_index = target_fi;
-                self.profile.files[target_fi].entries.insert(adjusted_pos + i, entry);
+                self.profile.files[target_fi]
+                    .entries
+                    .insert(adjusted_pos + i, entry);
             }
             self.profile.files[target_fi].dirty = true;
 
             self.selection.clear();
             self.mode = AppMode::Normal;
             self.rebuild_list();
-            self.cursor = ms.insertion_cursor.min(self.visible_items.len().saturating_sub(1));
+            self.cursor = ms
+                .insertion_cursor
+                .min(self.visible_items.len().saturating_sub(1));
             self.message = Some("Moved".into());
         }
     }
@@ -631,7 +651,11 @@ impl TuiApp {
     }
 
     /// Edit a file: suspend TUI, open in $EDITOR, re-parse, resume
-    fn run_edit_file(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, fi: usize) -> Result<()> {
+    fn run_edit_file(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        fi: usize,
+    ) -> Result<()> {
         let path = self.profile.files[fi].path.clone();
         if !self.profile.files[fi].exists {
             self.message = Some(format!("File does not exist: {}", path.display()));
@@ -649,10 +673,14 @@ impl TuiApp {
                 let parser = crate::parser::get_parser(self.profile.shell_type);
                 let result = parser.parse(&content);
                 let file = &mut self.profile.files[fi];
-                file.entries = result.entries.into_iter().map(|mut e| {
-                    e.file_index = fi;
-                    e
-                }).collect();
+                file.entries = result
+                    .entries
+                    .into_iter()
+                    .map(|mut e| {
+                        e.file_index = fi;
+                        e
+                    })
+                    .collect();
                 file.content = content;
                 self.rebuild_list();
                 self.message = Some(format!("Reloaded: {}", path.display()));
@@ -668,7 +696,12 @@ impl TuiApp {
     }
 
     /// Edit an entry: write value to temp file, open in $EDITOR, update entry
-    fn run_edit_entry(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, fi: usize, ei: usize) -> Result<()> {
+    fn run_edit_entry(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        fi: usize,
+        ei: usize,
+    ) -> Result<()> {
         let suffix = match self.profile.shell_type {
             crate::model::ShellType::PowerShell => ".ps1",
             _ => ".sh",
@@ -716,7 +749,11 @@ impl TuiApp {
     }
 
     /// Add a new entry: open empty temp file in $EDITOR, parse result, insert
-    fn run_add_entry(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, fi: usize) -> Result<()> {
+    fn run_add_entry(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        fi: usize,
+    ) -> Result<()> {
         let suffix = match self.profile.shell_type {
             crate::model::ShellType::PowerShell => ".ps1",
             _ => ".sh",
@@ -732,13 +769,18 @@ impl TuiApp {
                 if !content.is_empty() {
                     let parser = crate::parser::get_parser(self.profile.shell_type);
                     let parsed = parser.parse(&content);
-                    let mut new_entries: Vec<_> = parsed.entries.into_iter().map(|mut e| {
-                        e.file_index = fi;
-                        e
-                    }).collect();
+                    let mut new_entries: Vec<_> = parsed
+                        .entries
+                        .into_iter()
+                        .map(|mut e| {
+                            e.file_index = fi;
+                            e
+                        })
+                        .collect();
 
                     if !new_entries.is_empty() {
-                        self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                        self.undo_snapshot =
+                            Some(crate::tui::operations::take_snapshot(&self.profile));
                         // Insert after current entry position, or at end of file
                         let insert_pos = match self.visible_items.get(self.cursor) {
                             Some(ListItem::Entry(_, ei)) => ei + 1,

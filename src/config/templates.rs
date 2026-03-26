@@ -20,9 +20,7 @@ pub fn default_paths(shell_key: &str) -> Option<Vec<String>> {
             "~/.zshrc".into(),
             "~/.zsh_aliases".into(),
         ]),
-        "powershell" => Some(vec![
-            "$PROFILE".into(),
-        ]),
+        "powershell" => Some(vec!["$PROFILE".into()]),
         _ => None,
     }
 }
@@ -30,10 +28,9 @@ pub fn default_paths(shell_key: &str) -> Option<Vec<String>> {
 pub fn generate_default_config(shell_key: &str) -> String {
     let mut config = Config::default();
     if let Some(paths) = default_paths(shell_key) {
-        config.files.insert(
-            shell_key.to_string(),
-            FilesConfig { paths },
-        );
+        config
+            .files
+            .insert(shell_key.to_string(), FilesConfig { paths });
     }
     toml::to_string_pretty(&config).unwrap()
 }

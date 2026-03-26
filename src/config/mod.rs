@@ -41,10 +41,9 @@ pub fn save_config(config: &Config) -> Result<()> {
 pub fn first_run_setup(shell_key: &str) -> Result<Config> {
     let mut config = Config::default();
     if let Some(paths) = templates::default_paths(shell_key) {
-        config.files.insert(
-            shell_key.to_string(),
-            FilesConfig { paths },
-        );
+        config
+            .files
+            .insert(shell_key.to_string(), FilesConfig { paths });
     }
     config.save()?;
     Ok(config)
@@ -56,10 +55,9 @@ pub fn ensure_shell_files(config: &mut Config, shell_key: &str) -> Result<bool> 
         return Ok(false);
     }
     if let Some(paths) = templates::default_paths(shell_key) {
-        config.files.insert(
-            shell_key.to_string(),
-            FilesConfig { paths },
-        );
+        config
+            .files
+            .insert(shell_key.to_string(), FilesConfig { paths });
         config.save()?;
         Ok(true)
     } else {

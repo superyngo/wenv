@@ -1,11 +1,11 @@
 //! TUI rendering
 
-use ratatui::prelude::*;
-use ratatui::widgets::*;
+use crate::model::profile::ListItem as ProfileListItem;
 use crate::model::EntryType;
 use crate::tui::app::TuiApp;
 use crate::tui::state::AppMode;
-use crate::model::profile::ListItem as ProfileListItem;
+use ratatui::prelude::*;
+use ratatui::widgets::*;
 
 /// Map entry type to its display color (replicating pre-redesign scheme)
 fn type_color(et: &EntryType) -> Color {
@@ -62,7 +62,11 @@ fn build_highlighted_spans<'a>(
         }
         if is_hl != current_is_hl {
             if !current.is_empty() {
-                let style = if current_is_hl { hl_style } else { normal_style };
+                let style = if current_is_hl {
+                    hl_style
+                } else {
+                    normal_style
+                };
                 spans.push(Span::styled(std::mem::take(&mut current), style));
             }
             current_is_hl = is_hl;
@@ -70,7 +74,11 @@ fn build_highlighted_spans<'a>(
         current.push(ch);
     }
     if !current.is_empty() {
-        let style = if current_is_hl { hl_style } else { normal_style };
+        let style = if current_is_hl {
+            hl_style
+        } else {
+            normal_style
+        };
         spans.push(Span::styled(current, style));
     }
     spans
@@ -80,19 +88,19 @@ pub fn draw(f: &mut Frame, app: &TuiApp) {
     let has_search = app.search.is_some();
     let constraints = if has_search {
         vec![
-            Constraint::Length(1),  // title bar
-            Constraint::Min(1),     // main list
-            Constraint::Length(1),  // search bar
-            Constraint::Length(1),  // status bar
+            Constraint::Length(1), // title bar
+            Constraint::Min(1),    // main list
+            Constraint::Length(1), // search bar
+            Constraint::Length(1), // status bar
         ]
     } else {
         vec![
-            Constraint::Length(1),  // title bar
-            Constraint::Min(1),     // main list
-            Constraint::Length(1),  // status bar
+            Constraint::Length(1), // title bar
+            Constraint::Min(1),    // main list
+            Constraint::Length(1), // status bar
         ]
     };
-    
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
@@ -100,7 +108,7 @@ pub fn draw(f: &mut Frame, app: &TuiApp) {
 
     draw_title(f, chunks[0], app);
     draw_list(f, chunks[1], app);
-    
+
     if has_search {
         draw_search_bar(f, chunks[2], app);
         draw_status(f, chunks[3], app);
@@ -139,18 +147,43 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
     }
 
     let header_area = Rect::new(area.x, area.y, area.width, header_height);
-    let list_area = Rect::new(area.x, area.y + header_height, area.width, area.height - header_height);
+    let list_area = Rect::new(
+        area.x,
+        area.y + header_height,
+        area.width,
+        area.height - header_height,
+    );
 
     // --- Fixed column header ---
     let header_line = Line::from(vec![
-        Span::raw("  "),  // indent to match entry prefix
-        Span::styled(format!("{:<20}", "NAME"), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::raw("  "), // indent to match entry prefix
+        Span::styled(
+            format!("{:<20}", "NAME"),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" "),
-        Span::styled(format!("{:<10}", "TYPE"), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{:<10}", "TYPE"),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" "),
-        Span::styled(format!("{:<10}", "LINE"), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{:<10}", "LINE"),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" "),
-        Span::styled("VALUE", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "VALUE",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]);
     let separator_line = Line::from(Span::styled(
         "─".repeat(area.width as usize),
@@ -167,26 +200,40 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
         .map(|(i, item)| {
             let is_cursor = i == app.cursor;
             let is_selected = app.selection.is_selected(i);
-            let is_move_target = app.mode == AppMode::Moving 
-                && app.move_state.as_ref().is_some_and(|ms| ms.insertion_cursor == i);
-            
+            let is_move_target = app.mode == AppMode::Moving
+                && app
+                    .move_state
+                    .as_ref()
+                    .is_some_and(|ms| ms.insertion_cursor == i);
+
             match item {
                 ProfileListItem::FileHeader(fi) => {
                     let file = &app.profile.files[*fi];
                     let icon = if file.expanded { "▼" } else { "▶" };
                     let dirty = if file.dirty { " ●" } else { "" };
-                    let text = format!("📜 {} {} [{} entries]{}", icon, file.display_name(), file.entry_count(), dirty);
-                    
+                    let text = format!(
+                        "📜 {} {} [{} entries]{}",
+                        icon,
+                        file.display_name(),
+                        file.entry_count(),
+                        dirty
+                    );
+
                     let mut style = if is_cursor {
-                        Style::default().bg(Color::DarkGray).fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .bg(Color::DarkGray)
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
                     };
-                    
+
                     if is_move_target {
                         style = style.bg(Color::Green).fg(Color::Black);
                     }
-                    
+
                     ratatui::widgets::ListItem::new(text).style(style)
                 }
                 ProfileListItem::Entry(fi, ei) => {
@@ -200,15 +247,20 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     let tc = type_color(&entry.entry_type);
 
                     // Search mode styling
-                    let is_search_match = app.search.as_ref()
-                        .is_some_and(|s| s.is_match(*fi, *ei));
-                    let is_search_selected = app.search.as_ref()
+                    let is_search_match = app.search.as_ref().is_some_and(|s| s.is_match(*fi, *ei));
+                    let is_search_selected = app
+                        .search
+                        .as_ref()
                         .is_some_and(|s| s.is_selected_match(*fi, *ei));
 
                     // Build line with per-character highlighting for search matches
                     let line = if app.mode == AppMode::Searching && is_search_match {
-                        let hl_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
-                        let char_indices = app.search.as_ref()
+                        let hl_style = Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD);
+                        let char_indices = app
+                            .search
+                            .as_ref()
                             .and_then(|s| s.matched_char_indices(*fi, *ei, entry.name.len()));
                         let (name_hl, value_hl) = char_indices.unwrap_or_default();
 
@@ -216,20 +268,36 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                         let value_normal = Style::default().fg(Color::Gray);
 
                         let mut spans = vec![Span::raw(prefix.to_string())];
-                        spans.extend(build_highlighted_spans(&name_str, &name_hl, name_normal, hl_style));
+                        spans.extend(build_highlighted_spans(
+                            &name_str,
+                            &name_hl,
+                            name_normal,
+                            hl_style,
+                        ));
                         spans.push(Span::raw(" "));
-                        spans.push(Span::styled(type_str, Style::default().fg(tc).add_modifier(Modifier::BOLD)));
+                        spans.push(Span::styled(
+                            type_str,
+                            Style::default().fg(tc).add_modifier(Modifier::BOLD),
+                        ));
                         spans.push(Span::raw(" "));
                         spans.push(Span::styled(line_str, Style::default().fg(Color::Gray)));
                         spans.push(Span::raw(" "));
-                        spans.extend(build_highlighted_spans(&value_str, &value_hl, value_normal, hl_style));
+                        spans.extend(build_highlighted_spans(
+                            &value_str,
+                            &value_hl,
+                            value_normal,
+                            hl_style,
+                        ));
                         Line::from(spans)
                     } else {
                         Line::from(vec![
                             Span::raw(prefix.to_string()),
                             Span::styled(name_str, Style::default().fg(Color::White)),
                             Span::raw(" "),
-                            Span::styled(type_str, Style::default().fg(tc).add_modifier(Modifier::BOLD)),
+                            Span::styled(
+                                type_str,
+                                Style::default().fg(tc).add_modifier(Modifier::BOLD),
+                            ),
                             Span::raw(" "),
                             Span::styled(line_str, Style::default().fg(Color::Gray)),
                             Span::raw(" "),
@@ -239,7 +307,10 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
 
                     let mut style = if app.mode == AppMode::Searching {
                         if is_search_selected {
-                            Style::default().bg(Color::Rgb(80, 80, 0)).fg(Color::White).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .bg(Color::Rgb(80, 80, 0))
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD)
                         } else if is_search_match {
                             Style::default().bg(Color::Rgb(50, 50, 90))
                         } else {
@@ -247,25 +318,32 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                         }
                     } else {
                         match (is_cursor, is_selected) {
-                            (true, true) => Style::default().bg(Color::Blue).fg(Color::White).add_modifier(Modifier::BOLD),
-                            (true, false) => Style::default().bg(Color::Blue).fg(Color::White).add_modifier(Modifier::BOLD),
-                            (false, true) => Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                            (true, true) => Style::default()
+                                .bg(Color::Blue)
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                            (true, false) => Style::default()
+                                .bg(Color::Blue)
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                            (false, true) => Style::default()
+                                .bg(Color::DarkGray)
+                                .add_modifier(Modifier::BOLD),
                             (false, false) => Style::default(),
                         }
                     };
-                    
+
                     if is_move_target {
                         style = style.bg(Color::Green).fg(Color::Black);
                     }
-                    
+
                     ratatui::widgets::ListItem::new(line).style(style)
                 }
             }
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::NONE));
+    let list = List::new(items).block(Block::default().borders(Borders::NONE));
 
     // Calculate scroll offset to keep cursor visible
     let visible_height = list_area.height as usize;
@@ -289,20 +367,26 @@ fn draw_status(f: &mut Frame, area: Rect, app: &TuiApp) {
         let total = app.profile.total_entries();
         let files = app.profile.files.len();
         if app.selection.selected_count() > 0 {
-            format!(" {} selected | {} files, {} entries | q:quit ?:help s:select", 
-                app.selection.selected_count(), files, total)
+            format!(
+                " {} selected | {} files, {} entries | q:quit ?:help s:select",
+                app.selection.selected_count(),
+                files,
+                total
+            )
         } else {
-            format!(" {} files, {} entries | q:quit ?:help 0/9:collapse/expand", files, total)
+            format!(
+                " {} files, {} entries | q:quit ?:help 0/9:collapse/expand",
+                files, total
+            )
         }
     };
-    let text = Paragraph::new(status)
-        .style(Style::default().bg(Color::DarkGray).fg(Color::White));
+    let text = Paragraph::new(status).style(Style::default().bg(Color::DarkGray).fg(Color::White));
     f.render_widget(text, area);
 }
 
 fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     let msg = app.message.as_deref().unwrap_or("Confirm? (y/n)");
-    
+
     // Center a popup
     let popup_width = (msg.len() as u16 + 4).min(area.width - 4);
     let popup_height = 3;
@@ -370,8 +454,11 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
         }),
     ]));
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Value:", Style::default().fg(Color::Yellow))));
-    
+    lines.push(Line::from(Span::styled(
+        "Value:",
+        Style::default().fg(Color::Yellow),
+    )));
+
     // Split value by \n and show each line
     for line in entry.value.split('\n') {
         lines.push(Line::from(Span::raw(format!("  {}", line))));
@@ -394,7 +481,7 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
         .title(" Entry Detail (Esc to close) ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
-    
+
     let text = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: false });
@@ -403,18 +490,33 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
 
 fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
     let lines = vec![
-        Line::from(Span::styled("Navigation", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Navigation",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from("  ↑/k ↓/j    Navigate up/down"),
         Line::from("  PgUp/PgDn  Jump half page"),
         Line::from("  Home/End    Jump to first/last"),
         Line::from("  Enter/Space Toggle file / View entry detail"),
         Line::from("  0/9         Collapse/Expand all files"),
         Line::from(""),
-        Line::from(Span::styled("Selection", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Selection",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from("  s           Toggle select entry"),
         Line::from("  Shift+↑/↓  Range select"),
         Line::from(""),
-        Line::from(Span::styled("Editing", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Editing",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from("  e           Edit (file or entry in $EDITOR)"),
         Line::from("  a           Add new entry via $EDITOR"),
         Line::from("  d           Delete selected entries"),
@@ -423,7 +525,12 @@ fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
         Line::from("  m           Move mode (drag to reposition)"),
         Line::from("  u           Undo last operation"),
         Line::from(""),
-        Line::from(Span::styled("Other", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Other",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
         Line::from("  /           Fuzzy search"),
         Line::from("  w/Ctrl+s    Save all changes"),
         Line::from("  q           Quit"),
@@ -442,7 +549,7 @@ fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
         .title(" Help (Esc to close) ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
-    
+
     let text = Paragraph::new(lines).block(block);
     f.render_widget(text, popup_area);
 }
