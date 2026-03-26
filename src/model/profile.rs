@@ -53,6 +53,44 @@ impl ProfileFile {
         self.entries.len()
     }
 
+    /// Recalculate line_number, end_line, and name for all entries.
+    /// Call after any mutation (add, delete, move, paste, edit, remark).
+    /// Entry.value uses separator format: N lines = N-1 '\n'.
+    /// When written to file, each value gets a '\n' terminator, so next entry
+    /// starts at (previous end_line + 1).
+    pub fn recalculate_line_numbers(&mut self) {
+        let mut current_line = 1usize;
+        for entry in &mut self.entries {
+            let line_count = entry.value.split('\n').count();
+            entry.line_number = Some(current_line);
+            let end = current_line + line_count - 1;
+            entry.end_line = if end > current_line {
+                Some(end)
+            } else {
+                entry.line_number
+            };
+
+            match entry.entry_type {
+                crate::model::EntryType::Comment => {
+                    entry.name = if end > current_line {
+                        format!("#L{}-L{}", current_line, end)
+                    } else {
+                        format!("#L{}", current_line)
+                    };
+                }
+                crate::model::EntryType::Code => {
+                    entry.name = if end > current_line {
+                        format!("L{}-L{}", current_line, end)
+                    } else {
+                        format!("L{}", current_line)
+                    };
+                }
+                _ => {} // Alias, Function, EnvVar, Source keep parsed names
+            }
+            current_line = end + 1;
+        }
+    }
+
     pub fn display_name(&self) -> String {
         let path_str = self.path.to_string_lossy();
         if let Some(home) = dirs::home_dir() {

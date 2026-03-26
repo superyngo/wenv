@@ -1,5 +1,6 @@
 //! TUI operations logic tests (without rendering)
 
+use std::path::PathBuf;
 use wenv::model::profile::{ListItem, ProfileFile, ShellProfile};
 use wenv::model::{Entry, EntryType, ShellType};
 use wenv::tui::operations;
@@ -207,4 +208,58 @@ fn test_any_dirty() {
 fn test_total_entries() {
     let profile = make_test_profile();
     assert_eq!(profile.total_entries(), 5);
+}
+
+#[test]
+fn test_recalculate_line_numbers_single_line_entries() {
+    let mut profile = make_test_profile();
+    // File 0 has 3 single-line entries
+    profile.files[0].recalculate_line_numbers();
+
+    assert_eq!(profile.files[0].entries[0].line_number, Some(1));
+    assert_eq!(profile.files[0].entries[0].end_line, Some(1));
+    assert_eq!(profile.files[0].entries[1].line_number, Some(2));
+    assert_eq!(profile.files[0].entries[1].end_line, Some(2));
+    assert_eq!(profile.files[0].entries[2].line_number, Some(3));
+    assert_eq!(profile.files[0].entries[2].end_line, Some(3));
+}
+
+#[test]
+fn test_recalculate_line_numbers_multiline_entries() {
+    let mut file = ProfileFile::new(PathBuf::from("/test"), true);
+    file.entries = vec![
+        make_test_entry("foo", "foo() {\n  echo hi\n}", EntryType::Function, 0),
+        make_test_entry("bar", "alias bar='baz'", EntryType::Alias, 0),
+    ];
+    file.recalculate_line_numbers();
+
+    assert_eq!(file.entries[0].line_number, Some(1));
+    assert_eq!(file.entries[0].end_line, Some(3)); // 3 lines: foo() {\n  echo hi\n}
+    assert_eq!(file.entries[1].line_number, Some(4));
+    assert_eq!(file.entries[1].end_line, Some(4));
+}
+
+#[test]
+fn test_recalculate_updates_code_comment_names() {
+    let mut file = ProfileFile::new(PathBuf::from("/test"), true);
+    file.entries = vec![
+        make_test_entry("alias1", "alias a='b'", EntryType::Alias, 0),
+        {
+            let mut e = make_test_entry("L99", "echo hello", EntryType::Code, 0);
+            e.line_number = Some(99); // stale
+            e
+        },
+        {
+            let mut e = make_test_entry("#L99-L100", "# comment\n# more", EntryType::Comment, 0);
+            e.line_number = Some(99); // stale
+            e
+        },
+    ];
+    file.recalculate_line_numbers();
+
+    assert_eq!(file.entries[1].name, "L2");
+    assert_eq!(file.entries[1].line_number, Some(2));
+    assert_eq!(file.entries[2].name, "#L3-L4");
+    assert_eq!(file.entries[2].line_number, Some(3));
+    assert_eq!(file.entries[2].end_line, Some(4));
 }

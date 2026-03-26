@@ -599,6 +599,7 @@ impl TuiApp {
             for &(fi, ei) in &ms.source_items {
                 by_file.entry(fi).or_default().push(ei);
             }
+            let source_files: Vec<usize> = by_file.keys().cloned().collect();
             for (fi, mut indices) in by_file {
                 indices.sort();
                 indices.dedup();
@@ -624,6 +625,15 @@ impl TuiApp {
                     .insert(adjusted_pos + i, entry);
             }
             self.profile.files[target_fi].dirty = true;
+
+            // Recalculate line numbers for affected files
+            let mut affected_files: std::collections::HashSet<usize> = source_files.into_iter().collect();
+            affected_files.insert(target_fi);
+            for fi in affected_files {
+                if fi < self.profile.files.len() {
+                    self.profile.files[fi].recalculate_line_numbers();
+                }
+            }
 
             self.selection.clear();
             self.mode = AppMode::Normal;
@@ -726,12 +736,15 @@ impl TuiApp {
                         entry.name = new_entry.name;
                         entry.value = new_entry.value;
                         self.profile.files[fi].dirty = true;
+                        self.profile.files[fi].recalculate_line_numbers();
                         self.rebuild_list();
                         self.message = Some("Entry updated".into());
                     } else {
                         // Content was emptied or unparseable
                         self.profile.files[fi].entries[ei].value = new_content;
                         self.profile.files[fi].dirty = true;
+                        self.profile.files[fi].recalculate_line_numbers();
+                        self.rebuild_list();
                         self.message = Some("Entry value updated (raw)".into());
                     }
                 } else {
@@ -793,6 +806,7 @@ impl TuiApp {
                         }
                         self.profile.files[fi].dirty = true;
                         self.profile.files[fi].expanded = true;
+                        self.profile.files[fi].recalculate_line_numbers();
                         self.rebuild_list();
                         self.message = Some(format!("Added {} entries", count));
                     }

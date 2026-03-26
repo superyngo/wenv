@@ -57,6 +57,7 @@ pub fn delete_entries(
     }
 
     let mut deleted = Vec::new();
+    let affected_files: Vec<usize> = by_file.keys().cloned().collect();
 
     // Process each file, removing entries in reverse index order
     for (fi, mut entry_indices) in by_file {
@@ -69,6 +70,10 @@ pub fn delete_entries(
             }
         }
         profile.files[fi].dirty = true;
+    }
+
+    for fi in affected_files {
+        profile.files[fi].recalculate_line_numbers();
     }
 
     deleted
@@ -107,6 +112,7 @@ pub fn paste_entries(profile: &mut ShellProfile, items: &[ListItem], at: usize, 
         profile.files[fi].entries.insert(insert_pos + i, e);
     }
     profile.files[fi].dirty = true;
+    profile.files[fi].recalculate_line_numbers();
 }
 
 /// Save all dirty files. Reconstructs content from entry values.
@@ -118,6 +124,8 @@ pub fn save_dirty_files(profile: &mut ShellProfile) -> anyhow::Result<Vec<String
         if !file.dirty {
             continue;
         }
+
+        file.recalculate_line_numbers();
 
         // Reconstruct file content from entries
         let mut content = String::new();
