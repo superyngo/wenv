@@ -603,12 +603,11 @@ impl TuiApp {
                             let shell_key = self.shell_key.clone();
 
                             // Use helper to find matching pattern and all affected paths
-                            let match_result =
-                                crate::tui::operations::find_matching_config_pattern(
-                                    &self.config,
-                                    &shell_key,
-                                    &path,
-                                );
+                            let match_result = crate::tui::operations::find_matching_config_pattern(
+                                &self.config,
+                                &shell_key,
+                                &path,
+                            );
 
                             let (raw_pattern, affected_paths) = match match_result {
                                 Some((pat, paths)) => (Some(pat), paths),

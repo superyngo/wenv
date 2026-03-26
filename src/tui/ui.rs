@@ -140,9 +140,16 @@ pub fn draw(f: &mut Frame, app: &TuiApp) {
 
 fn draw_title(f: &mut Frame, area: Rect, app: &TuiApp) {
     let shell_name = app.profile.shell_type.name();
-    let title = format!(" wenv — {} ", shell_name);
+    let version = env!("CARGO_PKG_VERSION");
+    let prefix_len = (shell_name.len() + 16 + version.len()) as u16;
+    let dash_count = area.width.saturating_sub(prefix_len) as usize;
+    let line = Line::from(vec![
+        Span::raw(format!(" wenv — {} ", shell_name)),
+        Span::raw("─".repeat(dash_count)),
+        Span::styled(format!(" v{} ", version), Style::default().fg(Color::Gray)),
+    ]);
     let block = Block::default().style(Style::default().bg(Color::Blue).fg(Color::White));
-    let text = Paragraph::new(title).block(block);
+    let text = Paragraph::new(line).block(block);
     f.render_widget(text, area);
 }
 
