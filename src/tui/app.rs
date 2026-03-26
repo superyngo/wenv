@@ -42,6 +42,8 @@ pub struct TuiApp {
     pub config: crate::model::Config,
     pub shell_key: String,
     pub pending_remove_fi: Option<usize>,
+    pub text_input: Option<crate::tui::state::TextInputState>,
+    pub pending_create_path: Option<(String, std::path::PathBuf)>,
 }
 
 impl TuiApp {
@@ -70,6 +72,8 @@ impl TuiApp {
             config,
             shell_key,
             pending_remove_fi: None,
+            text_input: None,
+            pending_create_path: None,
         })
     }
 
@@ -484,8 +488,61 @@ impl TuiApp {
                         self.mode = AppMode::Normal;
                         self.previous_mode = None;
                     }
+                    AppMode::ConfirmCreateFile => {
+                        if let Some((raw_path, path)) = self.pending_create_path.take() {
+                            if let Some(parent) = path.parent() {
+                                if let Err(e) = std::fs::create_dir_all(parent) {
+                                    self.message = Some(format!("Failed to create directory: {}", e));
+                                    self.mode = AppMode::Normal;
+                                    return Ok(EditorRequest::None);
+                                }
+                            }
+                            match std::fs::File::create(&path) {
+                                Ok(_) => {
+                                    self.add_file_to_config_and_profile(raw_path, path)?;
+                                }
+                                Err(e) => {
+                                    self.message = Some(format!("Failed to create: {}", e));
+                                }
+                            }
+                        }
+                        self.mode = AppMode::Normal;
+                    }
                     AppMode::ShowingDetail | AppMode::ShowingHelp => {
                         self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+                    }
+                    AppMode::TextInput => {
+                        if let Some(input) = self.text_input.take() {
+                            match input.purpose {
+                                crate::tui::state::InputPurpose::AddFilePath => {
+                                    let raw_path = input.value.trim().to_string();
+                                    if raw_path.is_empty() {
+                                        self.mode = AppMode::Normal;
+                                        return Ok(EditorRequest::None);
+                                    }
+
+                                    let expanded = crate::config::path_resolver::expand_env_vars(
+                                        &crate::config::path_resolver::expand_tilde(&raw_path),
+                                    );
+                                    let path = std::path::PathBuf::from(&expanded);
+
+                                    if self.profile.files.iter().any(|f| f.path == path) {
+                                        self.message = Some("Path already in config".into());
+                                        self.mode = AppMode::Normal;
+                                        return Ok(EditorRequest::None);
+                                    }
+
+                                    if !path.exists() {
+                                        self.pending_create_path = Some((raw_path, path));
+                                        self.mode = AppMode::ConfirmCreateFile;
+                                        self.message = Some("File doesn't exist. Create? (y/n)".into());
+                                    } else {
+                                        self.add_file_to_config_and_profile(raw_path, path)?;
+                                        self.mode = AppMode::Normal;
+                                    }
+                                }
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -535,10 +592,13 @@ impl TuiApp {
                         }
                     }
                     AppMode::TextInput => {
+                        self.text_input = None;
                         self.mode = AppMode::Normal;
+                        self.message = None;
                     }
                     AppMode::ConfirmRemoveFile | AppMode::ConfirmCreateFile => {
                         self.pending_remove_fi = None;
+                        self.pending_create_path = None;
                         self.mode = AppMode::Normal;
                         self.message = Some("Cancelled".into());
                     }
@@ -594,12 +654,43 @@ impl TuiApp {
                 self.message = Some("Remark: not yet implemented".into());
             }
             Action::AddFile => {
-                self.message = Some("Add file: not yet implemented".into());
+                self.text_input = Some(crate::tui::state::TextInputState {
+                    prompt: "New file path: ".into(),
+                    value: String::new(),
+                    cursor_pos: 0,
+                    purpose: crate::tui::state::InputPurpose::AddFilePath,
+                });
+                self.mode = AppMode::TextInput;
+                self.message = None;
             }
-            Action::TextInputChar(_)
-            | Action::TextInputBackspace
-            | Action::TextInputLeft
-            | Action::TextInputRight => {}
+            Action::TextInputChar(c) => {
+                if let Some(ref mut input) = self.text_input {
+                    input.value.insert(input.cursor_pos, c);
+                    input.cursor_pos += 1;
+                }
+            }
+            Action::TextInputBackspace => {
+                if let Some(ref mut input) = self.text_input {
+                    if input.cursor_pos > 0 {
+                        input.cursor_pos -= 1;
+                        input.value.remove(input.cursor_pos);
+                    }
+                }
+            }
+            Action::TextInputLeft => {
+                if let Some(ref mut input) = self.text_input {
+                    if input.cursor_pos > 0 {
+                        input.cursor_pos -= 1;
+                    }
+                }
+            }
+            Action::TextInputRight => {
+                if let Some(ref mut input) = self.text_input {
+                    if input.cursor_pos < input.value.len() {
+                        input.cursor_pos += 1;
+                    }
+                }
+            }
             _ => {
                 // Other actions not implemented yet
             }
@@ -641,6 +732,51 @@ impl TuiApp {
             Some(ListItem::Entry(fi, _)) => *fi,
             None => 0,
         }
+    }
+
+    fn add_file_to_config_and_profile(
+        &mut self,
+        raw_path: String,
+        path: std::path::PathBuf,
+    ) -> anyhow::Result<()> {
+        let shell_key = self.shell_key.clone();
+        let files_config = self
+            .config
+            .files
+            .entry(shell_key)
+            .or_insert_with(|| crate::model::FilesConfig { paths: vec![] });
+        files_config.paths.push(raw_path);
+        self.config.save()?;
+
+        let fi = self.profile.files.len();
+        let exists = path.exists();
+        let content = if exists {
+            std::fs::read_to_string(&path).unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        let parser = crate::parser::get_parser(self.profile.shell_type);
+        let parsed = parser.parse(&content);
+        let entries: Vec<_> = parsed
+            .entries
+            .into_iter()
+            .map(|mut e| {
+                e.file_index = fi;
+                e
+            })
+            .collect();
+
+        let mut file = crate::model::profile::ProfileFile::new(path.clone(), exists);
+        file.entries = entries;
+        file.content = content;
+        file.expanded = true;
+        file.writable = crate::utils::path::check_writable(&path);
+        self.profile.files.push(file);
+
+        self.rebuild_list();
+        self.message = Some("File added to config".into());
+        Ok(())
     }
 
     /// Check if the file under the cursor is writable

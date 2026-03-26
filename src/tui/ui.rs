@@ -86,11 +86,12 @@ fn build_highlighted_spans<'a>(
 
 pub fn draw(f: &mut Frame, app: &TuiApp) {
     let has_search = app.search.is_some();
-    let constraints = if has_search {
+    let has_text_input = app.text_input.is_some();
+    let constraints = if has_search || has_text_input {
         vec![
             Constraint::Length(1), // title bar
             Constraint::Min(1),    // main list
-            Constraint::Length(1), // search bar
+            Constraint::Length(1), // search/text input bar
             Constraint::Length(1), // status bar
         ]
     } else {
@@ -112,13 +113,17 @@ pub fn draw(f: &mut Frame, app: &TuiApp) {
     if has_search {
         draw_search_bar(f, chunks[2], app);
         draw_status(f, chunks[3], app);
+    } else if has_text_input {
+        draw_text_input_bar(f, chunks[2], app);
+        draw_status(f, chunks[3], app);
     } else {
         draw_status(f, chunks[2], app);
     }
 
     // Draw confirmation popups on top
     match &app.mode {
-        AppMode::ConfirmDelete | AppMode::ConfirmQuit => {
+        AppMode::ConfirmDelete | AppMode::ConfirmQuit 
+        | AppMode::ConfirmRemoveFile | AppMode::ConfirmCreateFile => {
             draw_confirm_popup(f, f.size(), app);
         }
         AppMode::ShowingDetail => {
@@ -450,6 +455,17 @@ fn draw_search_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
         let text = format!(" / {}  [{} matches]", search.query, match_count);
         let style = Style::default().bg(Color::Black).fg(Color::Yellow);
         f.render_widget(Paragraph::new(text).style(style), area);
+    }
+}
+
+fn draw_text_input_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
+    if let Some(ref input) = app.text_input {
+        let text = format!("{}{}", input.prompt, input.value);
+        let style = Style::default().fg(Color::Cyan);
+        f.render_widget(Paragraph::new(text).style(style), area);
+        // Position cursor
+        let cursor_x = area.x + (input.prompt.len() + input.cursor_pos) as u16;
+        f.set_cursor(cursor_x, area.y);
     }
 }
 
