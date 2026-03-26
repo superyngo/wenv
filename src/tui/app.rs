@@ -647,11 +647,132 @@ impl TuiApp {
                 self.mode = AppMode::ShowingHelp;
             }
             Action::Remark => {
-                if !self.is_current_file_writable() {
+                let targets = self.get_operation_targets();
+                if targets.is_empty() {
+                    return Ok(EditorRequest::None);
+                }
+
+                // Collect target entries (skip FileHeaders)
+                let target_entries: Vec<(usize, usize)> = targets
+                    .iter()
+                    .filter_map(|&idx| match self.visible_items.get(idx) {
+                        Some(ListItem::Entry(fi, ei)) => Some((*fi, *ei)),
+                        _ => None,
+                    })
+                    .collect();
+
+                if target_entries.is_empty() {
+                    return Ok(EditorRequest::None);
+                }
+
+                // Check all affected files are writable
+                let affected_files: std::collections::HashSet<usize> =
+                    target_entries.iter().map(|(fi, _)| *fi).collect();
+
+                if affected_files
+                    .iter()
+                    .any(|&fi| !self.profile.files[fi].writable)
+                {
                     self.message = Some("File is read-only".into());
                     return Ok(EditorRequest::None);
                 }
-                self.message = Some("Remark: not yet implemented".into());
+
+                // Determine if all targets are Comments
+                let all_comment = target_entries.iter().all(|(fi, ei)| {
+                    self.profile.files[*fi].entries[*ei].entry_type
+                        == crate::model::EntryType::Comment
+                });
+
+                // Take undo snapshot
+                self.undo_snapshot =
+                    Some(crate::tui::operations::take_snapshot(&self.profile));
+
+                // Track original range for selection restoration
+                let first_visible = targets[0];
+                let last_visible = *targets.last().unwrap();
+
+                if all_comment {
+                    // UNCOMMENT: process in reverse order for stable indices
+                    let mut reversed = target_entries.clone();
+                    reversed.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.cmp(&a.0)));
+
+                    let mut new_entry_pairs: Vec<(usize, usize)> = Vec::new();
+
+                    for (fi, ei) in reversed {
+                        let value = self.profile.files[fi].entries[ei].value.clone();
+                        let uncommented =
+                            crate::tui::operations::uncomment_value(&value);
+                        let parser =
+                            crate::parser::get_parser(self.profile.shell_type);
+                        let parsed = parser.parse(&uncommented);
+                        let count = parsed.entries.len();
+                        let new_entries: Vec<_> = parsed
+                            .entries
+                            .into_iter()
+                            .map(|mut e| {
+                                e.file_index = fi;
+                                e
+                            })
+                            .collect();
+                        crate::tui::operations::replace_entry_with_parsed(
+                            &mut self.profile.files[fi],
+                            ei,
+                            new_entries,
+                            fi,
+                        );
+                        // Since we process in reverse, ei is stable for entries we already recorded
+                        // (they're at higher indices). The new entries occupy ei..ei+count
+                        for j in 0..count {
+                            new_entry_pairs.push((fi, ei + j));
+                        }
+                    }
+                    self.message = Some("Uncommented".into());
+
+                    // Rebuild and select new entries
+                    self.rebuild_list();
+                    self.selection.clear();
+                    for (idx, item) in self.visible_items.iter().enumerate() {
+                        if let ListItem::Entry(fi, ei) = item {
+                            if new_entry_pairs.contains(&(*fi, *ei)) {
+                                self.selection.toggle(idx, &self.visible_items);
+                            }
+                        }
+                    }
+                } else {
+                    // COMMENT: add "# " to non-Comment entries
+                    for (fi, ei) in &target_entries {
+                        if self.profile.files[*fi].entries[*ei].entry_type
+                            != crate::model::EntryType::Comment
+                        {
+                            let value =
+                                self.profile.files[*fi].entries[*ei].value.clone();
+                            let commented =
+                                crate::tui::operations::comment_value(&value);
+                            let entry = &mut self.profile.files[*fi].entries[*ei];
+                            entry.value = commented;
+                            entry.entry_type = crate::model::EntryType::Comment;
+                            self.profile.files[*fi].dirty = true;
+                        }
+                    }
+                    for &fi in &affected_files {
+                        self.profile.files[fi].recalculate_line_numbers();
+                    }
+                    self.message = Some("Commented".into());
+
+                    // Rebuild and restore selection range (comment path - entry count doesn't change)
+                    self.rebuild_list();
+                    self.selection.clear();
+                    let new_end =
+                        last_visible.min(self.visible_items.len().saturating_sub(1));
+                    for idx in first_visible..=new_end {
+                        if matches!(
+                            self.visible_items.get(idx),
+                            Some(ListItem::Entry(_, _))
+                        ) {
+                            self.selection.toggle(idx, &self.visible_items);
+                        }
+                    }
+                }
             }
             Action::AddFile => {
                 self.text_input = Some(crate::tui::state::TextInputState {

@@ -354,3 +354,57 @@ fn test_copy_entries() {
     // No file should be dirty after copy
     assert!(!profile.files.iter().any(|f| f.dirty));
 }
+
+#[test]
+fn test_comment_value_adds_hash() {
+    use wenv::tui::operations::{comment_value, uncomment_value};
+
+    let input = "alias foo='bar'\nexport PATH='/bin'";
+    let result = comment_value(input);
+    assert_eq!(result, "# alias foo='bar'\n# export PATH='/bin'");
+}
+
+#[test]
+fn test_comment_value_preserves_blank_lines() {
+    use wenv::tui::operations::comment_value;
+
+    let input = "echo hello\n\necho world";
+    let result = comment_value(input);
+    assert_eq!(result, "# echo hello\n\n# echo world");
+}
+
+#[test]
+fn test_comment_value_double_comments() {
+    use wenv::tui::operations::comment_value;
+
+    let input = "# already commented\necho hello";
+    let result = comment_value(input);
+    assert_eq!(result, "# # already commented\n# echo hello");
+}
+
+#[test]
+fn test_uncomment_value_removes_hash() {
+    use wenv::tui::operations::uncomment_value;
+
+    let input = "# alias foo='bar'\n# export PATH='/bin'";
+    let result = uncomment_value(input);
+    assert_eq!(result, "alias foo='bar'\nexport PATH='/bin'");
+}
+
+#[test]
+fn test_uncomment_value_preserves_blank_lines() {
+    use wenv::tui::operations::uncomment_value;
+
+    let input = "# echo hello\n\n# echo world";
+    let result = uncomment_value(input);
+    assert_eq!(result, "echo hello\n\necho world");
+}
+
+#[test]
+fn test_uncomment_value_handles_no_space() {
+    use wenv::tui::operations::uncomment_value;
+
+    let input = "#echo hello";
+    let result = uncomment_value(input);
+    assert_eq!(result, "echo hello");
+}

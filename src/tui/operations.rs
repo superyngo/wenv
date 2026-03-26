@@ -163,3 +163,37 @@ pub fn replace_entry_with_parsed(
     file.recalculate_line_numbers();
     count
 }
+
+/// Add "# " to all non-blank lines (including already-commented lines).
+pub fn comment_value(value: &str) -> String {
+    value
+        .split('\n')
+        .map(|line| {
+            if line.trim().is_empty() {
+                line.to_string()
+            } else {
+                format!("# {}", line)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Remove leading "# " or "#" from non-blank lines.
+pub fn uncomment_value(value: &str) -> String {
+    value
+        .split('\n')
+        .map(|line| {
+            if line.trim().is_empty() {
+                line.to_string()
+            } else if line.starts_with("# ") {
+                line[2..].to_string()
+            } else if line.starts_with('#') {
+                line[1..].to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
