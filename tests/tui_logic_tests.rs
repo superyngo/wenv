@@ -408,3 +408,146 @@ fn test_uncomment_value_handles_no_space() {
     let result = uncomment_value(input);
     assert_eq!(result, "echo hello");
 }
+
+#[test]
+fn test_push_undo_caps_at_max() {
+    use std::collections::VecDeque;
+    use wenv::tui::state::UndoSnapshot;
+
+    let mut undo_stack: VecDeque<UndoSnapshot> = VecDeque::new();
+    let mut redo_stack: Vec<UndoSnapshot> = Vec::new();
+
+    // Push 21 snapshots
+    for _ in 0..21 {
+        let profile = make_test_profile();
+        let snapshot = operations::take_snapshot(&profile);
+        operations::push_undo(&mut undo_stack, &mut redo_stack, snapshot);
+    }
+
+    assert_eq!(undo_stack.len(), 20); // capped at MAX_UNDO_HISTORY
+}
+
+#[test]
+fn test_push_undo_clears_redo() {
+    use std::collections::VecDeque;
+    use wenv::tui::state::UndoSnapshot;
+
+    let mut undo_stack: VecDeque<UndoSnapshot> = VecDeque::new();
+    let mut redo_stack: Vec<UndoSnapshot> = Vec::new();
+
+    let profile = make_test_profile();
+    let s1 = operations::take_snapshot(&profile);
+    operations::push_undo(&mut undo_stack, &mut redo_stack, s1);
+
+    // Simulate undo by moving to redo
+    if let Some(s) = undo_stack.pop_back() {
+        redo_stack.push(s);
+    }
+    assert_eq!(redo_stack.len(), 1);
+
+    // New operation should clear redo
+    let s2 = operations::take_snapshot(&profile);
+    operations::push_undo(&mut undo_stack, &mut redo_stack, s2);
+    assert_eq!(redo_stack.len(), 0);
+}
+
+#[test]
+fn test_multi_step_undo() {
+    use std::collections::VecDeque;
+    use wenv::tui::state::UndoSnapshot;
+
+    let mut profile = make_test_profile();
+    let mut undo_stack: VecDeque<UndoSnapshot> = VecDeque::new();
+    let mut redo_stack: Vec<UndoSnapshot> = Vec::new();
+    let items = profile.build_visible_list();
+
+    // Operation 1: delete entry "ll"
+    let snap1 = operations::take_snapshot(&profile);
+    operations::push_undo(&mut undo_stack, &mut redo_stack, snap1);
+    operations::delete_entries(&mut profile, &items, &[1]);
+    assert_eq!(profile.files[0].entries.len(), 2);
+
+    // Operation 2: delete entry "gs" (now at index 1 after rebuild)
+    let items = profile.build_visible_list();
+    let snap2 = operations::take_snapshot(&profile);
+    operations::push_undo(&mut undo_stack, &mut redo_stack, snap2);
+    operations::delete_entries(&mut profile, &items, &[1]);
+    assert_eq!(profile.files[0].entries.len(), 1);
+
+    // Undo operation 2
+    let current = operations::take_snapshot(&profile);
+    redo_stack.push(current);
+    let snapshot = undo_stack.pop_back().unwrap();
+    operations::restore_snapshot(&mut profile, snapshot);
+    assert_eq!(profile.files[0].entries.len(), 2);
+
+    // Undo operation 1
+    let current = operations::take_snapshot(&profile);
+    redo_stack.push(current);
+    let snapshot = undo_stack.pop_back().unwrap();
+    operations::restore_snapshot(&mut profile, snapshot);
+    assert_eq!(profile.files[0].entries.len(), 3);
+    assert_eq!(profile.files[0].entries[0].name, "ll");
+}
+
+#[test]
+fn test_redo_after_undo() {
+    use std::collections::VecDeque;
+    use wenv::tui::state::UndoSnapshot;
+
+    let mut profile = make_test_profile();
+    let mut undo_stack: VecDeque<UndoSnapshot> = VecDeque::new();
+    let mut redo_stack: Vec<UndoSnapshot> = Vec::new();
+    let items = profile.build_visible_list();
+
+    // Delete "ll"
+    let snap = operations::take_snapshot(&profile);
+    operations::push_undo(&mut undo_stack, &mut redo_stack, snap);
+    operations::delete_entries(&mut profile, &items, &[1]);
+    assert_eq!(profile.files[0].entries.len(), 2);
+
+    // Undo
+    let current = operations::take_snapshot(&profile);
+    redo_stack.push(current);
+    let snapshot = undo_stack.pop_back().unwrap();
+    operations::restore_snapshot(&mut profile, snapshot);
+    assert_eq!(profile.files[0].entries.len(), 3);
+    assert_eq!(redo_stack.len(), 1);
+
+    // Redo
+    let current = operations::take_snapshot(&profile);
+    undo_stack.push_back(current);
+    let snapshot = redo_stack.pop().unwrap();
+    operations::restore_snapshot(&mut profile, snapshot);
+    assert_eq!(profile.files[0].entries.len(), 2); // back to deleted state
+}
+
+#[test]
+fn test_redo_cleared_by_new_operation() {
+    use std::collections::VecDeque;
+    use wenv::tui::state::UndoSnapshot;
+
+    let mut profile = make_test_profile();
+    let mut undo_stack: VecDeque<UndoSnapshot> = VecDeque::new();
+    let mut redo_stack: Vec<UndoSnapshot> = Vec::new();
+    let items = profile.build_visible_list();
+
+    // Delete → undo → redo_stack has 1
+    let snap = operations::take_snapshot(&profile);
+    operations::push_undo(&mut undo_stack, &mut redo_stack, snap);
+    operations::delete_entries(&mut profile, &items, &[1]);
+
+    let current = operations::take_snapshot(&profile);
+    redo_stack.push(current);
+    let snapshot = undo_stack.pop_back().unwrap();
+    operations::restore_snapshot(&mut profile, snapshot);
+    assert_eq!(redo_stack.len(), 1);
+
+    // New operation should clear redo
+    let items = profile.build_visible_list();
+    let snap = operations::take_snapshot(&profile);
+    operations::push_undo(&mut undo_stack, &mut redo_stack, snap);
+    operations::delete_entries(&mut profile, &items, &[1]);
+
+    assert_eq!(redo_stack.len(), 0); // cleared
+}
