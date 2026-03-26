@@ -10,6 +10,8 @@ pub enum AppMode {
     ConfirmQuit,
     Moving,
     TextInput,
+    ConfirmRemoveFile,
+    ConfirmCreateFile,
 }
 
 pub struct ClipboardState {
@@ -42,4 +44,16 @@ pub struct MoveState {
     pub source_items: Vec<(usize, usize)>, // (file_index, entry_index) of entries being moved
     pub insertion_cursor: usize,           // visible-list index for drop target
     pub from_selection: bool,              // true if move was initiated from multi-selection
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InputPurpose {
+    AddFilePath,
+}
+
+pub struct TextInputState {
+    pub prompt: String,
+    pub value: String,
+    pub cursor_pos: usize,
+    pub purpose: InputPurpose,
 }

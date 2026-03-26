@@ -18,6 +18,7 @@ pub struct ProfileFile {
     pub expanded: bool,
     pub dirty: bool,
     pub exists: bool,
+    pub writable: bool,
 }
 
 /// All configuration files for one shell session
@@ -35,6 +36,7 @@ impl ProfileFile {
             expanded: false,
             dirty: false,
             exists,
+            writable: true,
         }
     }
 
@@ -46,6 +48,7 @@ impl ProfileFile {
             expanded,
             dirty: false,
             exists: true,
+            writable: true,
         }
     }
 

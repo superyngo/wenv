@@ -7,8 +7,84 @@ use wenv::cli::actions;
 use wenv::cli::args::Cli;
 use wenv::i18n;
 use wenv::model;
+use wenv::model::profile::ShellProfile;
 use wenv::tui::TuiApp;
 use wenv::utils::shell_detect::get_shell_type;
+
+fn startup_file_check(
+    profile: &mut ShellProfile,
+    config: &mut wenv::Config,
+    shell_key: &str,
+) -> Result<()> {
+    let mut paths_to_remove: Vec<std::path::PathBuf> = Vec::new();
+
+    for file in &mut profile.files {
+        if !file.exists {
+            println!("⚠ File not found: {}", file.path.display());
+            let create = dialoguer::Confirm::new()
+                .with_prompt("  Create this file?")
+                .default(true)
+                .interact_opt()?
+                .unwrap_or(false);
+
+            if create {
+                if let Some(parent) = file.path.parent() {
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        eprintln!(
+                            "  ✗ Failed to create directory {}: {}",
+                            parent.display(),
+                            e
+                        );
+                        continue;
+                    }
+                }
+                match std::fs::File::create(&file.path) {
+                    Ok(_) => {
+                        file.exists = true;
+                        file.content = String::new();
+                        println!("  ✓ Created: {}", file.path.display());
+                    }
+                    Err(e) => {
+                        eprintln!("  ✗ Failed to create: {}", e);
+                        let remove = dialoguer::Confirm::new()
+                            .with_prompt("  Remove this path from config?")
+                            .default(false)
+                            .interact_opt()?
+                            .unwrap_or(false);
+                        if remove {
+                            paths_to_remove.push(file.path.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !paths_to_remove.is_empty() {
+        if let Some(files_config) = config.files.get_mut(shell_key) {
+            files_config.paths.retain(|p| {
+                let expanded = wenv::config::path_resolver::expand_env_vars(
+                    &wenv::config::path_resolver::expand_tilde(p),
+                );
+                !paths_to_remove
+                    .iter()
+                    .any(|r| r == &std::path::PathBuf::from(&expanded))
+            });
+        }
+        config.save()?;
+        profile.files.retain(|f| !paths_to_remove.contains(&f.path));
+    }
+
+    for file in &mut profile.files {
+        file.writable = if file.exists {
+            wenv::utils::path::check_writable(&file.path)
+        } else {
+            false
+        };
+    }
+
+    Ok(())
+}
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -50,6 +126,7 @@ fn main() -> Result<()> {
     }
 
     // Load shell profile and launch TUI
-    let profile = model::profile::load_shell_profile(&config, shell_type)?;
-    TuiApp::new(profile, messages)?.run()
+    let mut profile = model::profile::load_shell_profile(&config, shell_type)?;
+    startup_file_check(&mut profile, &mut config, shell_key)?;
+    TuiApp::new(profile, messages, config, shell_key.to_string())?.run()
 }

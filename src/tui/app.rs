@@ -39,10 +39,17 @@ pub struct TuiApp {
     pub move_state: Option<MoveState>,
     pub search: Option<SearchState>,
     pub list_visible_height: usize,
+    pub config: crate::model::Config,
+    pub shell_key: String,
 }
 
 impl TuiApp {
-    pub fn new(profile: ShellProfile, messages: &'static Messages) -> Result<Self> {
+    pub fn new(
+        profile: ShellProfile,
+        messages: &'static Messages,
+        config: crate::model::Config,
+        shell_key: String,
+    ) -> Result<Self> {
         let visible_items = profile.build_visible_list();
         Ok(Self {
             profile,
@@ -59,6 +66,8 @@ impl TuiApp {
             move_state: None,
             search: None,
             list_visible_height: 20,
+            config,
+            shell_key,
         })
     }
 
@@ -244,15 +253,29 @@ impl TuiApp {
                 if let Some(item) = self.visible_items.get(self.cursor) {
                     match item {
                         ListItem::FileHeader(fi) => return Ok(EditorRequest::EditFile(*fi)),
-                        ListItem::Entry(fi, ei) => return Ok(EditorRequest::EditEntry(*fi, *ei)),
+                        ListItem::Entry(fi, ei) => {
+                            if !self.profile.files[*fi].writable {
+                                self.message = Some("File is read-only".into());
+                                return Ok(EditorRequest::None);
+                            }
+                            return Ok(EditorRequest::EditEntry(*fi, *ei));
+                        }
                     }
                 }
             }
             Action::Add => {
+                if !self.is_current_file_writable() {
+                    self.message = Some("File is read-only".into());
+                    return Ok(EditorRequest::None);
+                }
                 let fi = self.current_file_index();
                 return Ok(EditorRequest::AddEntry(fi));
             }
             Action::Delete => {
+                if !self.is_current_file_writable() {
+                    self.message = Some("File is read-only".into());
+                    return Ok(EditorRequest::None);
+                }
                 let targets = self.get_operation_targets();
                 if !targets.is_empty() {
                     self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
@@ -263,6 +286,10 @@ impl TuiApp {
                 }
             }
             Action::Cut => {
+                if !self.is_current_file_writable() {
+                    self.message = Some("File is read-only".into());
+                    return Ok(EditorRequest::None);
+                }
                 let targets = self.get_operation_targets();
                 if !targets.is_empty() {
                     self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
@@ -296,6 +323,10 @@ impl TuiApp {
                 }
             }
             Action::StartMove => {
+                if !self.is_current_file_writable() {
+                    self.message = Some("File is read-only".into());
+                    return Ok(EditorRequest::None);
+                }
                 let targets = self.get_operation_targets();
                 if !targets.is_empty() {
                     self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
@@ -329,6 +360,10 @@ impl TuiApp {
                 }
             }
             Action::Paste => {
+                if !self.is_current_file_writable() {
+                    self.message = Some("File is read-only".into());
+                    return Ok(EditorRequest::None);
+                }
                 if !self.clipboard.is_empty() {
                     self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
                     crate::tui::operations::paste_entries(
@@ -453,6 +488,10 @@ impl TuiApp {
                     AppMode::TextInput => {
                         self.mode = AppMode::Normal;
                     }
+                    AppMode::ConfirmRemoveFile | AppMode::ConfirmCreateFile => {
+                        self.mode = AppMode::Normal;
+                        self.message = Some("Cancelled".into());
+                    }
                 }
             }
             Action::Quit => {
@@ -498,6 +537,10 @@ impl TuiApp {
                 self.mode = AppMode::ShowingHelp;
             }
             Action::Remark => {
+                if !self.is_current_file_writable() {
+                    self.message = Some("File is read-only".into());
+                    return Ok(EditorRequest::None);
+                }
                 self.message = Some("Remark: not yet implemented".into());
             }
             Action::AddFile => {
@@ -548,6 +591,12 @@ impl TuiApp {
             Some(ListItem::Entry(fi, _)) => *fi,
             None => 0,
         }
+    }
+
+    /// Check if the file under the cursor is writable
+    fn is_current_file_writable(&self) -> bool {
+        let fi = self.current_file_index();
+        fi < self.profile.files.len() && self.profile.files[fi].writable
     }
 
     /// Navigate cursor to the currently selected search match

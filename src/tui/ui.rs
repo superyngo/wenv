@@ -211,15 +211,28 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     let file = &app.profile.files[*fi];
                     let icon = if file.expanded { "▼" } else { "▶" };
                     let dirty = if file.dirty { " ●" } else { "" };
+                    let readonly = if !file.writable { " 🔒" } else { "" };
                     let text = format!(
-                        "📜 {} {} [{} entries]{}",
+                        "📜 {} {} [{} entries]{}{}",
                         icon,
                         file.display_name(),
                         file.entry_count(),
-                        dirty
+                        dirty,
+                        readonly
                     );
 
-                    let mut style = if is_cursor {
+                    let mut style = if !file.writable {
+                        if is_cursor {
+                            Style::default()
+                                .bg(Color::DarkGray)
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::BOLD)
+                        }
+                    } else if is_cursor {
                         Style::default()
                             .bg(Color::DarkGray)
                             .fg(Color::Yellow)
@@ -237,7 +250,9 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     ratatui::widgets::ListItem::new(text).style(style)
                 }
                 ProfileListItem::Entry(fi, ei) => {
-                    let entry = &app.profile.files[*fi].entries[*ei];
+                    let file = &app.profile.files[*fi];
+                    let entry = &file.entries[*ei];
+                    let is_readonly = !file.writable;
 
                     let prefix = if is_selected { "● " } else { "  " };
                     let name_str = format!("{:<20}", entry.name);
@@ -254,7 +269,23 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                         .is_some_and(|s| s.is_selected_match(*fi, *ei));
 
                     // Build line with per-character highlighting for search matches
-                    let line = if app.mode == AppMode::Searching && is_search_match {
+                    let line = if is_readonly {
+                        let grey = if is_cursor {
+                            Style::default().fg(Color::Gray)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        };
+                        Line::from(vec![
+                            Span::raw(prefix.to_string()),
+                            Span::styled(name_str, grey),
+                            Span::raw(" "),
+                            Span::styled(type_str, grey),
+                            Span::raw(" "),
+                            Span::styled(line_str, grey),
+                            Span::raw(" "),
+                            Span::styled(value_str, grey),
+                        ])
+                    } else if app.mode == AppMode::Searching && is_search_match {
                         let hl_style = Style::default()
                             .fg(Color::Yellow)
                             .add_modifier(Modifier::BOLD);

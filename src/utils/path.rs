@@ -52,6 +52,25 @@ pub fn write_file(path: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+/// Check if a file path is writable.
+/// For existing files: try opening for write.
+/// For non-existent files: check parent directory is writable via metadata.
+pub fn check_writable(path: &Path) -> bool {
+    if path.exists() {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .is_ok()
+    } else {
+        path.parent().is_some_and(|p| {
+            p.exists()
+                && std::fs::metadata(p)
+                    .map(|m| !m.permissions().readonly())
+                    .unwrap_or(false)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
