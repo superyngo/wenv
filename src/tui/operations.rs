@@ -50,12 +50,12 @@ pub fn restore_snapshot(profile: &mut ShellProfile, snapshot: UndoSnapshot) {
         .map(|(path, content, entries, dirty)| {
             // Carry over UI-state from matching old file if it exists
             let old = old_files.iter().find(|f| f.path == path);
-            let mut file = ProfileFile::new(path, old.map_or(true, |f| f.exists));
+            let mut file = ProfileFile::new(path, old.is_none_or(|f| f.exists));
             file.content = content;
             file.entries = entries;
             file.dirty = dirty;
-            file.expanded = old.map_or(true, |f| f.expanded);
-            file.writable = old.map_or(true, |f| f.writable);
+            file.expanded = old.is_none_or(|f| f.expanded);
+            file.writable = old.is_none_or(|f| f.writable);
             file
         })
         .collect();
@@ -213,10 +213,10 @@ pub fn uncomment_value(value: &str) -> String {
         .map(|line| {
             if line.trim().is_empty() {
                 line.to_string()
-            } else if line.starts_with("# ") {
-                line[2..].to_string()
-            } else if line.starts_with('#') {
-                line[1..].to_string()
+            } else if let Some(stripped) = line.strip_prefix("# ") {
+                stripped.to_string()
+            } else if let Some(stripped) = line.strip_prefix('#') {
+                stripped.to_string()
             } else {
                 line.to_string()
             }
@@ -234,7 +234,8 @@ pub fn find_matching_config_pattern(
 ) -> Option<(String, Vec<std::path::PathBuf>)> {
     let files_config = config.files.get(shell_key)?;
     for raw_pattern in &files_config.paths {
-        let resolved = crate::config::path_resolver::resolve_paths(&[raw_pattern.clone()]);
+        let resolved =
+            crate::config::path_resolver::resolve_paths(std::slice::from_ref(raw_pattern));
         if resolved.iter().any(|(p, _)| p == resolved_path) {
             let all_paths: Vec<std::path::PathBuf> = resolved.into_iter().map(|(p, _)| p).collect();
             return Some((raw_pattern.clone(), all_paths));
