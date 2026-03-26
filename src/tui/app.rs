@@ -324,13 +324,42 @@ impl TuiApp {
             Action::Delete => {
                 if let Some(ListItem::FileHeader(fi)) = self.visible_items.get(self.cursor) {
                     let fi = *fi;
+                    let resolved_path = &self.profile.files[fi].path;
+
+                    let (raw_pattern, affected_files) =
+                        crate::tui::operations::find_matching_config_pattern(
+                            &self.config,
+                            &self.shell_key,
+                            resolved_path,
+                        )
+                        .unwrap_or_else(|| {
+                            (
+                                resolved_path.display().to_string(),
+                                vec![resolved_path.clone()],
+                            )
+                        });
+
                     self.pending_remove_fi = Some(fi);
                     self.previous_mode = Some(self.mode.clone());
                     self.mode = AppMode::ConfirmRemoveFile;
-                    self.message = Some(format!(
-                        "Remove '{}' from config? (y/n) (file won't be deleted)",
-                        self.profile.files[fi].display_name()
-                    ));
+
+                    if affected_files.len() <= 1 {
+                        self.message = Some(format!(
+                            "Remove '{}' from config? (y/n)\n(file won't be deleted)",
+                            raw_pattern
+                        ));
+                    } else {
+                        let other_files: Vec<String> = affected_files
+                            .iter()
+                            .filter(|p| p.as_path() != resolved_path)
+                            .map(|p| format!("  {}", p.display()))
+                            .collect();
+                        self.message = Some(format!(
+                            "Remove '{}' from config? (y/n)\nAlso removes:\n{}\n(files won't be deleted)",
+                            raw_pattern,
+                            other_files.join("\n")
+                        ));
+                    }
                 } else {
                     // Original entry deletion logic
                     if !self.is_current_file_writable() {
@@ -340,7 +369,11 @@ impl TuiApp {
                     let targets = self.get_operation_targets();
                     if !targets.is_empty() {
                         let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                        crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
+                        crate::tui::operations::push_undo(
+                            &mut self.undo_stack,
+                            &mut self.redo_stack,
+                            snapshot,
+                        );
                         self.previous_mode = Some(self.mode.clone());
                         self.mode = AppMode::ConfirmDelete;
                         let count = targets.len();
@@ -356,7 +389,11 @@ impl TuiApp {
                 let targets = self.get_operation_targets();
                 if !targets.is_empty() {
                     let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                    crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
+                    crate::tui::operations::push_undo(
+                        &mut self.undo_stack,
+                        &mut self.redo_stack,
+                        snapshot,
+                    );
                     let cut = crate::tui::operations::cut_entries(
                         &mut self.profile,
                         &self.visible_items,
@@ -423,7 +460,11 @@ impl TuiApp {
                 let targets = self.get_operation_targets();
                 if !targets.is_empty() {
                     let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                    crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
+                    crate::tui::operations::push_undo(
+                        &mut self.undo_stack,
+                        &mut self.redo_stack,
+                        snapshot,
+                    );
 
                     let has_selection = !self.selection.is_empty();
 
@@ -460,7 +501,11 @@ impl TuiApp {
                 }
                 if !self.clipboard.is_empty() {
                     let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                    crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
+                    crate::tui::operations::push_undo(
+                        &mut self.undo_stack,
+                        &mut self.redo_stack,
+                        snapshot,
+                    );
                     crate::tui::operations::paste_entries(
                         &mut self.profile,
                         &self.visible_items,
@@ -556,32 +601,70 @@ impl TuiApp {
                         if let Some(fi) = self.pending_remove_fi.take() {
                             let path = self.profile.files[fi].path.clone();
 
-                            // Remove from config
                             let shell_key = self.shell_key.clone();
                             if let Some(files_config) = self.config.files.get_mut(&shell_key) {
-                                files_config.paths.retain(|p| {
-                                    let expanded = crate::config::path_resolver::expand_env_vars(
-                                        &crate::config::path_resolver::expand_tilde(p),
-                                    );
-                                    std::path::Path::new(&expanded) != path
-                                });
-                            }
-                            if let Err(e) = self.config.save() {
-                                self.message = Some(format!("Config save error: {}", e));
-                            } else {
-                                // Remove from profile
-                                self.profile.files.remove(fi);
+                                // Find all files affected by the matching config pattern
+                                let affected_paths: Vec<std::path::PathBuf> = files_config
+                                    .paths
+                                    .iter()
+                                    .filter(|p| {
+                                        let resolved =
+                                            crate::config::path_resolver::resolve_paths(&[
+                                                p.to_string()
+                                            ]);
+                                        resolved.iter().any(|(rp, _)| *rp == path)
+                                    })
+                                    .flat_map(|p| {
+                                        crate::config::path_resolver::resolve_paths(
+                                            &[p.to_string()],
+                                        )
+                                        .into_iter()
+                                        .map(|(rp, _)| rp)
+                                    })
+                                    .collect();
 
-                                // Fix file_index for remaining entries
-                                for (new_fi, file) in self.profile.files.iter_mut().enumerate() {
-                                    for entry in &mut file.entries {
-                                        entry.file_index = new_fi;
+                                // Remove the matching pattern from config
+                                files_config.paths.retain(|p| {
+                                    let resolved = crate::config::path_resolver::resolve_paths(&[
+                                        p.to_string(),
+                                    ]);
+                                    !resolved.iter().any(|(rp, _)| *rp == path)
+                                });
+
+                                if let Err(e) = self.config.save() {
+                                    self.message = Some(format!("Config save error: {}", e));
+                                } else {
+                                    // Remove ALL affected files from profile
+                                    let removed_count = if affected_paths.is_empty() {
+                                        self.profile.files.remove(fi);
+                                        1
+                                    } else {
+                                        let before = self.profile.files.len();
+                                        self.profile
+                                            .files
+                                            .retain(|f| !affected_paths.contains(&f.path));
+                                        before - self.profile.files.len()
+                                    };
+
+                                    // Recalculate file_index for remaining entries
+                                    for (new_fi, file) in self.profile.files.iter_mut().enumerate()
+                                    {
+                                        for entry in &mut file.entries {
+                                            entry.file_index = new_fi;
+                                        }
+                                    }
+
+                                    self.selection.clear();
+                                    self.rebuild_list();
+                                    if removed_count > 1 {
+                                        self.message = Some(format!(
+                                            "Removed {} files from config",
+                                            removed_count
+                                        ));
+                                    } else {
+                                        self.message = Some("Removed from config".into());
                                     }
                                 }
-
-                                self.selection.clear();
-                                self.rebuild_list();
-                                self.message = Some("Removed from config".into());
                             }
                         }
                         self.mode = AppMode::Normal;
@@ -591,7 +674,8 @@ impl TuiApp {
                         if let Some((raw_path, path)) = self.pending_create_path.take() {
                             if let Some(parent) = path.parent() {
                                 if let Err(e) = std::fs::create_dir_all(parent) {
-                                    self.message = Some(format!("Failed to create directory: {}", e));
+                                    self.message =
+                                        Some(format!("Failed to create directory: {}", e));
                                     self.mode = AppMode::Normal;
                                     return Ok(EditorRequest::None);
                                 }
@@ -634,7 +718,8 @@ impl TuiApp {
                                     if !path.exists() {
                                         self.pending_create_path = Some((raw_path, path));
                                         self.mode = AppMode::ConfirmCreateFile;
-                                        self.message = Some("File doesn't exist. Create? (y/n)".into());
+                                        self.message =
+                                            Some("File doesn't exist. Create? (y/n)".into());
                                     } else {
                                         self.add_file_to_config_and_profile(raw_path, path)?;
                                         self.mode = AppMode::Normal;
@@ -801,7 +886,11 @@ impl TuiApp {
 
                 // Take undo snapshot
                 let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
+                crate::tui::operations::push_undo(
+                    &mut self.undo_stack,
+                    &mut self.redo_stack,
+                    snapshot,
+                );
 
                 // Track original range for selection restoration
                 let first_visible = targets[0];
@@ -816,10 +905,8 @@ impl TuiApp {
 
                     for (fi, ei) in reversed {
                         let value = self.profile.files[fi].entries[ei].value.clone();
-                        let uncommented =
-                            crate::tui::operations::uncomment_value(&value);
-                        let parser =
-                            crate::parser::get_parser(self.profile.shell_type);
+                        let uncommented = crate::tui::operations::uncomment_value(&value);
+                        let parser = crate::parser::get_parser(self.profile.shell_type);
                         let parsed = parser.parse(&uncommented);
                         let count = parsed.entries.len();
                         let new_entries: Vec<_> = parsed
@@ -860,10 +947,8 @@ impl TuiApp {
                         if self.profile.files[*fi].entries[*ei].entry_type
                             != crate::model::EntryType::Comment
                         {
-                            let value =
-                                self.profile.files[*fi].entries[*ei].value.clone();
-                            let commented =
-                                crate::tui::operations::comment_value(&value);
+                            let value = self.profile.files[*fi].entries[*ei].value.clone();
+                            let commented = crate::tui::operations::comment_value(&value);
                             let entry = &mut self.profile.files[*fi].entries[*ei];
                             entry.value = commented;
                             entry.entry_type = crate::model::EntryType::Comment;
@@ -879,13 +964,9 @@ impl TuiApp {
                     self.selection.clear();
                     // Only restore selection if there was one before (Feature 3 fix)
                     if had_selection {
-                        let new_end =
-                            last_visible.min(self.visible_items.len().saturating_sub(1));
+                        let new_end = last_visible.min(self.visible_items.len().saturating_sub(1));
                         for idx in first_visible..=new_end {
-                            if matches!(
-                                self.visible_items.get(idx),
-                                Some(ListItem::Entry(_, _))
-                            ) {
+                            if matches!(self.visible_items.get(idx), Some(ListItem::Entry(_, _))) {
                                 self.selection.toggle(idx, &self.visible_items);
                             }
                         }
@@ -1259,11 +1340,7 @@ impl TuiApp {
             }
             let mut pos = old - 1;
             loop {
-                if !Self::is_position_blocked(
-                    &self.visible_items,
-                    &self.profile.files,
-                    pos,
-                ) {
+                if !Self::is_position_blocked(&self.visible_items, &self.profile.files, pos) {
                     ms.insertion_cursor = pos;
                     return;
                 }
@@ -1286,11 +1363,7 @@ impl TuiApp {
             }
             let mut pos = old + 1;
             loop {
-                if !Self::is_position_blocked(
-                    &self.visible_items,
-                    &self.profile.files,
-                    pos,
-                ) {
+                if !Self::is_position_blocked(&self.visible_items, &self.profile.files, pos) {
                     ms.insertion_cursor = pos;
                     return;
                 }
@@ -1313,11 +1386,7 @@ impl TuiApp {
             let max_idx = self.visible_items.len().saturating_sub(1);
             let mut fwd = pos + 1;
             while fwd <= max_idx {
-                if !Self::is_position_blocked(
-                    &self.visible_items,
-                    &self.profile.files,
-                    fwd,
-                ) {
+                if !Self::is_position_blocked(&self.visible_items, &self.profile.files, fwd) {
                     ms.insertion_cursor = fwd;
                     return;
                 }
@@ -1325,11 +1394,7 @@ impl TuiApp {
             }
             let mut bwd = pos.saturating_sub(1);
             loop {
-                if !Self::is_position_blocked(
-                    &self.visible_items,
-                    &self.profile.files,
-                    bwd,
-                ) {
+                if !Self::is_position_blocked(&self.visible_items, &self.profile.files, bwd) {
                     ms.insertion_cursor = bwd;
                     return;
                 }
@@ -1424,7 +1489,11 @@ impl TuiApp {
                 let new_content = new_content.trim_end_matches('\n').to_string();
                 if new_content != value {
                     let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                    crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
+                    crate::tui::operations::push_undo(
+                        &mut self.undo_stack,
+                        &mut self.redo_stack,
+                        snapshot,
+                    );
                     let parser = crate::parser::get_parser(self.profile.shell_type);
                     let parsed = parser.parse(&new_content);
                     let new_entries: Vec<_> = parsed
@@ -1503,7 +1572,11 @@ impl TuiApp {
 
                     if !new_entries.is_empty() {
                         let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                        crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
+                        crate::tui::operations::push_undo(
+                            &mut self.undo_stack,
+                            &mut self.redo_stack,
+                            snapshot,
+                        );
                         // Insert after current entry position, or at end of file
                         let insert_pos = match self.visible_items.get(self.cursor) {
                             Some(ListItem::Entry(_, ei)) => ei + 1,

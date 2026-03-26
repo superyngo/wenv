@@ -30,11 +30,7 @@ fn startup_file_check(
             if create {
                 if let Some(parent) = file.path.parent() {
                     if let Err(e) = std::fs::create_dir_all(parent) {
-                        eprintln!(
-                            "  ✗ Failed to create directory {}: {}",
-                            parent.display(),
-                            e
-                        );
+                        eprintln!("  ✗ Failed to create directory {}: {}", parent.display(), e);
                         continue;
                     }
                 }

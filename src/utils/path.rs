@@ -57,10 +57,7 @@ pub fn write_file(path: &Path, content: &str) -> Result<()> {
 /// For non-existent files: check parent directory is writable via metadata.
 pub fn check_writable(path: &Path) -> bool {
     if path.exists() {
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(path)
-            .is_ok()
+        std::fs::OpenOptions::new().write(true).open(path).is_ok()
     } else {
         path.parent().is_some_and(|p| {
             p.exists()

@@ -60,7 +60,7 @@ pub struct TextInputState {
 }
 
 pub struct FileMovingState {
-    pub original_fi: usize,          // file index being moved
-    pub insertion_cursor: usize,     // visible-list index for drop target
-    pub saved_expanded: Vec<bool>,   // original expanded state per file
+    pub original_fi: usize,        // file index being moved
+    pub insertion_cursor: usize,   // visible-list index for drop target
+    pub saved_expanded: Vec<bool>, // original expanded state per file
 }

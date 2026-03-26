@@ -224,3 +224,21 @@ pub fn uncomment_value(value: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+/// Given a resolved file path, find the raw config pattern that matches it
+/// and return all files that pattern resolves to.
+pub fn find_matching_config_pattern(
+    config: &crate::model::Config,
+    shell_key: &str,
+    resolved_path: &std::path::Path,
+) -> Option<(String, Vec<std::path::PathBuf>)> {
+    let files_config = config.files.get(shell_key)?;
+    for raw_pattern in &files_config.paths {
+        let resolved = crate::config::path_resolver::resolve_paths(&[raw_pattern.clone()]);
+        if resolved.iter().any(|(p, _)| p == resolved_path) {
+            let all_paths: Vec<std::path::PathBuf> = resolved.into_iter().map(|(p, _)| p).collect();
+            return Some((raw_pattern.clone(), all_paths));
+        }
+    }
+    None
+}
