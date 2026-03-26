@@ -41,6 +41,7 @@ pub struct TuiApp {
     pub list_visible_height: usize,
     pub config: crate::model::Config,
     pub shell_key: String,
+    pub pending_remove_fi: Option<usize>,
 }
 
 impl TuiApp {
@@ -68,6 +69,7 @@ impl TuiApp {
             list_visible_height: 20,
             config,
             shell_key,
+            pending_remove_fi: None,
         })
     }
 
@@ -272,17 +274,29 @@ impl TuiApp {
                 return Ok(EditorRequest::AddEntry(fi));
             }
             Action::Delete => {
-                if !self.is_current_file_writable() {
-                    self.message = Some("File is read-only".into());
-                    return Ok(EditorRequest::None);
-                }
-                let targets = self.get_operation_targets();
-                if !targets.is_empty() {
-                    self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                if let Some(ListItem::FileHeader(fi)) = self.visible_items.get(self.cursor) {
+                    let fi = *fi;
+                    self.pending_remove_fi = Some(fi);
                     self.previous_mode = Some(self.mode.clone());
-                    self.mode = AppMode::ConfirmDelete;
-                    let count = targets.len();
-                    self.message = Some(format!("Delete {} entries? (y/n)", count));
+                    self.mode = AppMode::ConfirmRemoveFile;
+                    self.message = Some(format!(
+                        "Remove '{}' from config? (y/n) (file won't be deleted)",
+                        self.profile.files[fi].display_name()
+                    ));
+                } else {
+                    // Original entry deletion logic
+                    if !self.is_current_file_writable() {
+                        self.message = Some("File is read-only".into());
+                        return Ok(EditorRequest::None);
+                    }
+                    let targets = self.get_operation_targets();
+                    if !targets.is_empty() {
+                        self.undo_snapshot = Some(crate::tui::operations::take_snapshot(&self.profile));
+                        self.previous_mode = Some(self.mode.clone());
+                        self.mode = AppMode::ConfirmDelete;
+                        let count = targets.len();
+                        self.message = Some(format!("Delete {} entries? (y/n)", count));
+                    }
                 }
             }
             Action::Cut => {
@@ -435,6 +449,41 @@ impl TuiApp {
                     AppMode::ConfirmQuit => {
                         self.should_quit = true;
                     }
+                    AppMode::ConfirmRemoveFile => {
+                        if let Some(fi) = self.pending_remove_fi.take() {
+                            let path = self.profile.files[fi].path.clone();
+
+                            // Remove from config
+                            let shell_key = self.shell_key.clone();
+                            if let Some(files_config) = self.config.files.get_mut(&shell_key) {
+                                files_config.paths.retain(|p| {
+                                    let expanded = crate::config::path_resolver::expand_env_vars(
+                                        &crate::config::path_resolver::expand_tilde(p),
+                                    );
+                                    std::path::Path::new(&expanded) != path
+                                });
+                            }
+                            if let Err(e) = self.config.save() {
+                                self.message = Some(format!("Config save error: {}", e));
+                            } else {
+                                // Remove from profile
+                                self.profile.files.remove(fi);
+
+                                // Fix file_index for remaining entries
+                                for (new_fi, file) in self.profile.files.iter_mut().enumerate() {
+                                    for entry in &mut file.entries {
+                                        entry.file_index = new_fi;
+                                    }
+                                }
+
+                                self.selection.clear();
+                                self.rebuild_list();
+                                self.message = Some("Removed from config".into());
+                            }
+                        }
+                        self.mode = AppMode::Normal;
+                        self.previous_mode = None;
+                    }
                     AppMode::ShowingDetail | AppMode::ShowingHelp => {
                         self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
                     }
@@ -489,6 +538,7 @@ impl TuiApp {
                         self.mode = AppMode::Normal;
                     }
                     AppMode::ConfirmRemoveFile | AppMode::ConfirmCreateFile => {
+                        self.pending_remove_fi = None;
                         self.mode = AppMode::Normal;
                         self.message = Some("Cancelled".into());
                     }
