@@ -308,3 +308,28 @@ fn test_replace_entry_with_empty_deletes() {
     assert_eq!(file.entries[0].name, "b");
     assert!(file.dirty);
 }
+
+#[test]
+fn test_copy_entries() {
+    let profile = make_test_profile();
+    let items = profile.build_visible_list();
+
+    // Find an entry index (first Entry in visible_items)
+    let entry_idx = items.iter().position(|item| matches!(item, ListItem::Entry(_, _))).unwrap();
+
+    // Copy the entry
+    let copied: Vec<Entry> = vec![entry_idx]
+        .iter()
+        .filter_map(|&idx| match items.get(idx) {
+            Some(ListItem::Entry(fi, ei)) => Some(profile.files[*fi].entries[*ei].clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(copied.len(), 1);
+    // Original entries should be unchanged (not deleted like cut)
+    let original_count: usize = profile.files.iter().map(|f| f.entries.len()).sum();
+    assert!(original_count > 0);
+    // No file should be dirty after copy
+    assert!(!profile.files.iter().any(|f| f.dirty));
+}

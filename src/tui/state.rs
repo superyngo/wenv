@@ -9,6 +9,7 @@ pub enum AppMode {
     ConfirmDelete,
     ConfirmQuit,
     Moving,
+    TextInput,
 }
 
 pub struct ClipboardState {

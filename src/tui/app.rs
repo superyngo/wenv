@@ -278,6 +278,23 @@ impl TuiApp {
                     self.message = Some(format!("Cut {} entries", count));
                 }
             }
+            Action::Copy => {
+                let targets = self.get_operation_targets();
+                if !targets.is_empty() {
+                    let copied: Vec<crate::model::Entry> = targets
+                        .iter()
+                        .filter_map(|&idx| match self.visible_items.get(idx) {
+                            Some(ListItem::Entry(fi, ei)) => {
+                                Some(self.profile.files[*fi].entries[*ei].clone())
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    let count = copied.len();
+                    self.clipboard.entries = copied;
+                    self.message = Some(format!("Copied {} entries", count));
+                }
+            }
             Action::StartMove => {
                 let targets = self.get_operation_targets();
                 if !targets.is_empty() {
@@ -433,6 +450,9 @@ impl TuiApp {
                             self.message = Some("Selection cleared".into());
                         }
                     }
+                    AppMode::TextInput => {
+                        self.mode = AppMode::Normal;
+                    }
                 }
             }
             Action::Quit => {
@@ -477,6 +497,13 @@ impl TuiApp {
             Action::Help => {
                 self.mode = AppMode::ShowingHelp;
             }
+            Action::Remark => {
+                self.message = Some("Remark: not yet implemented".into());
+            }
+            Action::AddFile => {
+                self.message = Some("Add file: not yet implemented".into());
+            }
+            Action::TextInputChar(_) | Action::TextInputBackspace | Action::TextInputLeft | Action::TextInputRight => {}
             _ => {
                 // Other actions not implemented yet
             }

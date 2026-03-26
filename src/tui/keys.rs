@@ -20,10 +20,13 @@ pub enum Action {
     RangeSelectUp,
     RangeSelectDown,
     Cut,
+    Copy,
     Paste,
     StartMove,
     Search,
     Undo,
+    Remark,
+    AddFile,
     Help,
     Save,
     Quit,
@@ -31,6 +34,10 @@ pub enum Action {
     Cancel,
     SearchInput(char),
     SearchBackspace,
+    TextInputChar(char),
+    TextInputBackspace,
+    TextInputLeft,
+    TextInputRight,
     Noop,
 }
 
@@ -40,6 +47,7 @@ pub fn map_key(mode: &AppMode, key: KeyEvent) -> Action {
         AppMode::Moving => map_moving_key(key),
         AppMode::Searching => map_search_key(key),
         AppMode::ShowingDetail => map_detail_key(key),
+        AppMode::TextInput => map_text_input_key(key),
         _ => map_popup_key(key),
     }
 }
@@ -70,14 +78,17 @@ fn map_normal_key(key: KeyEvent) -> Action {
         KeyCode::Char('0') => Action::CollapseAll,
         KeyCode::Char('9') => Action::ExpandAll,
         KeyCode::Char('e') => Action::Edit,
-        KeyCode::Char('a') => Action::Add,
+        KeyCode::Char('n') => Action::Add,
         KeyCode::Char('d') => Action::Delete,
         KeyCode::Char('s') => Action::ToggleSelect,
         KeyCode::Char('x') => Action::Cut,
-        KeyCode::Char('p') => Action::Paste,
+        KeyCode::Char('c') => Action::Copy,
+        KeyCode::Char('v') => Action::Paste,
         KeyCode::Char('m') => Action::StartMove,
         KeyCode::Char('/') => Action::Search,
-        KeyCode::Char('u') => Action::Undo,
+        KeyCode::Char('z') => Action::Undo,
+        KeyCode::Char('r') => Action::Remark,
+        KeyCode::Char('a') => Action::AddFile,
         KeyCode::Char('?') => Action::Help,
         KeyCode::Char('w') => Action::Save,
         KeyCode::Char('q') => Action::Quit,
@@ -118,6 +129,18 @@ fn map_detail_key(key: KeyEvent) -> Action {
         // Toggle: Enter/Space close the detail popup
         KeyCode::Enter | KeyCode::Char(' ') => Action::ToggleExpand,
         KeyCode::Esc | KeyCode::Char('q') => Action::Cancel,
+        _ => Action::Noop,
+    }
+}
+
+fn map_text_input_key(key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => Action::Cancel,
+        KeyCode::Enter => Action::Confirm,
+        KeyCode::Backspace => Action::TextInputBackspace,
+        KeyCode::Left => Action::TextInputLeft,
+        KeyCode::Right => Action::TextInputRight,
+        KeyCode::Char(c) => Action::TextInputChar(c),
         _ => Action::Noop,
     }
 }
