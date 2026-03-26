@@ -1,6 +1,6 @@
 //! Entry manipulation operations
 
-use crate::model::profile::{ListItem, ShellProfile};
+use crate::model::profile::{ListItem, ProfileFile, ShellProfile};
 use crate::model::Entry;
 use crate::tui::state::UndoSnapshot;
 
@@ -140,4 +140,26 @@ pub fn save_dirty_files(profile: &mut ShellProfile) -> anyhow::Result<Vec<String
         saved.push(file.path.display().to_string());
     }
     Ok(saved)
+}
+
+/// Replace a single entry with zero or more parsed entries at the same position.
+/// Returns the number of new entries inserted.
+/// If new_entries is empty, the original entry is deleted.
+pub fn replace_entry_with_parsed(
+    file: &mut ProfileFile,
+    entry_index: usize,
+    new_entries: Vec<Entry>,
+    file_index: usize,
+) -> usize {
+    file.entries.remove(entry_index);
+
+    let count = new_entries.len();
+    for (i, mut entry) in new_entries.into_iter().enumerate() {
+        entry.file_index = file_index;
+        file.entries.insert(entry_index + i, entry);
+    }
+
+    file.dirty = true;
+    file.recalculate_line_numbers();
+    count
 }

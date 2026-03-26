@@ -263,3 +263,48 @@ fn test_recalculate_updates_code_comment_names() {
     assert_eq!(file.entries[2].line_number, Some(3));
     assert_eq!(file.entries[2].end_line, Some(4));
 }
+
+#[test]
+fn test_replace_entry_with_parsed_multiple() {
+    use wenv::tui::operations::replace_entry_with_parsed;
+
+    let mut file = ProfileFile::new(PathBuf::from("/tmp/test"), true);
+    file.entries = vec![
+        make_test_entry("a", "alias a='1'", EntryType::Alias, 0),
+        make_test_entry("b", "alias b='2'", EntryType::Alias, 0),
+        make_test_entry("c", "alias c='3'", EntryType::Alias, 0),
+    ];
+
+    let replacements = vec![
+        make_test_entry("x", "alias x='10'", EntryType::Alias, 0),
+        make_test_entry("y", "alias y='20'", EntryType::Alias, 0),
+    ];
+
+    let count = replace_entry_with_parsed(&mut file, 1, replacements, 0);
+
+    assert_eq!(count, 2);
+    assert_eq!(file.entries.len(), 4); // was 3, removed 1, added 2
+    assert_eq!(file.entries[0].name, "a");
+    assert_eq!(file.entries[1].name, "x");
+    assert_eq!(file.entries[2].name, "y");
+    assert_eq!(file.entries[3].name, "c");
+    assert!(file.dirty);
+}
+
+#[test]
+fn test_replace_entry_with_empty_deletes() {
+    use wenv::tui::operations::replace_entry_with_parsed;
+
+    let mut file = ProfileFile::new(PathBuf::from("/tmp/test"), true);
+    file.entries = vec![
+        make_test_entry("a", "alias a='1'", EntryType::Alias, 0),
+        make_test_entry("b", "alias b='2'", EntryType::Alias, 0),
+    ];
+
+    let count = replace_entry_with_parsed(&mut file, 0, vec![], 0);
+
+    assert_eq!(count, 0);
+    assert_eq!(file.entries.len(), 1);
+    assert_eq!(file.entries[0].name, "b");
+    assert!(file.dirty);
+}
