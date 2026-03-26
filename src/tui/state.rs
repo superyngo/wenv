@@ -12,6 +12,7 @@ pub enum AppMode {
     TextInput,
     ConfirmRemoveFile,
     ConfirmCreateFile,
+    MovingFile,
 }
 
 pub struct ClipboardState {
@@ -56,4 +57,10 @@ pub struct TextInputState {
     pub value: String,
     pub cursor_pos: usize,
     pub purpose: InputPurpose,
+}
+
+pub struct FileMovingState {
+    pub original_fi: usize,          // file index being moved
+    pub insertion_cursor: usize,     // visible-list index for drop target
+    pub saved_expanded: Vec<bool>,   // original expanded state per file
 }

@@ -45,6 +45,7 @@ pub fn map_key(mode: &AppMode, key: KeyEvent) -> Action {
     match mode {
         AppMode::Normal => map_normal_key(key),
         AppMode::Moving => map_moving_key(key),
+        AppMode::MovingFile => map_moving_key(key),
         AppMode::Searching => map_search_key(key),
         AppMode::ShowingDetail => map_detail_key(key),
         AppMode::TextInput => map_text_input_key(key),
@@ -129,6 +130,8 @@ fn map_detail_key(key: KeyEvent) -> Action {
         // Toggle: Enter/Space close the detail popup
         KeyCode::Enter | KeyCode::Char(' ') => Action::ToggleExpand,
         KeyCode::Esc | KeyCode::Char('q') => Action::Cancel,
+        KeyCode::Char('e') => Action::Edit,
+        KeyCode::Char('r') => Action::Remark,
         _ => Action::Noop,
     }
 }

@@ -15,7 +15,7 @@ use crate::tui::keys::{self, Action};
 use crate::tui::list;
 use crate::tui::search::SearchState;
 use crate::tui::selection::SelectionState;
-use crate::tui::state::{AppMode, ClipboardState, MoveState, UndoSnapshot};
+use crate::tui::state::{AppMode, ClipboardState, FileMovingState, MoveState, UndoSnapshot};
 
 enum EditorRequest {
     None,
@@ -44,6 +44,7 @@ pub struct TuiApp {
     pub pending_remove_fi: Option<usize>,
     pub text_input: Option<crate::tui::state::TextInputState>,
     pub pending_create_path: Option<(String, std::path::PathBuf)>,
+    pub file_move_state: Option<FileMovingState>,
 }
 
 impl TuiApp {
@@ -74,6 +75,7 @@ impl TuiApp {
             pending_remove_fi: None,
             text_input: None,
             pending_create_path: None,
+            file_move_state: None,
         })
     }
 
@@ -114,12 +116,21 @@ impl TuiApp {
                 match request {
                     EditorRequest::EditFile(fi) => {
                         self.run_edit_file(terminal, fi)?;
+                        if self.mode == AppMode::Searching {
+                            self.update_search_and_navigate();
+                        }
                     }
                     EditorRequest::EditEntry(fi, ei) => {
                         self.run_edit_entry(terminal, fi, ei)?;
+                        if self.mode == AppMode::Searching {
+                            self.update_search_and_navigate();
+                        }
                     }
                     EditorRequest::AddEntry(fi) => {
                         self.run_add_entry(terminal, fi)?;
+                        if self.mode == AppMode::Searching {
+                            self.update_search_and_navigate();
+                        }
                     }
                     EditorRequest::None => {}
                 }
@@ -138,12 +149,14 @@ impl TuiApp {
                         search.select_prev();
                     }
                     self.navigate_to_search_match();
-                } else if self.mode == AppMode::Moving {
-                    if let Some(ref mut ms) = self.move_state {
-                        if ms.insertion_cursor > 0 {
-                            ms.insertion_cursor -= 1;
+                } else if self.mode == AppMode::MovingFile {
+                    if let Some(ref mut fms) = self.file_move_state {
+                        if fms.insertion_cursor > 0 {
+                            fms.insertion_cursor -= 1;
                         }
                     }
+                } else if self.mode == AppMode::Moving {
+                    self.move_cursor_up();
                 } else {
                     self.selection.commit_range();
                     self.cursor = list::navigate_up(&self.visible_items, self.cursor);
@@ -155,12 +168,15 @@ impl TuiApp {
                         search.select_next();
                     }
                     self.navigate_to_search_match();
-                } else if self.mode == AppMode::Moving {
-                    if let Some(ref mut ms) = self.move_state {
-                        if ms.insertion_cursor < self.visible_items.len().saturating_sub(1) {
-                            ms.insertion_cursor += 1;
+                } else if self.mode == AppMode::MovingFile {
+                    if let Some(ref mut fms) = self.file_move_state {
+                        let max_idx = self.visible_items.len().saturating_sub(1);
+                        if fms.insertion_cursor < max_idx {
+                            fms.insertion_cursor += 1;
                         }
                     }
+                } else if self.mode == AppMode::Moving {
+                    self.move_cursor_down();
                 } else {
                     self.selection.commit_range();
                     self.cursor = list::navigate_down(&self.visible_items, self.cursor);
@@ -168,10 +184,16 @@ impl TuiApp {
             }
             Action::PageUp => {
                 let half = (self.list_visible_height / 2).max(1);
-                if self.mode == AppMode::Moving {
-                    if let Some(ref mut ms) = self.move_state {
-                        ms.insertion_cursor = ms.insertion_cursor.saturating_sub(half);
+                if self.mode == AppMode::MovingFile {
+                    if let Some(ref mut fms) = self.file_move_state {
+                        fms.insertion_cursor = fms.insertion_cursor.saturating_sub(half);
                     }
+                } else if self.mode == AppMode::Moving {
+                    if let Some(ref mut ms) = self.move_state {
+                        let target = ms.insertion_cursor.saturating_sub(half);
+                        ms.insertion_cursor = target;
+                    }
+                    self.snap_move_cursor_to_non_blocked();
                 } else {
                     self.selection.commit_range();
                     self.cursor = self.cursor.saturating_sub(half);
@@ -180,10 +202,15 @@ impl TuiApp {
             Action::PageDown => {
                 let half = (self.list_visible_height / 2).max(1);
                 let max_idx = self.visible_items.len().saturating_sub(1);
-                if self.mode == AppMode::Moving {
+                if self.mode == AppMode::MovingFile {
+                    if let Some(ref mut fms) = self.file_move_state {
+                        fms.insertion_cursor = (fms.insertion_cursor + half).min(max_idx);
+                    }
+                } else if self.mode == AppMode::Moving {
                     if let Some(ref mut ms) = self.move_state {
                         ms.insertion_cursor = (ms.insertion_cursor + half).min(max_idx);
                     }
+                    self.snap_move_cursor_to_non_blocked();
                 } else {
                     self.selection.commit_range();
                     self.cursor = (self.cursor + half).min(max_idx);
@@ -256,6 +283,20 @@ impl TuiApp {
                 self.selection.set_range(self.cursor, &self.visible_items);
             }
             Action::Edit => {
+                // In ShowingDetail: close popup first, then edit
+                if self.mode == AppMode::ShowingDetail {
+                    if let Some(ListItem::Entry(fi, ei)) = self.visible_items.get(self.cursor) {
+                        let fi = *fi;
+                        let ei = *ei;
+                        if !self.profile.files[fi].writable {
+                            self.message = Some("File is read-only".into());
+                            return Ok(EditorRequest::None);
+                        }
+                        self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+                        return Ok(EditorRequest::EditEntry(fi, ei));
+                    }
+                    return Ok(EditorRequest::None);
+                }
                 if let Some(item) = self.visible_items.get(self.cursor) {
                     match item {
                         ListItem::FileHeader(fi) => return Ok(EditorRequest::EditFile(*fi)),
@@ -341,6 +382,35 @@ impl TuiApp {
                 }
             }
             Action::StartMove => {
+                // Check if cursor is on a FileHeader → enter file move mode
+                if let Some(ListItem::FileHeader(fi)) = self.visible_items.get(self.cursor) {
+                    let fi = *fi;
+                    if self.profile.files.len() < 2 {
+                        self.message = Some("Only one file, nothing to move".into());
+                        return Ok(EditorRequest::None);
+                    }
+                    let saved_expanded: Vec<bool> =
+                        self.profile.files.iter().map(|f| f.expanded).collect();
+                    self.profile.toggle_all(false);
+                    self.rebuild_list();
+                    // Find cursor for the file header after collapse
+                    let cursor_pos = self
+                        .visible_items
+                        .iter()
+                        .position(|item| matches!(item, ListItem::FileHeader(i) if *i == fi))
+                        .unwrap_or(0);
+                    self.cursor = cursor_pos;
+                    self.file_move_state = Some(FileMovingState {
+                        original_fi: fi,
+                        insertion_cursor: cursor_pos,
+                        saved_expanded,
+                    });
+                    self.mode = AppMode::MovingFile;
+                    self.message =
+                        Some("File move: ↑↓ to position, Enter to drop, Esc to cancel".into());
+                    return Ok(EditorRequest::None);
+                }
+
                 if !self.is_current_file_writable() {
                     self.message = Some("File is read-only".into());
                     return Ok(EditorRequest::None);
@@ -424,6 +494,9 @@ impl TuiApp {
                         self.navigate_to_search_match();
                         self.search = None;
                         self.mode = AppMode::Normal;
+                    }
+                    AppMode::MovingFile => {
+                        self.execute_file_move();
                     }
                     AppMode::Moving => {
                         self.execute_move();
@@ -554,6 +627,9 @@ impl TuiApp {
                         self.mode = AppMode::Normal;
                         self.message = None;
                     }
+                    AppMode::MovingFile => {
+                        self.cancel_file_move();
+                    }
                     AppMode::Moving => {
                         let from_sel = self.move_state.as_ref().is_some_and(|ms| ms.from_selection);
                         // Restore from snapshot
@@ -647,7 +723,18 @@ impl TuiApp {
                 self.mode = AppMode::ShowingHelp;
             }
             Action::Remark => {
-                let targets = self.get_operation_targets();
+                let in_detail = self.mode == AppMode::ShowingDetail;
+
+                // In ShowingDetail: operate on the single entry at cursor
+                // Otherwise: use normal operation targets
+                let targets = if in_detail {
+                    match self.visible_items.get(self.cursor) {
+                        Some(ListItem::Entry(_, _)) => vec![self.cursor],
+                        _ => vec![],
+                    }
+                } else {
+                    self.get_operation_targets()
+                };
                 if targets.is_empty() {
                     return Ok(EditorRequest::None);
                 }
@@ -676,6 +763,9 @@ impl TuiApp {
                     self.message = Some("File is read-only".into());
                     return Ok(EditorRequest::None);
                 }
+
+                // Remember whether there was a pre-existing selection (Feature 3 fix)
+                let had_selection = !self.selection.is_empty();
 
                 // Determine if all targets are Comments
                 let all_comment = target_entries.iter().all(|(fi, ei)| {
@@ -720,21 +810,21 @@ impl TuiApp {
                             new_entries,
                             fi,
                         );
-                        // Since we process in reverse, ei is stable for entries we already recorded
-                        // (they're at higher indices). The new entries occupy ei..ei+count
                         for j in 0..count {
                             new_entry_pairs.push((fi, ei + j));
                         }
                     }
                     self.message = Some("Uncommented".into());
 
-                    // Rebuild and select new entries
                     self.rebuild_list();
                     self.selection.clear();
-                    for (idx, item) in self.visible_items.iter().enumerate() {
-                        if let ListItem::Entry(fi, ei) = item {
-                            if new_entry_pairs.contains(&(*fi, *ei)) {
-                                self.selection.toggle(idx, &self.visible_items);
+                    // Only restore selection if there was one before (Feature 3 fix)
+                    if had_selection {
+                        for (idx, item) in self.visible_items.iter().enumerate() {
+                            if let ListItem::Entry(fi, ei) = item {
+                                if new_entry_pairs.contains(&(*fi, *ei)) {
+                                    self.selection.toggle(idx, &self.visible_items);
+                                }
                             }
                         }
                     }
@@ -759,20 +849,23 @@ impl TuiApp {
                     }
                     self.message = Some("Commented".into());
 
-                    // Rebuild and restore selection range (comment path - entry count doesn't change)
                     self.rebuild_list();
                     self.selection.clear();
-                    let new_end =
-                        last_visible.min(self.visible_items.len().saturating_sub(1));
-                    for idx in first_visible..=new_end {
-                        if matches!(
-                            self.visible_items.get(idx),
-                            Some(ListItem::Entry(_, _))
-                        ) {
-                            self.selection.toggle(idx, &self.visible_items);
+                    // Only restore selection if there was one before (Feature 3 fix)
+                    if had_selection {
+                        let new_end =
+                            last_visible.min(self.visible_items.len().saturating_sub(1));
+                        for idx in first_visible..=new_end {
+                            if matches!(
+                                self.visible_items.get(idx),
+                                Some(ListItem::Entry(_, _))
+                            ) {
+                                self.selection.toggle(idx, &self.visible_items);
+                            }
                         }
                     }
                 }
+                // In ShowingDetail: stay in the popup (don't change mode)
             }
             Action::AddFile => {
                 self.text_input = Some(crate::tui::state::TextInputState {
@@ -1029,6 +1122,197 @@ impl TuiApp {
                 .insertion_cursor
                 .min(self.visible_items.len().saturating_sub(1));
             self.message = Some("Moved".into());
+        }
+    }
+
+    /// Execute file move: reorder file in config and profile
+    fn execute_file_move(&mut self) {
+        if let Some(fms) = self.file_move_state.take() {
+            let target_fi = match self.visible_items.get(fms.insertion_cursor) {
+                Some(ListItem::FileHeader(fi)) => *fi,
+                _ => fms.original_fi,
+            };
+
+            if target_fi == fms.original_fi {
+                // No change — just restore expanded states
+                self.restore_expanded(&fms.saved_expanded);
+                self.mode = AppMode::Normal;
+                self.rebuild_list();
+                self.message = Some("No change".into());
+                return;
+            }
+
+            // Reorder profile.files
+            let file = self.profile.files.remove(fms.original_fi);
+            self.profile.files.insert(target_fi, file);
+
+            // Fix file_index on all entries
+            for (fi, f) in self.profile.files.iter_mut().enumerate() {
+                for entry in &mut f.entries {
+                    entry.file_index = fi;
+                }
+            }
+
+            // Reorder config paths
+            let shell_key = self.shell_key.clone();
+            if let Some(files_config) = self.config.files.get_mut(&shell_key) {
+                if fms.original_fi < files_config.paths.len()
+                    && target_fi < files_config.paths.len()
+                {
+                    let path = files_config.paths.remove(fms.original_fi);
+                    files_config.paths.insert(target_fi, path);
+                }
+            }
+            let _ = self.config.save();
+
+            // Restore expanded states mapped to new positions
+            let mut new_expanded = fms.saved_expanded.clone();
+            let removed = new_expanded.remove(fms.original_fi);
+            new_expanded.insert(target_fi, removed);
+            self.restore_expanded(&new_expanded);
+
+            self.mode = AppMode::Normal;
+            self.rebuild_list();
+
+            // Place cursor on the moved file's new header
+            let cursor_pos = self
+                .visible_items
+                .iter()
+                .position(|item| matches!(item, ListItem::FileHeader(fi) if *fi == target_fi))
+                .unwrap_or(0);
+            self.cursor = cursor_pos;
+            self.message = Some("File moved".into());
+        }
+    }
+
+    /// Cancel file move: restore expanded states
+    fn cancel_file_move(&mut self) {
+        if let Some(fms) = self.file_move_state.take() {
+            self.restore_expanded(&fms.saved_expanded);
+            self.mode = AppMode::Normal;
+            self.rebuild_list();
+            // Place cursor on original file's header
+            let cursor_pos = self
+                .visible_items
+                .iter()
+                .position(|item| matches!(item, ListItem::FileHeader(fi) if *fi == fms.original_fi))
+                .unwrap_or(0);
+            self.cursor = cursor_pos;
+            self.message = Some("File move cancelled".into());
+        }
+    }
+
+    /// Restore per-file expanded states
+    fn restore_expanded(&mut self, states: &[bool]) {
+        for (i, file) in self.profile.files.iter_mut().enumerate() {
+            if let Some(&expanded) = states.get(i) {
+                file.expanded = expanded;
+            }
+        }
+    }
+
+    /// Check if a visible-list position belongs to a blocked file
+    fn is_position_blocked(
+        items: &[ListItem],
+        files: &[crate::model::profile::ProfileFile],
+        pos: usize,
+    ) -> bool {
+        let fi = match items.get(pos) {
+            Some(ListItem::FileHeader(fi)) | Some(ListItem::Entry(fi, _)) => *fi,
+            None => return true,
+        };
+        fi < files.len() && (!files[fi].exists || !files[fi].writable)
+    }
+
+    /// Move cursor up in Moving mode, skipping blocked files
+    fn move_cursor_up(&mut self) {
+        if let Some(ref mut ms) = self.move_state {
+            let old = ms.insertion_cursor;
+            if old == 0 {
+                return;
+            }
+            let mut pos = old - 1;
+            loop {
+                if !Self::is_position_blocked(
+                    &self.visible_items,
+                    &self.profile.files,
+                    pos,
+                ) {
+                    ms.insertion_cursor = pos;
+                    return;
+                }
+                if pos == 0 {
+                    break;
+                }
+                pos -= 1;
+            }
+            self.message = Some("No writable file to move to".into());
+        }
+    }
+
+    /// Move cursor down in Moving mode, skipping blocked files
+    fn move_cursor_down(&mut self) {
+        if let Some(ref mut ms) = self.move_state {
+            let old = ms.insertion_cursor;
+            let max_idx = self.visible_items.len().saturating_sub(1);
+            if old >= max_idx {
+                return;
+            }
+            let mut pos = old + 1;
+            loop {
+                if !Self::is_position_blocked(
+                    &self.visible_items,
+                    &self.profile.files,
+                    pos,
+                ) {
+                    ms.insertion_cursor = pos;
+                    return;
+                }
+                if pos >= max_idx {
+                    break;
+                }
+                pos += 1;
+            }
+            self.message = Some("No writable file to move to".into());
+        }
+    }
+
+    /// After a page-jump in Moving mode, snap to nearest non-blocked position
+    fn snap_move_cursor_to_non_blocked(&mut self) {
+        if let Some(ref mut ms) = self.move_state {
+            let pos = ms.insertion_cursor;
+            if !Self::is_position_blocked(&self.visible_items, &self.profile.files, pos) {
+                return;
+            }
+            let max_idx = self.visible_items.len().saturating_sub(1);
+            let mut fwd = pos + 1;
+            while fwd <= max_idx {
+                if !Self::is_position_blocked(
+                    &self.visible_items,
+                    &self.profile.files,
+                    fwd,
+                ) {
+                    ms.insertion_cursor = fwd;
+                    return;
+                }
+                fwd += 1;
+            }
+            let mut bwd = pos.saturating_sub(1);
+            loop {
+                if !Self::is_position_blocked(
+                    &self.visible_items,
+                    &self.profile.files,
+                    bwd,
+                ) {
+                    ms.insertion_cursor = bwd;
+                    return;
+                }
+                if bwd == 0 {
+                    break;
+                }
+                bwd -= 1;
+            }
+            self.message = Some("No writable file to move to".into());
         }
     }
 

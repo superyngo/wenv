@@ -157,7 +157,7 @@ paths = [
 | `x` | Cut selected entries |
 | `c` | Copy selected entries |
 | `v` | Paste clipboard entries |
-| `m` | Enter move mode |
+| `m` | Enter move mode (entry or file) |
 | `r` | Toggle remark (comment/uncomment) |
 | `a` | Add file path to config |
 | `0` | Collapse all files |

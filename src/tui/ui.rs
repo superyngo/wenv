@@ -205,11 +205,16 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
         .map(|(i, item)| {
             let is_cursor = i == app.cursor;
             let is_selected = app.selection.is_selected(i);
-            let is_move_target = app.mode == AppMode::Moving
+            let is_move_target = (app.mode == AppMode::Moving
                 && app
                     .move_state
                     .as_ref()
-                    .is_some_and(|ms| ms.insertion_cursor == i);
+                    .is_some_and(|ms| ms.insertion_cursor == i))
+                || (app.mode == AppMode::MovingFile
+                    && app
+                        .file_move_state
+                        .as_ref()
+                        .is_some_and(|fms| fms.insertion_cursor == i));
 
             match item {
                 ProfileListItem::FileHeader(fi) => {
@@ -525,7 +530,7 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(" Entry Detail (Esc to close) ")
+        .title(" Entry Detail (e:edit r:remark Esc:close) ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
@@ -570,7 +575,7 @@ fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
         Line::from("  x           Cut selected entries"),
         Line::from("  c           Copy selected entries"),
         Line::from("  v           Paste entries"),
-        Line::from("  m           Move mode (drag to reposition)"),
+        Line::from("  m           Move entry/file (drag to reposition)"),
         Line::from("  z           Undo last operation"),
         Line::from("  r           Toggle remark"),
         Line::from("  a           Add file path"),
