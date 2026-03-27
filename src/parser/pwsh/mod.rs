@@ -38,8 +38,9 @@ use crate::parser::Parser;
 
 use control::{count_control_end, count_control_start};
 use parsers::{
-    detect_function_start, detect_scriptblock_start, is_block_comment_end, is_block_comment_start,
-    is_heredoc_end, try_parse_alias, try_parse_env, try_parse_source,
+    detect_class_start, detect_enum_start, detect_function_start, detect_scriptblock_start,
+    is_block_comment_end, is_block_comment_start, is_heredoc_end, try_parse_alias, try_parse_env,
+    try_parse_import_module, try_parse_source,
 };
 
 use crate::parser::ParseEvent;
@@ -383,6 +384,25 @@ impl Parser for PowerShellParser {
                 ParseEvent::None => {}
             }
 
+            // Try import-module
+            match try_parse_import_module(trimmed, line_number) {
+                ParseEvent::Complete(entry) => {
+                    let (pending_entry_to_add, merged) =
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
+                    }
+                    pending_entry = Some(entry_to_trailing_pending(merged));
+                    continue;
+                }
+                ParseEvent::Started { .. } => {
+                    unreachable!("Import-Module should not return Started");
+                }
+                ParseEvent::None => {}
+            }
+
             // Try function
             if let Some(func_name) = detect_function_start(trimmed) {
                 let (open, close) = count_braces_outside_quotes(trimmed);
@@ -420,6 +440,92 @@ impl Parser for PowerShellParser {
                         &merged_first_line,
                         brace_count,
                     ));
+                }
+                continue;
+            }
+
+            // Try class
+            if let Some(class_name) = detect_class_start(trimmed) {
+                let (open, close) = count_braces_outside_quotes(trimmed);
+                let brace_count = (open as i32).saturating_sub(close as i32);
+                let is_single_line = brace_count == 0 && trimmed.contains('}');
+
+                if is_single_line {
+                    let entry = Entry::new(EntryType::Code, class_name, line.to_string())
+                        .with_line_number(line_number)
+                        .with_end_line(line_number);
+                    let (pending_entry_to_add, merged) =
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
+                    }
+                    pending_entry = Some(entry_to_trailing_pending(merged));
+                } else {
+                    let (merged_first_line, start_line) =
+                        if let Some(pending) = pending_entry.take() {
+                            if pending.can_merge_down() {
+                                let merged = format!("{}\n{}", pending.raw_content(), line);
+                                (merged, pending.start_line)
+                            } else {
+                                result.add_entry(self.build_entry_from_pending(pending));
+                                (line.to_string(), line_number)
+                            }
+                        } else {
+                            (line.to_string(), line_number)
+                        };
+                    let mut block = PendingBlock::new(
+                        start_line,
+                        &merged_first_line,
+                        BoundaryType::BraceCounting { brace_count },
+                    );
+                    block.entry_hint = Some(EntryType::Code);
+                    block.name = Some(class_name);
+                    active_block = Some(block);
+                }
+                continue;
+            }
+
+            // Try enum (must have { on same line per ENUM_RE)
+            if let Some(enum_name) = detect_enum_start(trimmed) {
+                let (open, close) = count_braces_outside_quotes(trimmed);
+                let brace_count = (open as i32).saturating_sub(close as i32);
+                let is_single_line = brace_count == 0 && trimmed.contains('}');
+
+                if is_single_line {
+                    let entry = Entry::new(EntryType::Code, enum_name.clone(), line.to_string())
+                        .with_line_number(line_number)
+                        .with_end_line(line_number);
+                    let (pending_entry_to_add, merged) =
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
+                    }
+                    pending_entry = Some(entry_to_trailing_pending(merged));
+                } else {
+                    let (merged_first_line, start_line) =
+                        if let Some(pending) = pending_entry.take() {
+                            if pending.can_merge_down() {
+                                let merged = format!("{}\n{}", pending.raw_content(), line);
+                                (merged, pending.start_line)
+                            } else {
+                                result.add_entry(self.build_entry_from_pending(pending));
+                                (line.to_string(), line_number)
+                            }
+                        } else {
+                            (line.to_string(), line_number)
+                        };
+                    let mut block = PendingBlock::new(
+                        start_line,
+                        &merged_first_line,
+                        BoundaryType::BraceCounting { brace_count },
+                    );
+                    block.entry_hint = Some(EntryType::Code);
+                    block.name = Some(enum_name);
+                    active_block = Some(block);
                 }
                 continue;
             }
@@ -1365,5 +1471,86 @@ C:\bin
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].entry_type, EntryType::Code);
         assert_eq!(result.entries[0].name, "$block");
+    }
+
+    #[test]
+    fn test_do_while_control_structure() {
+        let parser = PowerShellParser::new();
+        let content = "do {\n    Write-Host 'loop'\n} while ($true)";
+        let result = parser.parse(content);
+
+        let code_blocks: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Code)
+            .collect();
+        assert_eq!(code_blocks.len(), 1);
+        assert_eq!(code_blocks[0].line_number, Some(1));
+        assert_eq!(code_blocks[0].end_line, Some(3));
+    }
+
+    #[test]
+    fn test_class_detection() {
+        let parser = PowerShellParser::new();
+        let content = "class MyClass {\n    [string]$Name\n    Method() { }\n}";
+        let result = parser.parse(content);
+
+        let code_blocks: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Code)
+            .collect();
+        assert_eq!(code_blocks.len(), 1);
+        assert_eq!(code_blocks[0].name, "MyClass");
+        assert_eq!(code_blocks[0].line_number, Some(1));
+        assert_eq!(code_blocks[0].end_line, Some(4));
+    }
+
+    #[test]
+    fn test_enum_detection() {
+        let parser = PowerShellParser::new();
+        let content = "enum Status {\n    Active\n    Inactive\n}";
+        let result = parser.parse(content);
+
+        let code_blocks: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Code)
+            .collect();
+        assert_eq!(code_blocks.len(), 1);
+        assert_eq!(code_blocks[0].name, "Status");
+    }
+
+    #[test]
+    fn test_import_module_as_source() {
+        let parser = PowerShellParser::new();
+        let content = "Import-Module posh-git";
+        let result = parser.parse(content);
+
+        let sources: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Source)
+            .collect();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].name, "posh-git");
+        assert_eq!(sources[0].value, "Import-Module posh-git");
+    }
+
+    #[test]
+    fn test_env_single_quoted_heredoc() {
+        let parser = PowerShellParser::new();
+        let content = "$env:PATH = @'\nC:\\bin\nD:\\tools\n'@";
+        let result = parser.parse(content);
+
+        let envs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::EnvVar)
+            .collect();
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].name, "PATH");
+        assert!(envs[0].value.contains("C:\\bin"));
+        assert!(envs[0].value.contains("'@"));
     }
 }

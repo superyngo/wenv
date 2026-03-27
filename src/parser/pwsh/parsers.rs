@@ -82,7 +82,18 @@ pub fn try_parse_alias(line: &str, line_num: usize) -> ParseEvent {
 /// - `ParseEvent::Started { ... }` for Here-String start
 /// - `ParseEvent::None` otherwise
 pub fn try_parse_env(line: &str, line_num: usize) -> ParseEvent {
-    // Check for Here-String start FIRST (multi-line)
+    // Check for single-quoted Here-String start first
+    if let Some(caps) = ENV_HEREDOC_START_SINGLE_RE.captures(line) {
+        let name = caps[1].to_string();
+        return ParseEvent::Started {
+            entry_type: EntryType::EnvVar,
+            name,
+            boundary: BoundaryType::QuoteCounting { quote_count: 1 },
+            first_line: line.to_string(),
+        };
+    }
+
+    // Check for double-quoted Here-String start (multi-line)
     if let Some(caps) = ENV_HEREDOC_START_RE.captures(line) {
         let name = caps[1].to_string();
         return ParseEvent::Started {
@@ -176,6 +187,29 @@ pub fn detect_scriptblock_start(line: &str) -> Option<String> {
     None
 }
 
+pub fn detect_class_start(line: &str) -> Option<String> {
+    CLASS_RE.captures(line).map(|caps| caps[1].to_string())
+}
+
+pub fn detect_enum_start(line: &str) -> Option<String> {
+    ENUM_RE.captures(line).map(|caps| caps[1].to_string())
+}
+
+pub fn try_parse_import_module(line: &str, line_num: usize) -> ParseEvent {
+    if let Some(caps) = IMPORT_MODULE_RE.captures(line) {
+        let module_name = caps[1].trim().to_string();
+        let name = module_name
+            .split_whitespace()
+            .next()
+            .unwrap_or(&module_name)
+            .to_string();
+        return ParseEvent::Complete(
+            Entry::new(EntryType::Source, name, line.to_string()).with_line_number(line_num),
+        );
+    }
+    ParseEvent::None
+}
+
 /// Check if a line is a Here-String end marker.
 ///
 /// Matches: `"@`
@@ -188,7 +222,7 @@ pub fn detect_scriptblock_start(line: &str) -> Option<String> {
 ///
 /// `true` if this is a Here-String end marker.
 pub fn is_heredoc_end(line: &str) -> bool {
-    line == r#""@"#
+    line == r#""@"# || line == "'@"
 }
 
 pub fn is_block_comment_start(line: &str) -> bool {
@@ -277,7 +311,8 @@ mod tests {
     #[test]
     fn test_is_heredoc_end() {
         assert!(is_heredoc_end(r#""@"#));
-        assert!(!is_heredoc_end(r#"  "@"#)); // Trimmed before calling
+        assert!(is_heredoc_end("'@"));
+        assert!(!is_heredoc_end(r#"  "@"#));
         assert!(!is_heredoc_end("other line"));
     }
 
@@ -305,5 +340,36 @@ mod tests {
     fn test_detect_scriptblock_none() {
         assert_eq!(detect_scriptblock_start("Write-Host 'hello'"), None);
         assert_eq!(detect_scriptblock_start("function foo {"), None);
+    }
+
+    #[test]
+    fn test_detect_class_start() {
+        assert_eq!(
+            detect_class_start("class MyClass {"),
+            Some("MyClass".into())
+        );
+        assert_eq!(
+            detect_class_start("class MyClass : Base {"),
+            Some("MyClass".into())
+        );
+        assert_eq!(detect_class_start("Write-Host 'hi'"), None);
+    }
+
+    #[test]
+    fn test_detect_enum_start() {
+        assert_eq!(detect_enum_start("enum Status {"), Some("Status".into()));
+        assert_eq!(detect_enum_start("Write-Host 'hi'"), None);
+    }
+
+    #[test]
+    fn test_try_parse_import_module() {
+        match try_parse_import_module("Import-Module posh-git", 1) {
+            ParseEvent::Complete(entry) => {
+                assert_eq!(entry.entry_type, EntryType::Source);
+                assert_eq!(entry.name, "posh-git");
+                assert_eq!(entry.value, "Import-Module posh-git");
+            }
+            _ => panic!("Expected Complete"),
+        }
     }
 }

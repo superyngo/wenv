@@ -56,7 +56,10 @@ pub fn count_control_start(line: &str) -> usize {
             || part.starts_with("switch(")
             || part.starts_with("try ")
             || part == "try"
-            || part.starts_with("try{");
+            || part.starts_with("try{")
+            || part.starts_with("do ")
+            || part.starts_with("do{")
+            || part == "do";
 
         if starts_control {
             count += 1;
@@ -83,6 +86,16 @@ pub fn count_control_end(line: &str) -> usize {
 
     // A lone closing brace ends a control structure
     if trimmed == "}" {
+        return 1;
+    }
+
+    // `} while (...)` or `} until (...)` ends a do loop
+    if (lower.contains("} while ")
+        || lower.contains("}while ")
+        || lower.contains("} until ")
+        || lower.contains("}until "))
+        && !lower.contains('{')
+    {
         return 1;
     }
 
@@ -145,5 +158,11 @@ mod tests {
     #[test]
     fn test_count_control_end_none() {
         assert_eq!(count_control_end("Write-Host 'hello'"), 0);
+    }
+
+    #[test]
+    fn test_count_control_start_do() {
+        assert_eq!(count_control_start("do {"), 1);
+        assert_eq!(count_control_start("do{"), 1);
     }
 }

@@ -68,6 +68,11 @@ lazy_static! {
         r#"^\$env:(\w+)\s*=\s*@"$"#
     ).unwrap();
 
+    /// Matches environment variable single-quoted Here-String start: `$env:VAR = @'`
+    pub static ref ENV_HEREDOC_START_SINGLE_RE: Regex = Regex::new(
+        r#"^\$env:(\w+)\s*=\s*@'$"#
+    ).unwrap();
+
     // =========================================================================
     // Source Patterns
     // =========================================================================
@@ -118,6 +123,25 @@ lazy_static! {
     /// Matches PowerShell block comment end: `#>`
     pub static ref BLOCK_COMMENT_END_RE: Regex = Regex::new(
         r#"^\s*#>\s*$"#
+    ).unwrap();
+
+    // =========================================================================
+    // Class / Enum / Import-Module Patterns
+    // =========================================================================
+
+    /// Matches class definition: `class Name` (with optional inheritance)
+    pub static ref CLASS_RE: Regex = Regex::new(
+        r#"^class\s+(\w[\w-]*)"#)
+    .unwrap();
+
+    /// Matches enum definition: `enum Name {`
+    pub static ref ENUM_RE: Regex = Regex::new(
+        r#"^enum\s+(\w[\w-]*)\s*\{"#
+    ).unwrap();
+
+    /// Matches Import-Module: `Import-Module name` or `ipmo name`
+    pub static ref IMPORT_MODULE_RE: Regex = Regex::new(
+        r#"^(?:Import-Module|ipmo)\s+(.+)$"#
     ).unwrap();
 }
 
@@ -225,5 +249,37 @@ mod tests {
         assert!(BLOCK_COMMENT_END_RE.is_match("#>"));
         assert!(BLOCK_COMMENT_END_RE.is_match("  #>  "));
         assert!(!BLOCK_COMMENT_END_RE.is_match("Write-Host"));
+    }
+
+    #[test]
+    fn test_env_heredoc_start_single_re() {
+        let caps = ENV_HEREDOC_START_SINGLE_RE
+            .captures("$env:PATH = @'")
+            .unwrap();
+        assert_eq!(&caps[1], "PATH");
+    }
+
+    #[test]
+    fn test_class_re() {
+        let caps = CLASS_RE.captures("class MyClass {").unwrap();
+        assert_eq!(&caps[1], "MyClass");
+
+        let caps = CLASS_RE.captures("class MyClass : Base {").unwrap();
+        assert_eq!(&caps[1], "MyClass");
+    }
+
+    #[test]
+    fn test_enum_re() {
+        let caps = ENUM_RE.captures("enum Status {").unwrap();
+        assert_eq!(&caps[1], "Status");
+    }
+
+    #[test]
+    fn test_import_module_re() {
+        let caps = IMPORT_MODULE_RE.captures("Import-Module posh-git").unwrap();
+        assert_eq!(&caps[1], "posh-git");
+
+        let caps = IMPORT_MODULE_RE.captures("ipmo posh-git").unwrap();
+        assert_eq!(&caps[1], "posh-git");
     }
 }
