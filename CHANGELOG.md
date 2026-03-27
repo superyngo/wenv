@@ -7,11 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Unreleased Update - 2026-03-27
+## [v0.13.0] - 2026-03-27
+
+### ✨ NEW FEATURES
+
+- Add PowerShell `do/while` and `do/until` loop detection as control structures
+- Add PowerShell `class` and `enum` type detection as control structures
+- Add PowerShell `Import-Module` parsing as Source entries
+- Add PowerShell single-quoted Here-String (`@'...'@`) support for environment variables
+- Add PowerShell block comment (`<# ... #>`) support
+- Add PowerShell pipeline block (`| { ... }`) and scriptblock assignment detection
+- Port Bash merging logic to PowerShell: comment merge-down, trailing blank absorption, adjacent code merge
+
+### 🔧 CHANGED
+
+- Extract `merge_pending_with_structured` and `entry_to_trailing_pending` to `pending.rs`
+
+### 🐛 FIXED
+
 - Fix detail popup height: calculate visual line count accounting for word-wrap instead of counting logical lines, preventing value lines from being clipped when file paths or long values wrap to multiple rows
 - Fix adjacent comment merging: a comment block that absorbs a trailing blank is now sealed and cannot merge with subsequent comments or code — they become separate entries
-- Simplify parser architecture: replace redundant `merge_pending_with_structured()` and inline branch patterns with a single `can_merge_down()` method on `PendingBlock`
-- Apply fix and simplification to both Bash and PowerShell parsers
 
 ## [v0.12.0] - 2026-03-27
 
