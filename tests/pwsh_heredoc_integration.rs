@@ -28,14 +28,12 @@ Set-Alias ll Get-ChildItem
 
     assert_eq!(envs.len(), 3, "Should parse 3 environment variables");
 
-    // Verify single-line env var
+    // Verify single-line env var (comment merged into it)
     let editor = envs.iter().find(|e| e.name == "EDITOR").unwrap();
-    // With Raw Value Architecture, value contains complete syntax
-    assert_eq!(editor.value, "$env:EDITOR = \"code\"");
-    assert!(
-        editor.end_line.is_none(),
-        "Single-line should not have end_line"
-    );
+    assert!(editor.value.starts_with("# Test file"));
+    assert!(editor.value.contains("$env:EDITOR = \"code\""));
+    assert_eq!(editor.line_number, Some(1));
+    assert_eq!(editor.end_line, Some(3)); // Absorbs trailing blank line
 
     // Verify multi-line env var
     let path = envs.iter().find(|e| e.name == "PATH").unwrap();

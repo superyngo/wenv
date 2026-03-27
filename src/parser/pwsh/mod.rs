@@ -31,7 +31,9 @@ pub mod patterns;
 
 use crate::model::{Entry, EntryType, ParseResult, ShellType};
 use crate::parser::builders::{count_braces_outside_quotes, CommentBlockBuilder};
-use crate::parser::pending::{BoundaryType, MergeType, PendingBlock};
+use crate::parser::pending::{
+    entry_to_trailing_pending, merge_pending_with_structured, BoundaryType, MergeType, PendingBlock,
+};
 use crate::parser::Parser;
 
 use control::{count_control_end, count_control_start};
@@ -108,8 +110,10 @@ impl Parser for PowerShellParser {
                         *brace_count = (*brace_count).saturating_sub(close as i32);
 
                         if *brace_count == 0 {
-                            let entry = self.build_entry_from_pending(active_block.take().unwrap());
-                            result.add_entry(entry);
+                            let completed = active_block.take().unwrap();
+                            pending_entry = Some(entry_to_trailing_pending(
+                                self.build_entry_from_pending(completed),
+                            ));
                         }
                     }
                     BoundaryType::QuoteCounting { quote_count: _ } => {
@@ -127,7 +131,7 @@ impl Parser for PowerShellParser {
                                 .join("\n");
                             completed.value = Some(value);
                             let entry = self.build_entry_from_pending(completed);
-                            result.add_entry(entry);
+                            pending_entry = Some(entry_to_trailing_pending(entry));
                         }
                     }
                     BoundaryType::KeywordTracking { ref mut depth } => {
@@ -217,7 +221,10 @@ impl Parser for PowerShellParser {
                 match &mut pending_entry {
                     Some(pending) if pending.can_absorb_blank() => {
                         pending.add_line(line, line_number);
-                        if pending.merge_type() == Some(MergeType::Comment) {
+                        if matches!(
+                            pending.merge_type(),
+                            Some(MergeType::CodeWithBlanks) | Some(MergeType::Comment)
+                        ) {
                             pending.has_absorbed_blanks = true;
                         }
                     }
@@ -241,8 +248,8 @@ impl Parser for PowerShellParser {
             if CommentBlockBuilder::is_standalone_comment(trimmed) {
                 match &mut pending_entry {
                     Some(pending) if pending.can_absorb_comment() => {
-                        // Comment merges with Comment
                         pending.add_line(line, line_number);
+                        pending.increment_comment_count();
                     }
                     Some(_) => {
                         // Non-Comment pending: flush and start new comment
@@ -265,15 +272,17 @@ impl Parser for PowerShellParser {
             // Try alias
             match try_parse_alias(trimmed, line_number) {
                 ParseEvent::Complete(entry) => {
-                    // Flush pending entry
-                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(e);
+                    let (pending_entry_to_add, merged) =
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
                     }
-                    result.add_entry(entry);
+                    pending_entry = Some(entry_to_trailing_pending(merged));
                     continue;
                 }
                 ParseEvent::Started { .. } => {
-                    // PowerShell aliases are currently single-line only
                     unreachable!("PowerShell aliases should not return Started");
                 }
                 ParseEvent::None => {}
@@ -282,11 +291,14 @@ impl Parser for PowerShellParser {
             // Try env var (handles both single-line and Here-String start)
             match try_parse_env(trimmed, line_number) {
                 ParseEvent::Complete(entry) => {
-                    // Flush pending entry
-                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(e);
+                    let (pending_entry_to_add, merged) =
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
                     }
-                    result.add_entry(entry);
+                    pending_entry = Some(entry_to_trailing_pending(merged));
                     continue;
                 }
                 ParseEvent::Started {
@@ -295,14 +307,21 @@ impl Parser for PowerShellParser {
                     boundary,
                     first_line,
                 } => {
-                    // Flush pending entry
-                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(e);
-                    }
-                    // Start Here-String block
+                    let (merged_first_line, start_line) =
+                        if let Some(pending) = pending_entry.take() {
+                            if pending.can_merge_down() {
+                                let merged = format!("{}\n{}", pending.raw_content(), first_line);
+                                (merged, pending.start_line)
+                            } else {
+                                result.add_entry(self.build_entry_from_pending(pending));
+                                (first_line.to_string(), line_number)
+                            }
+                        } else {
+                            (first_line.to_string(), line_number)
+                        };
                     active_block = Some(PendingBlock {
-                        lines: vec![first_line],
-                        start_line: line_number,
+                        lines: vec![merged_first_line],
+                        start_line,
                         end_line: line_number,
                         boundary,
                         entry_hint: Some(entry_type),
@@ -319,15 +338,17 @@ impl Parser for PowerShellParser {
             // Try source
             match try_parse_source(trimmed, line_number) {
                 ParseEvent::Complete(entry) => {
-                    // Flush pending entry
-                    if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(e);
+                    let (pending_entry_to_add, merged) =
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
                     }
-                    result.add_entry(entry);
+                    pending_entry = Some(entry_to_trailing_pending(merged));
                     continue;
                 }
                 ParseEvent::Started { .. } => {
-                    // Source statements are currently single-line only
                     unreachable!("Source statements should not return Started");
                 }
                 ParseEvent::None => {}
@@ -335,23 +356,41 @@ impl Parser for PowerShellParser {
 
             // Try function
             if let Some(func_name) = detect_function_start(trimmed) {
-                // Flush pending entry
-                if let Some(e) = self.flush_pending_comment_code(&mut pending_entry) {
-                    result.add_entry(e);
-                }
-
                 let (open, close) = count_braces_outside_quotes(trimmed);
                 let brace_count = (open as i32).saturating_sub(close as i32);
+                let is_single_line = brace_count == 0 && trimmed.contains('}');
 
-                let func_block =
-                    PendingBlock::function(func_name.clone(), line_number, line, brace_count);
-
-                // Single-line function check
-                if brace_count == 0 && trimmed.contains('}') {
-                    let entry = self.build_entry_from_pending(func_block);
-                    result.add_entry(entry);
+                if is_single_line {
+                    let entry = Entry::new(EntryType::Function, func_name, line.to_string())
+                        .with_line_number(line_number)
+                        .with_end_line(line_number);
+                    let (pending_entry_to_add, merged) =
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
+                    }
+                    pending_entry = Some(entry_to_trailing_pending(merged));
                 } else {
-                    active_block = Some(func_block);
+                    let (merged_first_line, start_line) =
+                        if let Some(pending) = pending_entry.take() {
+                            if pending.can_merge_down() {
+                                let merged = format!("{}\n{}", pending.raw_content(), line);
+                                (merged, pending.start_line)
+                            } else {
+                                result.add_entry(self.build_entry_from_pending(pending));
+                                (line.to_string(), line_number)
+                            }
+                        } else {
+                            (line.to_string(), line_number)
+                        };
+                    active_block = Some(PendingBlock::function(
+                        func_name,
+                        start_line,
+                        &merged_first_line,
+                        brace_count,
+                    ));
                 }
                 continue;
             }
@@ -372,11 +411,16 @@ impl Parser for PowerShellParser {
                     }
                 }
                 Some(pending) if pending.entry_hint == Some(EntryType::Code) => {
-                    // Non-blank Code pending + new non-blank Code → flush pending, new pending
-                    if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(entry);
+                    if pending.merge_type() == Some(MergeType::CodeWithBlanks)
+                        && !pending.has_absorbed_blanks
+                    {
+                        pending.add_line(line, line_number);
+                    } else {
+                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
+                            result.add_entry(entry);
+                        }
+                        pending_entry = Some(PendingBlock::code(line_number, line));
                     }
-                    pending_entry = Some(PendingBlock::code(line_number, line));
                 }
                 Some(_) => {
                     // Flush pending, start new pending Code
@@ -461,9 +505,9 @@ impl PowerShellParser {
                     .with_line_number(block.start_line)
                     .with_end_line(block.end_line)
             }
-            _ => {
-                // Shouldn't happen, but handle gracefully
-                Entry::new(entry_type, "unknown".to_string(), raw_content.clone())
+            EntryType::Alias | EntryType::Source => {
+                let name = block.name.unwrap_or_else(|| "unknown".to_string());
+                Entry::new(entry_type, name, raw_content)
                     .with_line_number(block.start_line)
                     .with_end_line(block.end_line)
             }
@@ -668,7 +712,7 @@ D:\tools
         assert_eq!(envs[0].name, "EDITOR");
         assert_eq!(envs[0].value, r#"$env:EDITOR = "code""#);
         assert_eq!(envs[0].line_number, Some(1));
-        assert!(envs[0].end_line.is_none());
+        assert_eq!(envs[0].end_line, Some(1));
     }
 
     #[test]
@@ -971,15 +1015,12 @@ C:\bin
         let content = "# Section header\nSet-Alias ll Get-ChildItem";
         let result = parser.parse(content);
 
-        assert_eq!(result.entries.len(), 2);
-
-        let comment = &result.entries[0];
-        assert_eq!(comment.entry_type, EntryType::Comment);
-        assert_eq!(comment.line_number, Some(1));
-
-        let alias = &result.entries[1];
-        assert_eq!(alias.entry_type, EntryType::Alias);
-        assert_eq!(alias.name, "ll");
+        assert_eq!(result.entries.len(), 1);
+        let entry = &result.entries[0];
+        assert_eq!(entry.entry_type, EntryType::Alias);
+        assert_eq!(entry.name, "ll");
+        assert_eq!(entry.line_number, Some(1));
+        assert!(entry.value.starts_with("# Section header"));
     }
 
     #[test]
@@ -1035,5 +1076,107 @@ C:\bin
         // value should contain comment + control structure
         assert!(code_blocks[0].value.contains("# This is a conditional"));
         assert!(code_blocks[0].value.contains("if ($true)"));
+    }
+
+    #[test]
+    fn test_single_comment_merges_into_alias() {
+        let parser = PowerShellParser::new();
+        let content = "# My alias\nSet-Alias ll Get-ChildItem";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[0].name, "ll");
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(2));
+    }
+
+    #[test]
+    fn test_multi_comment_does_not_merge_into_alias() {
+        let parser = PowerShellParser::new();
+        let content = "# Header\n# Description\nSet-Alias ll Get-ChildItem";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::Comment);
+        assert_eq!(result.entries[1].entry_type, EntryType::Alias);
+    }
+
+    #[test]
+    fn test_alias_absorbs_trailing_blanks() {
+        let parser = PowerShellParser::new();
+        let content = "Set-Alias ll Get-ChildItem\n\n\nSet-Alias gs git";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[0].name, "ll");
+        assert_eq!(result.entries[0].end_line, Some(3));
+    }
+
+    #[test]
+    fn test_adjacent_code_lines_merge() {
+        let parser = PowerShellParser::new();
+        let content = "Write-Host 'a'\nWrite-Host 'b'\nWrite-Host 'c'";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(3));
+    }
+
+    #[test]
+    fn test_code_with_blank_gap_splits() {
+        let parser = PowerShellParser::new();
+        let content = "Write-Host 'a'\n\nWrite-Host 'b'";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].end_line, Some(2));
+        assert_eq!(result.entries[1].line_number, Some(3));
+    }
+
+    #[test]
+    fn test_function_absorbs_trailing_blanks() {
+        let parser = PowerShellParser::new();
+        let content = "function Get-Name {\n    'test'\n}\n\nSet-Alias ll Get-ChildItem";
+        let result = parser.parse(content);
+
+        let funcs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Function)
+            .collect();
+        assert_eq!(funcs.len(), 1);
+        assert_eq!(funcs[0].end_line, Some(4));
+    }
+
+    #[test]
+    fn test_single_comment_merges_into_function() {
+        let parser = PowerShellParser::new();
+        let content = "# Helper\nfunction Get-Name {\n    'test'\n}";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].entry_type, EntryType::Function);
+        assert_eq!(result.entries[0].name, "Get-Name");
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert!(result.entries[0].value.starts_with("# Helper"));
+    }
+
+    #[test]
+    fn test_env_absorbs_trailing_blanks() {
+        let parser = PowerShellParser::new();
+        let content = r#"$env:EDITOR = "code""#;
+        let result = parser.parse(content);
+
+        let envs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::EnvVar)
+            .collect();
+        assert_eq!(envs.len(), 1);
+        assert_eq!(envs[0].name, "EDITOR");
     }
 }
