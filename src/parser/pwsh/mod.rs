@@ -184,14 +184,11 @@ impl Parser for PowerShellParser {
             control_depth += count_control_start(trimmed);
 
             if control_depth > 0 || (prev_depth > 0 && control_depth == 0) {
-                // Start control block - merge pending Comment/Code if present
+                // Start control block - merge pending single comment if present
                 if active_block.is_none() && prev_depth == 0 && control_depth > 0 {
                     if let Some(pending) = pending_entry.take() {
-                        if matches!(
-                            pending.entry_hint,
-                            Some(EntryType::Comment) | Some(EntryType::Code)
-                        ) {
-                            // Seed block with pending content
+                        if pending.can_merge_down() {
+                            // Seed block with single comment + first line
                             let mut lines = pending.lines;
                             lines.push(line.to_string());
                             active_block = Some(PendingBlock {
@@ -551,14 +548,12 @@ impl Parser for PowerShellParser {
                 } else {
                     let (merged_first_line, start_line) =
                         if let Some(pending) = pending_entry.take() {
-                            if matches!(
-                                pending.entry_hint,
-                                Some(EntryType::Comment) | Some(EntryType::Code)
-                            ) && !pending.has_absorbed_blanks
-                            {
-                                let mut lines = pending.lines;
-                                lines.push(line.to_string());
-                                (lines, pending.start_line)
+                            if pending.can_merge_down() {
+                                let merged = format!("{}\n{}", pending.raw_content(), line);
+                                (
+                                    merged.lines().map(String::from).collect::<Vec<_>>(),
+                                    pending.start_line,
+                                )
                             } else {
                                 result.add_entry(self.build_entry_from_pending(pending));
                                 (vec![line.to_string()], line_number)
@@ -1394,7 +1389,7 @@ C:\bin
     }
 
     #[test]
-    fn test_pipeline_with_preceding_comment() {
+    fn test_single_comment_merges_into_scriptblock() {
         let parser = PowerShellParser::new();
         let content = "# Build numbers\n1..9 | ForEach-Object {\n    $_\n}";
         let result = parser.parse(content);
@@ -1552,5 +1547,72 @@ C:\bin
         assert_eq!(envs[0].name, "PATH");
         assert!(envs[0].value.contains("C:\\bin"));
         assert!(envs[0].value.contains("'@"));
+    }
+
+    #[test]
+    fn test_multi_comment_does_not_merge_into_scriptblock() {
+        let parser = PowerShellParser::new();
+        let content = "# comment1\n# comment2\n1..9 | ForEach-Object {\n    $_\n}";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::Comment);
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+        assert_eq!(result.entries[1].line_number, Some(3));
+    }
+
+    #[test]
+    fn test_code_does_not_merge_into_scriptblock() {
+        let parser = PowerShellParser::new();
+        let content = "echo 123\n1..9 | ForEach-Object {\n    $_\n}";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+        assert_eq!(result.entries[1].line_number, Some(2));
+    }
+
+    #[test]
+    fn test_comment_code_then_scriptblock_three_entries() {
+        let parser = PowerShellParser::new();
+        let content = "#123\n#456\necho 123\n1..9 | ForEach-Object {\n    $_\n}";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 3);
+        assert_eq!(result.entries[0].entry_type, EntryType::Comment);
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+        assert_eq!(result.entries[1].line_number, Some(3));
+        assert_eq!(result.entries[2].entry_type, EntryType::Code);
+        assert_eq!(result.entries[2].line_number, Some(4));
+    }
+
+    #[test]
+    fn test_multi_comment_does_not_merge_into_control() {
+        let parser = PowerShellParser::new();
+        let content = "# comment1\n# comment2\nif ($true) {\n    Write-Host 'yes'\n}";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::Comment);
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+        assert_eq!(result.entries[1].line_number, Some(3));
+    }
+
+    #[test]
+    fn test_code_does_not_merge_into_control() {
+        let parser = PowerShellParser::new();
+        let content = "echo 123\nif ($true) {\n    Write-Host 'yes'\n}";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+        assert_eq!(result.entries[1].line_number, Some(2));
     }
 }

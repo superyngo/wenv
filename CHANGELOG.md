@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🐛 FIXED
+
+- Preserve trailing blank lines when editing entries in the TUI editor (was stripping all trailing newlines instead of just the file-terminator newline)
+- PowerShell ScriptBlock and control structure parsing: adjacent merged comments and code blocks are no longer absorbed — they remain separate entries, matching Bash behavior
+
 ## [v0.13.0] - 2026-03-27
 
 ### ✨ NEW FEATURES

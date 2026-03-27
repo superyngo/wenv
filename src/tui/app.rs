@@ -1498,7 +1498,10 @@ impl TuiApp {
 
         match result {
             Ok(Some(new_content)) => {
-                let new_content = new_content.trim_end_matches('\n').to_string();
+                let new_content = new_content
+                    .strip_suffix('\n')
+                    .map(str::to_string)
+                    .unwrap_or(new_content);
                 if new_content != value {
                     let snapshot = crate::tui::operations::take_snapshot(&self.profile);
                     crate::tui::operations::push_undo(
@@ -1569,7 +1572,10 @@ impl TuiApp {
 
         match result {
             Ok(Some(content)) => {
-                let content = content.trim_end_matches('\n').to_string();
+                let content = content
+                    .strip_suffix('\n')
+                    .map(str::to_string)
+                    .unwrap_or(content);
                 if !content.is_empty() {
                     let parser = crate::parser::get_parser(self.profile.shell_type);
                     let parsed = parser.parse(&content);
