@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.13.1] - 2026-03-28
+
 ### 🐛 FIXED
 
 - Preserve trailing blank lines when editing entries in the TUI editor (was stripping all trailing newlines instead of just the file-terminator newline)
