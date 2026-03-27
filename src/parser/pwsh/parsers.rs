@@ -191,6 +191,14 @@ pub fn is_heredoc_end(line: &str) -> bool {
     line == r#""@"#
 }
 
+pub fn is_block_comment_start(line: &str) -> bool {
+    BLOCK_COMMENT_START_RE.is_match(line)
+}
+
+pub fn is_block_comment_end(line: &str) -> bool {
+    BLOCK_COMMENT_END_RE.is_match(line)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -38,8 +38,8 @@ use crate::parser::Parser;
 
 use control::{count_control_end, count_control_start};
 use parsers::{
-    detect_function_start, detect_scriptblock_start, is_heredoc_end, try_parse_alias,
-    try_parse_env, try_parse_source,
+    detect_function_start, detect_scriptblock_start, is_block_comment_end, is_block_comment_start,
+    is_heredoc_end, try_parse_alias, try_parse_env, try_parse_source,
 };
 
 use crate::parser::ParseEvent;
@@ -163,6 +163,13 @@ impl Parser for PowerShellParser {
                             });
                         }
                     }
+                    BoundaryType::BlockComment => {
+                        if is_block_comment_end(trimmed) {
+                            let completed = active_block.take().unwrap();
+                            let entry = self.build_entry_from_pending(completed);
+                            pending_entry = Some(entry_to_trailing_pending(entry));
+                        }
+                    }
                     _ => {}
                 }
                 continue;
@@ -210,6 +217,27 @@ impl Parser for PowerShellParser {
                             Some(PendingBlock::control(line_number, line, control_depth));
                     }
                 }
+                continue;
+            }
+
+            // ------------------------------------------------------------------
+            // Check for block comment start <#
+            // ------------------------------------------------------------------
+            if is_block_comment_start(trimmed) {
+                if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
+                    result.add_entry(entry);
+                }
+                active_block = Some(PendingBlock {
+                    lines: vec![line.to_string()],
+                    start_line: line_number,
+                    end_line: line_number,
+                    boundary: BoundaryType::BlockComment,
+                    entry_hint: Some(EntryType::Comment),
+                    name: None,
+                    value: None,
+                    comment_count: 0,
+                    has_absorbed_blanks: false,
+                });
                 continue;
             }
 
@@ -1279,6 +1307,53 @@ C:\bin
         assert_eq!(result.entries.len(), 2);
         assert_eq!(result.entries[0].end_line, Some(5));
         assert_eq!(result.entries[1].line_number, Some(6));
+    }
+
+    #[test]
+    fn test_block_comment_single() {
+        let parser = PowerShellParser::new();
+        let content = "<#\nA comment\n#>";
+        let result = parser.parse(content);
+
+        let comments: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Comment)
+            .collect();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].line_number, Some(1));
+        assert_eq!(comments[0].end_line, Some(3));
+    }
+
+    #[test]
+    fn test_block_comment_does_not_merge_with_hash_comment() {
+        let parser = PowerShellParser::new();
+        let content = "<#\nBlock\n#>\n# Regular\nWrite-Host 'hi'";
+        let result = parser.parse(content);
+
+        let comments: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Comment)
+            .collect();
+        assert_eq!(comments.len(), 1);
+        assert!(comments[0].value.contains("<#"));
+        assert!(!comments[0].value.contains("# Regular"));
+    }
+
+    #[test]
+    fn test_block_comment_with_surrounding_entries() {
+        let parser = PowerShellParser::new();
+        let content = "Set-Alias ll Get-ChildItem\n\n<#\nA note\n#>\n\nSet-Alias gs git";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 3);
+        let comments: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Comment)
+            .collect();
+        assert_eq!(comments.len(), 1);
     }
 
     #[test]

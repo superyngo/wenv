@@ -63,6 +63,9 @@ pub enum BoundaryType {
         /// The type of line being merged.
         merge_type: MergeType,
     },
+
+    /// Block comment `<# ... #>` — accumulates lines until `#>` is found.
+    BlockComment,
 }
 
 /// Type of content being merged in AdjacentMerging mode.
@@ -243,6 +246,7 @@ impl PendingBlock {
             // AdjacentMerging blocks are never "complete" by themselves;
             // they're completed externally when a non-matching line is seen.
             BoundaryType::AdjacentMerging { .. } => false,
+            BoundaryType::BlockComment => false,
         }
     }
 

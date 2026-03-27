@@ -105,6 +105,20 @@ lazy_static! {
     pub static ref SCRIPTBLOCK_ASSIGN_RE: Regex = Regex::new(
         r#"(\$\w[\w:]*)\s*=\s*\{$"#
     ).unwrap();
+
+    // =========================================================================
+    // Block Comment Patterns
+    // =========================================================================
+
+    /// Matches PowerShell block comment start: `<#`
+    pub static ref BLOCK_COMMENT_START_RE: Regex = Regex::new(
+        r#"^<#\s*$"#
+    ).unwrap();
+
+    /// Matches PowerShell block comment end: `#>`
+    pub static ref BLOCK_COMMENT_END_RE: Regex = Regex::new(
+        r#"^\s*#>\s*$"#
+    ).unwrap();
 }
 
 #[cfg(test)]
@@ -197,5 +211,19 @@ mod tests {
             .captures("$script:MyBlock = {")
             .unwrap();
         assert_eq!(&caps[1], "$script:MyBlock");
+    }
+
+    #[test]
+    fn test_block_comment_start_re() {
+        assert!(BLOCK_COMMENT_START_RE.is_match("<#"));
+        assert!(BLOCK_COMMENT_START_RE.is_match("<# "));
+        assert!(!BLOCK_COMMENT_START_RE.is_match("Write-Host"));
+    }
+
+    #[test]
+    fn test_block_comment_end_re() {
+        assert!(BLOCK_COMMENT_END_RE.is_match("#>"));
+        assert!(BLOCK_COMMENT_END_RE.is_match("  #>  "));
+        assert!(!BLOCK_COMMENT_END_RE.is_match("Write-Host"));
     }
 }
