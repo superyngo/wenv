@@ -45,7 +45,9 @@ use crate::model::{Entry, EntryType, ParseResult, ShellType};
 use crate::parser::builders::{
     count_braces_outside_quotes, count_parens_outside_quotes, CommentBlockBuilder,
 };
-use crate::parser::pending::{BoundaryType, MergeType, PendingBlock};
+use crate::parser::pending::{
+    entry_to_trailing_pending, merge_pending_with_structured, BoundaryType, MergeType, PendingBlock,
+};
 use crate::parser::Parser;
 
 use control::{count_control_end, count_control_start};
@@ -77,51 +79,6 @@ impl BashParser {
     /// Create a new Bash parser instance.
     pub fn new() -> Self {
         Self
-    }
-
-    /// Convert an entry to a pending block that can absorb trailing blanks.
-    fn entry_to_trailing_pending(entry: Entry) -> PendingBlock {
-        PendingBlock {
-            lines: entry.value.split('\n').map(|s| s.to_string()).collect(),
-            start_line: entry.line_number.unwrap_or(1),
-            end_line: entry.end_line.unwrap_or(entry.line_number.unwrap_or(1)),
-            boundary: BoundaryType::AdjacentMerging {
-                merge_type: MergeType::CodeWithBlanks,
-            },
-            entry_hint: Some(entry.entry_type),
-            name: Some(entry.name),
-            value: None, // Don't set value - let build_entry_from_pending use raw_content
-            comment_count: 0,
-            has_absorbed_blanks: false,
-        }
-    }
-
-    /// Merge pending entry (Comment/Code/blank lines) with a structured entry.
-    /// Only a single comment with no absorbed blanks merges downward.
-    /// All other cases flush the pending block as a separate entry.
-    fn merge_pending_with_structured(
-        pending: Option<PendingBlock>,
-        entry: Entry,
-        parser: &BashParser,
-    ) -> (Option<Entry>, Entry) {
-        if let Some(pending) = pending {
-            if pending.can_merge_down() {
-                let pending_content = pending.raw_content();
-                let merged_value = format!("{}\n{}", pending_content, entry.value);
-                let end_line = entry
-                    .end_line
-                    .or(entry.line_number)
-                    .unwrap_or(pending.start_line);
-                return (
-                    None,
-                    Entry::new(entry.entry_type, entry.name, merged_value)
-                        .with_line_number(pending.start_line)
-                        .with_end_line(end_line),
-                );
-            }
-            return (Some(parser.build_entry_from_pending(pending)), entry);
-        }
-        (None, entry)
     }
 
     /// Build an Entry from a completed PendingBlock.
@@ -249,7 +206,7 @@ impl Parser for BashParser {
                         if *brace_count == 0 {
                             let entry = self.build_entry_from_pending(active_block.take().unwrap());
                             // Set as pending to absorb trailing blanks
-                            pending_entry = Some(Self::entry_to_trailing_pending(entry));
+                            pending_entry = Some(entry_to_trailing_pending(entry));
                         }
                     }
                     BoundaryType::QuoteCounting {
@@ -263,7 +220,7 @@ impl Parser for BashParser {
                             // Don't set completed.value - let build_entry_from_pending use raw_content
                             let entry = self.build_entry_from_pending(completed);
                             // Set as pending to absorb trailing blanks
-                            pending_entry = Some(Self::entry_to_trailing_pending(entry));
+                            pending_entry = Some(entry_to_trailing_pending(entry));
                         }
                     }
                     BoundaryType::ParenthesisCounting {
@@ -277,7 +234,7 @@ impl Parser for BashParser {
                         if *parenthesis_count == 0 {
                             let entry = self.build_entry_from_pending(active_block.take().unwrap());
                             // Set as pending to absorb trailing blanks
-                            pending_entry = Some(Self::entry_to_trailing_pending(entry));
+                            pending_entry = Some(entry_to_trailing_pending(entry));
                         }
                     }
                     BoundaryType::KeywordTracking { ref mut depth } => {
@@ -423,12 +380,14 @@ impl Parser for BashParser {
                 ParseEvent::Complete(entry) => {
                     // Merge pending entry (if exists) with this structured entry
                     let (pending_entry_to_add, merged) =
-                        Self::merge_pending_with_structured(pending_entry.take(), entry, self);
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
                     if let Some(pending_e) = pending_entry_to_add {
                         result.add_entry(pending_e);
                     }
                     // Set merged entry as pending to absorb trailing blanks
-                    pending_entry = Some(Self::entry_to_trailing_pending(merged));
+                    pending_entry = Some(entry_to_trailing_pending(merged));
                     continue;
                 }
                 ParseEvent::Started {
@@ -472,12 +431,14 @@ impl Parser for BashParser {
                 ParseEvent::Complete(entry) => {
                     // Merge pending entry (if exists) with this structured entry
                     let (pending_entry_to_add, merged) =
-                        Self::merge_pending_with_structured(pending_entry.take(), entry, self);
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
                     if let Some(pending_e) = pending_entry_to_add {
                         result.add_entry(pending_e);
                     }
                     // Set merged entry as pending to absorb trailing blanks
-                    pending_entry = Some(Self::entry_to_trailing_pending(merged));
+                    pending_entry = Some(entry_to_trailing_pending(merged));
                     continue;
                 }
                 ParseEvent::Started {
@@ -521,12 +482,14 @@ impl Parser for BashParser {
                 ParseEvent::Complete(entry) => {
                     // Merge pending entry (if exists) with this structured entry
                     let (pending_entry_to_add, merged) =
-                        Self::merge_pending_with_structured(pending_entry.take(), entry, self);
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
                     if let Some(pending_e) = pending_entry_to_add {
                         result.add_entry(pending_e);
                     }
                     // Set merged entry as pending to absorb trailing blanks
-                    pending_entry = Some(Self::entry_to_trailing_pending(merged));
+                    pending_entry = Some(entry_to_trailing_pending(merged));
                     continue;
                 }
                 ParseEvent::Started { .. } => {
@@ -564,12 +527,14 @@ impl Parser for BashParser {
                         .with_end_line(line_number);
                     // Merge with pending
                     let (pending_entry_to_add, merged) =
-                        Self::merge_pending_with_structured(pending_entry.take(), entry, self);
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
                     if let Some(pending_e) = pending_entry_to_add {
                         result.add_entry(pending_e);
                     }
                     // Set merged entry as pending to absorb trailing blanks
-                    pending_entry = Some(Self::entry_to_trailing_pending(merged));
+                    pending_entry = Some(entry_to_trailing_pending(merged));
                 } else {
                     let (merged_first_line, start_line) =
                         if let Some(pending) = pending_entry.take() {

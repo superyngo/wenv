@@ -21,7 +21,7 @@
 //! | `KeywordTracking` | Track control keywords | `if`/`fi`, `while`/`done` |
 //! | `AdjacentMerging` | Merge consecutive lines | Comments, blank lines |
 
-use crate::model::EntryType;
+use crate::model::{Entry, EntryType};
 
 /// Boundary detection type - determines when a pending block is complete.
 #[derive(Debug, Clone, PartialEq)]
@@ -354,6 +354,50 @@ impl PendingBlock {
                 | Some(EntryType::Function)
         )
     }
+}
+
+pub fn entry_to_trailing_pending(entry: Entry) -> PendingBlock {
+    PendingBlock {
+        lines: entry.value.split('\n').map(|s| s.to_string()).collect(),
+        start_line: entry.line_number.unwrap_or(1),
+        end_line: entry.end_line.unwrap_or(entry.line_number.unwrap_or(1)),
+        boundary: BoundaryType::AdjacentMerging {
+            merge_type: MergeType::CodeWithBlanks,
+        },
+        entry_hint: Some(entry.entry_type),
+        name: Some(entry.name),
+        value: None,
+        comment_count: 0,
+        has_absorbed_blanks: false,
+    }
+}
+
+pub fn merge_pending_with_structured<F>(
+    pending: Option<PendingBlock>,
+    entry: Entry,
+    build_entry: F,
+) -> (Option<Entry>, Entry)
+where
+    F: FnOnce(PendingBlock) -> Entry,
+{
+    if let Some(pending) = pending {
+        if pending.can_merge_down() {
+            let pending_content = pending.raw_content();
+            let merged_value = format!("{}\n{}", pending_content, entry.value);
+            let end_line = entry
+                .end_line
+                .or(entry.line_number)
+                .unwrap_or(pending.start_line);
+            return (
+                None,
+                Entry::new(entry.entry_type, entry.name, merged_value)
+                    .with_line_number(pending.start_line)
+                    .with_end_line(end_line),
+            );
+        }
+        return (Some(build_entry(pending)), entry);
+    }
+    (None, entry)
 }
 
 #[cfg(test)]
