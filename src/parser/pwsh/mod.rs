@@ -31,7 +31,7 @@ pub mod patterns;
 
 use crate::model::{Entry, EntryType, ParseResult, ShellType};
 use crate::parser::builders::{count_braces_outside_quotes, CommentBlockBuilder};
-use crate::parser::pending::{BoundaryType, PendingBlock};
+use crate::parser::pending::{BoundaryType, MergeType, PendingBlock};
 use crate::parser::Parser;
 
 use control::{count_control_end, count_control_start};
@@ -216,8 +216,10 @@ impl Parser for PowerShellParser {
 
                 match &mut pending_entry {
                     Some(pending) if pending.can_absorb_blank() => {
-                        // Comment or BlankLines absorbs blank
                         pending.add_line(line, line_number);
+                        if pending.merge_type() == Some(MergeType::Comment) {
+                            pending.has_absorbed_blanks = true;
+                        }
                     }
                     Some(_) => {
                         // Other pending types: flush and start new blank
@@ -359,9 +361,15 @@ impl Parser for PowerShellParser {
             // ------------------------------------------------------------------
             match &mut pending_entry {
                 Some(pending) if pending.entry_hint == Some(EntryType::Comment) => {
-                    // Comment + non-blank Code → merge and upgrade to Code
-                    pending.add_line(line, line_number);
-                    pending.upgrade_to_code();
+                    if pending.can_merge_down() {
+                        pending.add_line(line, line_number);
+                        pending.upgrade_to_code();
+                    } else {
+                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
+                            result.add_entry(entry);
+                        }
+                        pending_entry = Some(PendingBlock::code(line_number, line));
+                    }
                 }
                 Some(pending) if pending.entry_hint == Some(EntryType::Code) => {
                     // Non-blank Code pending + new non-blank Code → flush pending, new pending
@@ -859,20 +867,23 @@ C:\bin
     }
 
     #[test]
-    fn test_comment_blank_code_all_merge() {
+    fn test_comment_blank_code_separate() {
         let parser = PowerShellParser::new();
         let content = "# Header\n\nWrite-Host 'hi'";
         let result = parser.parse(content);
 
-        // Should be merged into a single Code entry
-        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries.len(), 2);
 
-        let code = &result.entries[0];
+        let comment = &result.entries[0];
+        assert_eq!(comment.entry_type, EntryType::Comment);
+        assert_eq!(comment.line_number, Some(1));
+        assert_eq!(comment.end_line, Some(2)); // Absorbs blank line
+
+        let code = &result.entries[1];
         assert_eq!(code.entry_type, EntryType::Code);
-        assert_eq!(code.line_number, Some(1));
+        assert_eq!(code.line_number, Some(3));
         assert_eq!(code.end_line, Some(3));
-        // value contains complete content (comment + blank + code)
-        assert_eq!(code.value, "# Header\n\nWrite-Host 'hi'");
+        assert_eq!(code.value, "Write-Host 'hi'");
     }
 
     #[test]
@@ -929,6 +940,29 @@ C:\bin
         assert_eq!(second.entry_type, EntryType::Code);
         assert_eq!(second.value, "Write-Host 'second'");
         assert_eq!(second.line_number, Some(3));
+    }
+
+    #[test]
+    fn test_comment_blank_then_code_separate() {
+        let parser = PowerShellParser::new();
+        let content = "# note\n\nWrite-Host 'hi'\n# another\nWrite-Host 'bye'";
+        let result = parser.parse(content);
+
+        // #note + blank → Comment(L1-L2) sealed
+        // Write-Host hi → Code(L3)
+        // #another + Write-Host bye → Code(L4-L5) merged (single comment, no blank gap)
+        assert_eq!(result.entries.len(), 3);
+
+        assert_eq!(result.entries[0].entry_type, EntryType::Comment);
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(2));
+
+        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+        assert_eq!(result.entries[1].line_number, Some(3));
+
+        assert_eq!(result.entries[2].entry_type, EntryType::Code);
+        assert_eq!(result.entries[2].line_number, Some(4));
+        assert_eq!(result.entries[2].end_line, Some(5));
     }
 
     #[test]

@@ -97,73 +97,31 @@ impl BashParser {
     }
 
     /// Merge pending entry (Comment/Code/blank lines) with a structured entry.
-    /// The pending content becomes a prefix to the structured entry's value.
-    ///
-    /// New merge rules:
-    /// - Single comment (comment_count == 1): merge downward to structured entry
-    /// - Multiple comments (comment_count > 1): don't merge, return as separate entries
-    /// - Blank lines only (comment_count == 0): don't merge, return as separate entry
-    /// - Structured entry pending (has stored value): flush and don't merge
+    /// Only a single comment with no absorbed blanks merges downward.
+    /// All other cases flush the pending block as a separate entry.
     fn merge_pending_with_structured(
         pending: Option<PendingBlock>,
         entry: Entry,
         parser: &BashParser,
     ) -> (Option<Entry>, Entry) {
         if let Some(pending) = pending {
-            // If pending has a stored value, it's a structured entry absorbing trailing blanks
-            // Flush it using build_entry_from_pending to preserve proper name extraction
-            if pending.is_structured_entry() {
-                let flushed = parser.build_entry_from_pending(pending);
-                return (Some(flushed), entry);
-            }
-
-            if pending.comment_count == 0 {
-                // All blank lines → return as separate Code entry
-                (
-                    Some(
-                        Entry::new(
-                            EntryType::Code,
-                            format!("L{}-L{}", pending.start_line, pending.end_line),
-                            pending.raw_content(),
-                        )
-                        .with_line_number(pending.start_line)
-                        .with_end_line(pending.end_line),
-                    ),
-                    entry,
-                )
-            } else if pending.comment_count == 1 {
-                // Single comment → merge downward
+            if pending.can_merge_down() {
                 let pending_content = pending.raw_content();
                 let merged_value = format!("{}\n{}", pending_content, entry.value);
                 let end_line = entry
                     .end_line
                     .or(entry.line_number)
                     .unwrap_or(pending.start_line);
-
-                (
+                return (
                     None,
                     Entry::new(entry.entry_type, entry.name, merged_value)
                         .with_line_number(pending.start_line)
                         .with_end_line(end_line),
-                )
-            } else {
-                // Multiple comments → return as separate Comment entry
-                (
-                    Some(
-                        Entry::new(
-                            EntryType::Comment,
-                            format!("#L{}-L{}", pending.start_line, pending.end_line),
-                            pending.raw_content(),
-                        )
-                        .with_line_number(pending.start_line)
-                        .with_end_line(pending.end_line),
-                    ),
-                    entry,
-                )
+                );
             }
-        } else {
-            (None, entry)
+            return (Some(parser.build_entry_from_pending(pending)), entry);
         }
+        (None, entry)
     }
 
     /// Build an Entry from a completed PendingBlock.
@@ -410,8 +368,11 @@ impl Parser for BashParser {
                     Some(pending) if pending.can_absorb_blank() => {
                         // Comment, BlankLines, or CodeWithBlanks absorbs blank
                         pending.add_line(line, line_number);
-                        // Track that this CodeWithBlanks block has absorbed blanks
-                        if pending.merge_type() == Some(MergeType::CodeWithBlanks) {
+                        // Track absorbed blanks — seals Comment from further merging
+                        if matches!(
+                            pending.merge_type(),
+                            Some(MergeType::CodeWithBlanks) | Some(MergeType::Comment)
+                        ) {
                             pending.has_absorbed_blanks = true;
                         }
                     }
@@ -476,19 +437,12 @@ impl Parser for BashParser {
                     boundary,
                     first_line,
                 } => {
-                    // For multi-line alias, check pending merge rules
                     let (merged_first_line, start_line) =
                         if let Some(pending) = pending_entry.take() {
-                            // If pending has stored value, it's a trailing structured entry - flush it
-                            if pending.is_structured_entry() {
-                                result.add_entry(self.build_entry_from_pending(pending));
-                                (first_line, line_number)
-                            } else if pending.comment_count == 1 {
-                                // Single comment can merge down
+                            if pending.can_merge_down() {
                                 let merged = format!("{}\n{}", pending.raw_content(), first_line);
                                 (merged, pending.start_line)
                             } else {
-                                // Multiple comments or pure blank - don't merge
                                 result.add_entry(self.build_entry_from_pending(pending));
                                 (first_line, line_number)
                             }
@@ -532,19 +486,12 @@ impl Parser for BashParser {
                     boundary,
                     first_line,
                 } => {
-                    // For multi-line env, check pending merge rules
                     let (merged_first_line, start_line) =
                         if let Some(pending) = pending_entry.take() {
-                            // If pending has stored value, it's a trailing structured entry - flush it
-                            if pending.is_structured_entry() {
-                                result.add_entry(self.build_entry_from_pending(pending));
-                                (first_line, line_number)
-                            } else if pending.comment_count == 1 {
-                                // Single comment can merge down
+                            if pending.can_merge_down() {
                                 let merged = format!("{}\n{}", pending.raw_content(), first_line);
                                 (merged, pending.start_line)
                             } else {
-                                // Multiple comments or pure blank - don't merge
                                 result.add_entry(self.build_entry_from_pending(pending));
                                 (first_line, line_number)
                             }
@@ -624,19 +571,12 @@ impl Parser for BashParser {
                     // Set merged entry as pending to absorb trailing blanks
                     pending_entry = Some(Self::entry_to_trailing_pending(merged));
                 } else {
-                    // Multi-line function: check pending merge rules
                     let (merged_first_line, start_line) =
                         if let Some(pending) = pending_entry.take() {
-                            // If pending has stored value, it's a trailing structured entry - flush it
-                            if pending.is_structured_entry() {
-                                result.add_entry(self.build_entry_from_pending(pending));
-                                (line.to_string(), line_number)
-                            } else if pending.comment_count == 1 {
-                                // Single comment can merge down
+                            if pending.can_merge_down() {
                                 let merged = format!("{}\n{}", pending.raw_content(), line);
                                 (merged, pending.start_line)
                             } else {
-                                // Multiple comments or pure blank - don't merge
                                 result.add_entry(self.build_entry_from_pending(pending));
                                 (line.to_string(), line_number)
                             }
@@ -669,16 +609,10 @@ impl Parser for BashParser {
                 let parenthesis_count = (open_paren - close_paren) as i32;
 
                 let (merged_first_line, start_line) = if let Some(pending) = pending_entry.take() {
-                    // If pending has stored value, it's a trailing structured entry - flush it
-                    if pending.is_structured_entry() {
-                        result.add_entry(self.build_entry_from_pending(pending));
-                        (line.to_string(), line_number)
-                    } else if pending.comment_count == 1 {
-                        // Single comment can merge down
+                    if pending.can_merge_down() {
                         let merged = format!("{}\n{}", pending.raw_content(), line);
                         (merged, pending.start_line)
                     } else {
-                        // Multiple comments or pure blank - don't merge
                         result.add_entry(self.build_entry_from_pending(pending));
                         (line.to_string(), line_number)
                     }
@@ -706,13 +640,10 @@ impl Parser for BashParser {
             // ------------------------------------------------------------------
             match &mut pending_entry {
                 Some(pending) if pending.entry_hint == Some(EntryType::Comment) => {
-                    // Only single comment can merge down to code
-                    if pending.comment_count == 1 {
-                        // Comment + non-blank Code → merge and upgrade to Code
+                    if pending.can_merge_down() {
                         pending.add_line(line, line_number);
                         pending.upgrade_to_code();
                     } else {
-                        // Multiple comments don't merge - flush and start new code
                         if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
                             result.add_entry(entry);
                         }
@@ -911,9 +842,8 @@ mod tests {
 
     #[test]
     fn test_comments_separated_by_blank() {
-        // With new merging logic: Comment + blank + Comment → first Comment absorbs blank
-        // Then when second Comment comes, since pending is still Comment (absorbed blank),
-        // the second Comment merges into it
+        // Comment + blank → first Comment absorbs blank and seals.
+        // Second Comment becomes a separate entry.
         let parser = BashParser::new();
         let content = "# First block\n\n# Second block";
         let result = parser.parse(content);
@@ -924,10 +854,30 @@ mod tests {
             .filter(|e| e.entry_type == EntryType::Comment)
             .collect();
 
-        // All merged into one Comment spanning L1-L3
-        assert_eq!(comments.len(), 1);
+        assert_eq!(comments.len(), 2);
         assert_eq!(comments[0].line_number, Some(1));
-        assert_eq!(comments[0].end_line, Some(3));
+        assert_eq!(comments[0].end_line, Some(2)); // Absorbs blank
+        assert_eq!(comments[1].line_number, Some(3));
+        assert_eq!(comments[1].end_line, Some(3));
+    }
+
+    #[test]
+    fn test_comment_blank_then_structured_entry() {
+        // Single comment + blank → sealed Comment + standalone Alias
+        let parser = BashParser::new();
+        let content = "# header\n\nalias ll='ls -la'";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+
+        assert_eq!(result.entries[0].entry_type, EntryType::Comment);
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(2)); // Absorbs blank
+
+        assert_eq!(result.entries[1].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[1].name, "ll");
+        assert_eq!(result.entries[1].line_number, Some(3));
+        assert!(!result.entries[1].value.contains("# header"));
     }
 
     #[test]
@@ -1045,25 +995,27 @@ mod tests {
     }
 
     #[test]
-    fn test_comment_blank_code_all_merge() {
+    fn test_comment_blank_code_separate() {
         // # Header
         // (blank)
         // echo hi
-        // → 1 entry: Code L1-L3
+        // → 2 entries: Comment L1-L2 (absorbs blank, sealed), Code L3
         let parser = BashParser::new();
         let content = "# Header\n\necho hi";
         let result = parser.parse(content);
 
-        // Should be merged into a single Code entry
-        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries.len(), 2);
 
-        let code = &result.entries[0];
+        let comment = &result.entries[0];
+        assert_eq!(comment.entry_type, EntryType::Comment);
+        assert_eq!(comment.line_number, Some(1));
+        assert_eq!(comment.end_line, Some(2)); // Absorbs blank line
+
+        let code = &result.entries[1];
         assert_eq!(code.entry_type, EntryType::Code);
-        assert_eq!(code.line_number, Some(1));
+        assert_eq!(code.line_number, Some(3));
         assert_eq!(code.end_line, Some(3));
-        // raw_line contains complete content (comment + blank + code)
-        assert_eq!(code.value, ("# Header\n\necho hi".to_string()));
-        // comment field is no longer set - raw_line has complete content
+        assert_eq!(code.value, "echo hi");
     }
 
     #[test]
@@ -1330,30 +1282,37 @@ mod tests {
 
     #[test]
     fn test_single_vs_multiple_comment_distinction() {
-        // Rule 4: Distinguish between single and multiple comments
+        // Distinguish between single and multiple comments with blank separation
         let parser = BashParser::new();
         let content = "# comment 1\n# comment 2\n\nalias a='b'\n\n# single\n\nalias c='d'\n";
         let result = parser.parse(content);
 
-        // Should have 3 entries:
-        // 1. Multiple comments (not merged with alias a)
-        // 2. Alias a (absorbs trailing blank)
-        // 3. Alias c (merges with single comment, absorbs trailing blank)
-        assert_eq!(result.entries.len(), 3);
+        // 4 entries:
+        // 1. Multiple comments + trailing blank (sealed) L1-L3
+        // 2. Alias a + trailing blank L4-L5
+        // 3. Single comment + trailing blank (sealed) L6-L7
+        // 4. Alias c L8
+        assert_eq!(result.entries.len(), 4);
 
         // Multiple comments block
         assert_eq!(result.entries[0].entry_type, EntryType::Comment);
         assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(3));
 
         // Alias a (not merged with comments above)
         assert_eq!(result.entries[1].entry_type, EntryType::Alias);
         assert_eq!(result.entries[1].line_number, Some(4));
         assert!(!result.entries[1].value.contains("comment 1"));
 
-        // Alias c (merged with single comment)
-        assert_eq!(result.entries[2].entry_type, EntryType::Alias);
-        assert_eq!(result.entries[2].line_number, Some(6)); // Starts from single comment
-        assert!(result.entries[2].value.contains("# single"));
+        // Single comment (sealed by trailing blank, not merged with alias c)
+        assert_eq!(result.entries[2].entry_type, EntryType::Comment);
+        assert_eq!(result.entries[2].line_number, Some(6));
+        assert_eq!(result.entries[2].end_line, Some(7));
+
+        // Alias c (standalone, no merge)
+        assert_eq!(result.entries[3].entry_type, EntryType::Alias);
+        assert_eq!(result.entries[3].line_number, Some(8));
+        assert!(!result.entries[3].value.contains("# single"));
     }
 
     #[test]

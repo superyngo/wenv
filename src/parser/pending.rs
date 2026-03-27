@@ -322,13 +322,20 @@ impl PendingBlock {
     }
 
     /// Check if this block should merge with a comment line.
+    /// Comment blocks that have absorbed blanks are sealed and reject further comments.
     pub fn can_absorb_comment(&self) -> bool {
         match &self.boundary {
             BoundaryType::AdjacentMerging { merge_type } => {
-                matches!(merge_type, MergeType::Comment)
+                matches!(merge_type, MergeType::Comment) && !self.has_absorbed_blanks
             }
             _ => false,
         }
+    }
+
+    /// Check if this pending block can merge downward into the next entry.
+    /// Only a single comment line with no absorbed blanks qualifies.
+    pub fn can_merge_down(&self) -> bool {
+        self.comment_count == 1 && !self.has_absorbed_blanks
     }
 
     /// Increment comment count when absorbing a comment line.
@@ -389,10 +396,23 @@ mod tests {
 
     #[test]
     fn test_pending_block_adjacent_merging() {
-        let block = PendingBlock::comment(1, "# header");
-        assert!(!block.is_complete()); // never complete by itself
+        let mut block = PendingBlock::comment(1, "# header");
+        assert!(!block.is_complete());
         assert!(block.can_absorb_blank());
         assert!(block.can_absorb_comment());
+        assert!(block.can_merge_down());
+
+        block.has_absorbed_blanks = true;
+        assert!(!block.can_absorb_comment());
+        assert!(!block.can_merge_down());
+    }
+
+    #[test]
+    fn test_can_merge_down_multiple_comments() {
+        let mut block = PendingBlock::comment(1, "# c1");
+        block.add_line("# c2", 2);
+        block.comment_count = 2;
+        assert!(!block.can_merge_down());
     }
 
     #[test]

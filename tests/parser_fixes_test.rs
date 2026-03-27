@@ -49,7 +49,8 @@ function dasd (){
 
 #[test]
 fn test_multi_comment_not_merged_with_code() {
-    // Test case 2: Multiple comments should NOT merge with following code
+    // Multiple comments + blank seal the comment block.
+    // The comment after blank merges with following code.
     let content = r#"# 後綴別名設定
 # alias -s {md,txt,json}=vim
 # alias -s py=python
@@ -61,31 +62,28 @@ autoload -Uz compinit && compinit
     let parser = get_parser(ShellType::Bash);
     let result = parser.parse(content);
 
-    // Should have 2 entries: comment (L1-L5) and code (L6-L7)
-    // Comment L1-L3 absorbs blank L4, then continues to absorb comment L5
-    // This is multi-comment so it does NOT merge with code L6
-    assert_eq!(
-        result.entries.len(),
-        2,
-        "Should have 2 entries (comment did NOT merge with code)"
-    );
+    // Comment L1-L3 absorbs blank L4 and seals.
+    // Comment L5 merges down with code L6 → Code L5-L6.
+    assert_eq!(result.entries.len(), 2, "Should have 2 entries");
 
-    // First entry: Comment (multi-line L1-L5)
+    // First entry: Comment (L1-L4, absorbed blank)
     assert_eq!(
         result.entries[0].entry_type,
         wenv::model::EntryType::Comment
     );
     assert_eq!(result.entries[0].line_number, Some(1));
-    assert_eq!(result.entries[0].end_line, Some(5), "Comment absorbs L1-L5");
-
-    // Second entry: Code (with trailing newline)
-    assert_eq!(result.entries[1].entry_type, wenv::model::EntryType::Code);
-    assert_eq!(result.entries[1].line_number, Some(6));
     assert_eq!(
-        result.entries[1].end_line,
-        Some(6),
-        "Code L6 with no trailing blank"
+        result.entries[0].end_line,
+        Some(4),
+        "Comment absorbs blank L4"
     );
+
+    // Second entry: Code (L5-L6, single comment merged with code)
+    assert_eq!(result.entries[1].entry_type, wenv::model::EntryType::Code);
+    assert_eq!(result.entries[1].line_number, Some(5));
+    assert_eq!(result.entries[1].end_line, Some(6));
+    assert!(result.entries[1].value.contains("# 讓 Tab"));
+    assert!(result.entries[1].value.contains("autoload"));
 }
 
 #[test]
