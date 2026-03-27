@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.12.0] - 2026-03-27
+
+### ✨ NEW FEATURES
+
+- Add Windows-style environment variable expansion (%VAR%)
+- Improve PowerShell path query UTF-8 encoding handling
+- Skip empty paths and unresolved variables in config
+- Improve TUI scroll offset management for better cursor visibility
+
 ## [v0.11.0] - 2026-03-26
 
 ### ✨ NEW FEATURES
