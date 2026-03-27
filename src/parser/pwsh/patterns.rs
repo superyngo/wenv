@@ -91,6 +91,20 @@ lazy_static! {
     pub static ref FUNC_START_RE: Regex = Regex::new(
         r#"^function\s+(\w[\w-]*)\s*(?:\([^)]*\))?\s*\{"#
     ).unwrap();
+
+    // =========================================================================
+    // Pipeline & Scriptblock Patterns
+    // =========================================================================
+
+    /// Matches a cmdlet name before a scriptblock at end of line.
+    pub static ref PIPELINE_BLOCK_RE: Regex = Regex::new(
+        r#"(\w[\w-]*)\s*\{$"#
+    ).unwrap();
+
+    /// Matches assignment to a scriptblock.
+    pub static ref SCRIPTBLOCK_ASSIGN_RE: Regex = Regex::new(
+        r#"(\$\w[\w:]*)\s*=\s*\{$"#
+    ).unwrap();
 }
 
 #[cfg(test)]
@@ -160,5 +174,28 @@ mod tests {
             .captures("function Test-Func($param) {")
             .unwrap();
         assert_eq!(&caps[1], "Test-Func");
+    }
+
+    #[test]
+    fn test_pipeline_block_re() {
+        let caps = PIPELINE_BLOCK_RE.captures("ForEach-Object {").unwrap();
+        assert_eq!(&caps[1], "ForEach-Object");
+
+        let caps = PIPELINE_BLOCK_RE.captures("Where-Object {").unwrap();
+        assert_eq!(&caps[1], "Where-Object");
+
+        let caps = PIPELINE_BLOCK_RE.captures("ForEach {").unwrap();
+        assert_eq!(&caps[1], "ForEach");
+    }
+
+    #[test]
+    fn test_scriptblock_assign_re() {
+        let caps = SCRIPTBLOCK_ASSIGN_RE.captures("$block = {").unwrap();
+        assert_eq!(&caps[1], "$block");
+
+        let caps = SCRIPTBLOCK_ASSIGN_RE
+            .captures("$script:MyBlock = {")
+            .unwrap();
+        assert_eq!(&caps[1], "$script:MyBlock");
     }
 }

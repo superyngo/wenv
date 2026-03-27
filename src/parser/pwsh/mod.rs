@@ -38,7 +38,8 @@ use crate::parser::Parser;
 
 use control::{count_control_end, count_control_start};
 use parsers::{
-    detect_function_start, is_heredoc_end, try_parse_alias, try_parse_env, try_parse_source,
+    detect_function_start, detect_scriptblock_start, is_heredoc_end, try_parse_alias,
+    try_parse_env, try_parse_source,
 };
 
 use crate::parser::ParseEvent;
@@ -395,6 +396,58 @@ impl Parser for PowerShellParser {
                 continue;
             }
 
+            // Try pipeline/scriptblock
+            if let Some(block_name) = detect_scriptblock_start(trimmed) {
+                let (open, close) = count_braces_outside_quotes(trimmed);
+                let brace_count = (open as i32).saturating_sub(close as i32);
+                let is_single_line = brace_count == 0 && trimmed.contains('}');
+
+                if is_single_line {
+                    let entry = Entry::new(EntryType::Code, block_name, line.to_string())
+                        .with_line_number(line_number)
+                        .with_end_line(line_number);
+                    let (pending_entry_to_add, merged) =
+                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
+                            self.build_entry_from_pending(b)
+                        });
+                    if let Some(pending_e) = pending_entry_to_add {
+                        result.add_entry(pending_e);
+                    }
+                    pending_entry = Some(entry_to_trailing_pending(merged));
+                } else {
+                    let (merged_first_line, start_line) =
+                        if let Some(pending) = pending_entry.take() {
+                            if matches!(
+                                pending.entry_hint,
+                                Some(EntryType::Comment) | Some(EntryType::Code)
+                            ) && !pending.has_absorbed_blanks
+                            {
+                                let mut lines = pending.lines;
+                                lines.push(line.to_string());
+                                (lines, pending.start_line)
+                            } else {
+                                result.add_entry(self.build_entry_from_pending(pending));
+                                (vec![line.to_string()], line_number)
+                            }
+                        } else {
+                            (vec![line.to_string()], line_number)
+                        };
+
+                    active_block = Some(PendingBlock {
+                        lines: merged_first_line,
+                        start_line,
+                        end_line: line_number,
+                        boundary: BoundaryType::BraceCounting { brace_count },
+                        entry_hint: Some(EntryType::Code),
+                        name: Some(block_name),
+                        value: None,
+                        comment_count: 0,
+                        has_absorbed_blanks: false,
+                    });
+                }
+                continue;
+            }
+
             // ------------------------------------------------------------------
             // Fallback: capture as non-blank Code
             // ------------------------------------------------------------------
@@ -495,11 +548,13 @@ impl PowerShellParser {
                     .with_end_line(block.end_line)
             }
             EntryType::Code => {
-                let name = if block.start_line == block.end_line {
-                    format!("L{}", block.start_line)
-                } else {
-                    format!("L{}-L{}", block.start_line, block.end_line)
-                };
+                let name = block.name.unwrap_or_else(|| {
+                    if block.start_line == block.end_line {
+                        format!("L{}", block.start_line)
+                    } else {
+                        format!("L{}-L{}", block.start_line, block.end_line)
+                    }
+                });
                 // Store complete code content (Raw Value Architecture)
                 Entry::new(EntryType::Code, name, raw_content)
                     .with_line_number(block.start_line)
@@ -1178,5 +1233,62 @@ C:\bin
             .collect();
         assert_eq!(envs.len(), 1);
         assert_eq!(envs[0].name, "EDITOR");
+    }
+
+    #[test]
+    fn test_pipeline_multiline_block() {
+        let parser = PowerShellParser::new();
+        let content = "1..9 | ForEach-Object {\n    $num = $_\n    Write-Host $num\n}";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+        assert_eq!(result.entries[0].name, "ForEach-Object");
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(4));
+    }
+
+    #[test]
+    fn test_pipeline_block_with_internal_blanks() {
+        let parser = PowerShellParser::new();
+        let content = "1..9 | ForEach-Object {\n    $num = $_\n\n    Write-Host $num\n}";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+        assert!(result.entries[0].value.contains("\n\n"));
+    }
+
+    #[test]
+    fn test_pipeline_with_preceding_comment() {
+        let parser = PowerShellParser::new();
+        let content = "# Build numbers\n1..9 | ForEach-Object {\n    $_\n}";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert!(result.entries[0].value.starts_with("# Build numbers"));
+    }
+
+    #[test]
+    fn test_pipeline_absorbs_trailing_blanks() {
+        let parser = PowerShellParser::new();
+        let content = "1..9 | ForEach-Object {\n    $_\n}\n\n\nWrite-Host 'done'";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].end_line, Some(5));
+        assert_eq!(result.entries[1].line_number, Some(6));
+    }
+
+    #[test]
+    fn test_scriptblock_assign_multiline() {
+        let parser = PowerShellParser::new();
+        let content = "$block = {\n    Write-Host 'hi'\n}";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+        assert_eq!(result.entries[0].name, "$block");
     }
 }

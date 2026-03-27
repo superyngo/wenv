@@ -27,7 +27,7 @@
 
 use super::patterns::*;
 use crate::model::{Entry, EntryType};
-use crate::parser::builders::{extract_comment, strip_quotes};
+use crate::parser::builders::{count_braces_outside_quotes, extract_comment, strip_quotes};
 use crate::parser::{BoundaryType, ParseEvent};
 
 /// Try to parse a line as a PowerShell alias.
@@ -156,6 +156,26 @@ pub fn detect_function_start(line: &str) -> Option<String> {
     None
 }
 
+pub fn detect_scriptblock_start(line: &str) -> Option<String> {
+    if let Some(caps) = SCRIPTBLOCK_ASSIGN_RE.captures(line) {
+        let (open, close) = count_braces_outside_quotes(line);
+        if open > close {
+            return Some(caps[1].to_string());
+        }
+    }
+
+    if line.contains('|') {
+        if let Some(caps) = PIPELINE_BLOCK_RE.captures(line) {
+            let (open, close) = count_braces_outside_quotes(line);
+            if open > close {
+                return Some(caps[1].to_string());
+            }
+        }
+    }
+
+    None
+}
+
 /// Check if a line is a Here-String end marker.
 ///
 /// Matches: `"@`
@@ -251,5 +271,31 @@ mod tests {
         assert!(is_heredoc_end(r#""@"#));
         assert!(!is_heredoc_end(r#"  "@"#)); // Trimmed before calling
         assert!(!is_heredoc_end("other line"));
+    }
+
+    #[test]
+    fn test_detect_scriptblock_pipeline() {
+        assert_eq!(
+            detect_scriptblock_start("1..9 | ForEach-Object {"),
+            Some("ForEach-Object".into())
+        );
+        assert_eq!(
+            detect_scriptblock_start("$items | Where-Object {"),
+            Some("Where-Object".into())
+        );
+    }
+
+    #[test]
+    fn test_detect_scriptblock_assign() {
+        assert_eq!(
+            detect_scriptblock_start("$block = {"),
+            Some("$block".into())
+        );
+    }
+
+    #[test]
+    fn test_detect_scriptblock_none() {
+        assert_eq!(detect_scriptblock_start("Write-Host 'hello'"), None);
+        assert_eq!(detect_scriptblock_start("function foo {"), None);
     }
 }
