@@ -521,15 +521,24 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     }
 
     // Size popup to content, max 80% of screen
-    let max_width = (area.width * 4 / 5).max(40);
-    let max_height = (area.height * 4 / 5).max(10);
-    let content_height = (lines.len() as u16 + 2).min(max_height); // +2 for borders
-    let popup_width = max_width;
-    let popup_height = content_height;
+    let max_width = (area.width * 4 / 5).max(20);
+    let max_height = (area.height * 4 / 5).max(6);
+    let popup_width = max_width.min(area.width);
+    let inner_width = (popup_width - 2).max(1) as usize;
+    let visual_line_count: usize = lines
+        .iter()
+        .map(|line| {
+            let w: usize = line.spans.iter().map(|s| s.width()).sum();
+            (w.saturating_sub(1) / inner_width + 1).max(1)
+        })
+        .sum();
+    let popup_height = (visual_line_count as u16 + 2)
+        .min(max_height)
+        .min(area.height);
 
     let x = (area.width.saturating_sub(popup_width)) / 2;
     let y = (area.height.saturating_sub(popup_height)) / 2;
-    let popup_area = Rect::new(x, y, popup_width, popup_height);
+    let popup_area = area.intersection(Rect::new(x, y, popup_width, popup_height));
 
     f.render_widget(Clear, popup_area);
 

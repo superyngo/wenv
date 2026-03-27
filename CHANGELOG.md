@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Unreleased Update - 2026-03-27
+- Fix detail popup height: calculate visual line count accounting for word-wrap instead of counting logical lines, preventing value lines from being clipped when file paths or long values wrap to multiple rows
 - Fix adjacent comment merging: a comment block that absorbs a trailing blank is now sealed and cannot merge with subsequent comments or code — they become separate entries
 - Simplify parser architecture: replace redundant `merge_pending_with_structured()` and inline branch patterns with a single `can_merge_down()` method on `PendingBlock`
 - Apply fix and simplification to both Bash and PowerShell parsers
