@@ -357,7 +357,7 @@ fn test_copy_entries() {
 
 #[test]
 fn test_comment_value_adds_hash() {
-    use wenv::tui::operations::{comment_value, uncomment_value};
+    use wenv::tui::operations::comment_value;
 
     let input = "alias foo='bar'\nexport PATH='/bin'";
     let result = comment_value(input);

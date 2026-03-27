@@ -29,6 +29,7 @@ pub struct TuiApp {
     pub profile: ShellProfile,
     pub visible_items: Vec<ListItem>,
     pub cursor: usize,
+    pub scroll_offset: usize,
     pub mode: AppMode,
     pub previous_mode: Option<AppMode>,
     pub should_quit: bool,
@@ -61,6 +62,7 @@ impl TuiApp {
             profile,
             visible_items,
             cursor: 0,
+            scroll_offset: 0,
             mode: AppMode::Normal,
             previous_mode: None,
             should_quit: false,
@@ -106,6 +108,7 @@ impl TuiApp {
                 let total_height = f.size().height as usize;
                 let chrome = if self.search.is_some() { 4 } else { 3 }; // title + status + search? + header/separator
                 self.list_visible_height = total_height.saturating_sub(chrome);
+                self.clamp_scroll_offset();
                 crate::tui::ui::draw(f, self);
             })?;
 
@@ -163,6 +166,7 @@ impl TuiApp {
                 } else {
                     self.selection.commit_range();
                     self.cursor = list::navigate_up(&self.visible_items, self.cursor);
+                    self.clamp_scroll_offset();
                 }
             }
             Action::NavigateDown => {
@@ -183,6 +187,7 @@ impl TuiApp {
                 } else {
                     self.selection.commit_range();
                     self.cursor = list::navigate_down(&self.visible_items, self.cursor);
+                    self.clamp_scroll_offset();
                 }
             }
             Action::PageUp => {
@@ -200,6 +205,7 @@ impl TuiApp {
                 } else {
                     self.selection.commit_range();
                     self.cursor = self.cursor.saturating_sub(half);
+                    self.clamp_scroll_offset();
                 }
             }
             Action::PageDown => {
@@ -217,6 +223,7 @@ impl TuiApp {
                 } else {
                     self.selection.commit_range();
                     self.cursor = (self.cursor + half).min(max_idx);
+                    self.clamp_scroll_offset();
                 }
             }
             Action::Home => {
@@ -228,6 +235,7 @@ impl TuiApp {
                 } else {
                     self.selection.commit_range();
                     self.cursor = list::navigate_home();
+                    self.clamp_scroll_offset();
                 }
             }
             Action::End => {
@@ -239,6 +247,7 @@ impl TuiApp {
                 } else {
                     self.selection.commit_range();
                     self.cursor = list::navigate_end(&self.visible_items);
+                    self.clamp_scroll_offset();
                 }
             }
             Action::ToggleExpand => {
@@ -278,11 +287,13 @@ impl TuiApp {
             Action::RangeSelectUp => {
                 self.selection.set_range(self.cursor, &self.visible_items);
                 self.cursor = list::navigate_up(&self.visible_items, self.cursor);
+                self.clamp_scroll_offset();
                 self.selection.set_range(self.cursor, &self.visible_items);
             }
             Action::RangeSelectDown => {
                 self.selection.set_range(self.cursor, &self.visible_items);
                 self.cursor = list::navigate_down(&self.visible_items, self.cursor);
+                self.clamp_scroll_offset();
                 self.selection.set_range(self.cursor, &self.visible_items);
             }
             Action::Edit => {
@@ -442,6 +453,7 @@ impl TuiApp {
                         .position(|item| matches!(item, ListItem::FileHeader(i) if *i == fi))
                         .unwrap_or(0);
                     self.cursor = cursor_pos;
+                    self.clamp_scroll_offset();
                     self.file_move_state = Some(FileMovingState {
                         original_fi: fi,
                         insertion_cursor: cursor_pos,
@@ -472,6 +484,7 @@ impl TuiApp {
                     if has_selection {
                         let first = self.selection.sorted_indices()[0];
                         self.cursor = first;
+                        self.clamp_scroll_offset();
                     }
 
                     let source_items: Vec<(usize, usize)> = targets
@@ -1028,6 +1041,17 @@ impl TuiApp {
         if self.cursor >= self.visible_items.len() {
             self.cursor = self.visible_items.len().saturating_sub(1);
         }
+        self.clamp_scroll_offset();
+    }
+
+    /// Enforce: scroll_offset <= cursor < scroll_offset + list_visible_height
+    pub fn clamp_scroll_offset(&mut self) {
+        let h = self.list_visible_height;
+        if self.cursor < self.scroll_offset {
+            self.scroll_offset = self.cursor;
+        } else if h > 0 && self.cursor >= self.scroll_offset + h {
+            self.scroll_offset = self.cursor - h + 1;
+        }
     }
 
     /// Get the file index for the current cursor position
@@ -1101,6 +1125,7 @@ impl TuiApp {
                 for (i, item) in self.visible_items.iter().enumerate() {
                     if matches!(item, ListItem::Entry(f, e) if *f == fi && *e == ei) {
                         self.cursor = i;
+                        self.clamp_scroll_offset();
                         break;
                     }
                 }
@@ -1212,6 +1237,7 @@ impl TuiApp {
             self.cursor = ms
                 .insertion_cursor
                 .min(self.visible_items.len().saturating_sub(1));
+            self.clamp_scroll_offset();
             self.message = Some("Moved".into());
         }
     }
@@ -1272,6 +1298,7 @@ impl TuiApp {
                 .position(|item| matches!(item, ListItem::FileHeader(fi) if *fi == target_fi))
                 .unwrap_or(0);
             self.cursor = cursor_pos;
+            self.clamp_scroll_offset();
             self.message = Some("File moved".into());
         }
     }
@@ -1289,6 +1316,7 @@ impl TuiApp {
                 .position(|item| matches!(item, ListItem::FileHeader(fi) if *fi == fms.original_fi))
                 .unwrap_or(0);
             self.cursor = cursor_pos;
+            self.clamp_scroll_offset();
             self.message = Some("File move cancelled".into());
         }
     }

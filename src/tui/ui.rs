@@ -395,17 +395,9 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
 
     let list = List::new(items).block(Block::default().borders(Borders::NONE));
 
-    // Calculate scroll offset to keep cursor visible
-    let visible_height = list_area.height as usize;
-    let offset = if app.cursor >= visible_height {
-        app.cursor - visible_height + 1
-    } else {
-        0
-    };
-
     let mut list_state = ratatui::widgets::ListState::default();
     list_state.select(Some(app.cursor));
-    *list_state.offset_mut() = offset;
+    *list_state.offset_mut() = app.scroll_offset;
 
     f.render_stateful_widget(list, list_area, &mut list_state);
 }
