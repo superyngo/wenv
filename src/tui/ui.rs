@@ -525,14 +525,9 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
     let max_width = (area.width * 4 / 5).max(20);
     let max_height = (area.height * 4 / 5).max(6);
     let popup_width = max_width.min(area.width);
-    let inner_width = (popup_width - 2).max(1) as usize;
-    let visual_line_count: usize = lines
-        .iter()
-        .map(|line| {
-            let w: usize = line.spans.iter().map(|s| s.width()).sum();
-            (w.saturating_sub(1) / inner_width + 1).max(1)
-        })
-        .sum();
+    let inner_width = (popup_width - 2).max(1);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let visual_line_count = paragraph.line_count(inner_width);
 
     let needs_scroll = visual_line_count + 2 > max_height as usize;
     let inner_height = if needs_scroll {
@@ -557,9 +552,7 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let mut paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
+    let mut paragraph = paragraph.block(block);
     if needs_scroll {
         paragraph = paragraph.scroll((app.detail_scroll_offset, 0));
     }

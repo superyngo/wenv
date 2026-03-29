@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.14.1] - 2026-03-30
+
+### 🐛 FIXED
+
+- Fix detail popup last line unreachable when word-wrap produces more visual lines than character-level calculation (e.g. long file paths + values)
+
 ## [v0.14.0] - 2026-03-29
 
 ### ✨ NEW FEATURES
