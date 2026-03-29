@@ -39,6 +39,12 @@ pub enum Action {
     TextInputBackspace,
     TextInputLeft,
     TextInputRight,
+    DetailScrollUp,
+    DetailScrollDown,
+    DetailPageUp,
+    DetailPageDown,
+    DetailHome,
+    DetailEnd,
     Noop,
 }
 
@@ -129,11 +135,16 @@ fn map_search_key(key: KeyEvent) -> Action {
 
 fn map_detail_key(key: KeyEvent) -> Action {
     match key.code {
-        // Toggle: Enter/Space close the detail popup
         KeyCode::Enter | KeyCode::Char(' ') => Action::ToggleExpand,
         KeyCode::Esc | KeyCode::Char('q') => Action::Cancel,
         KeyCode::Char('e') => Action::Edit,
         KeyCode::Char('r') => Action::Remark,
+        KeyCode::Up | KeyCode::Char('k') => Action::DetailScrollUp,
+        KeyCode::Down | KeyCode::Char('j') => Action::DetailScrollDown,
+        KeyCode::PageUp => Action::DetailPageUp,
+        KeyCode::PageDown => Action::DetailPageDown,
+        KeyCode::Home => Action::DetailHome,
+        KeyCode::End => Action::DetailEnd,
         _ => Action::Noop,
     }
 }

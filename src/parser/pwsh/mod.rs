@@ -534,7 +534,7 @@ impl Parser for PowerShellParser {
                 let is_single_line = brace_count == 0 && trimmed.contains('}');
 
                 if is_single_line {
-                    let entry = Entry::new(EntryType::Code, block_name, line.to_string())
+                    let entry = Entry::new(EntryType::ScriptBlock, block_name, line.to_string())
                         .with_line_number(line_number)
                         .with_end_line(line_number);
                     let (pending_entry_to_add, merged) =
@@ -567,7 +567,7 @@ impl Parser for PowerShellParser {
                         start_line,
                         end_line: line_number,
                         boundary: BoundaryType::BraceCounting { brace_count },
-                        entry_hint: Some(EntryType::Code),
+                        entry_hint: Some(EntryType::ScriptBlock),
                         name: Some(block_name),
                         value: None,
                         comment_count: 0,
@@ -631,6 +631,7 @@ impl Parser for PowerShellParser {
                 Some(EntryType::EnvVar) => {
                     "Unclosed environment variable Here-String at end of file"
                 }
+                Some(EntryType::ScriptBlock) => "Unclosed scriptblock at end of file",
                 _ => "Unclosed block at end of file",
             };
             result.add_warning(crate::model::ParseWarning::new(block.start_line, msg, ""));
@@ -692,6 +693,12 @@ impl PowerShellParser {
             EntryType::Alias | EntryType::Source => {
                 let name = block.name.unwrap_or_else(|| "unknown".to_string());
                 Entry::new(entry_type, name, raw_content)
+                    .with_line_number(block.start_line)
+                    .with_end_line(block.end_line)
+            }
+            EntryType::ScriptBlock => {
+                let name = block.name.unwrap_or_else(|| "anonymous".to_string());
+                Entry::new(EntryType::ScriptBlock, name, raw_content)
                     .with_line_number(block.start_line)
                     .with_end_line(block.end_line)
             }
@@ -1371,7 +1378,7 @@ C:\bin
         let result = parser.parse(content);
 
         assert_eq!(result.entries.len(), 1);
-        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+        assert_eq!(result.entries[0].entry_type, EntryType::ScriptBlock);
         assert_eq!(result.entries[0].name, "ForEach-Object");
         assert_eq!(result.entries[0].line_number, Some(1));
         assert_eq!(result.entries[0].end_line, Some(4));
@@ -1384,7 +1391,7 @@ C:\bin
         let result = parser.parse(content);
 
         assert_eq!(result.entries.len(), 1);
-        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+        assert_eq!(result.entries[0].entry_type, EntryType::ScriptBlock);
         assert!(result.entries[0].value.contains("\n\n"));
     }
 
@@ -1464,7 +1471,7 @@ C:\bin
         let result = parser.parse(content);
 
         assert_eq!(result.entries.len(), 1);
-        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+        assert_eq!(result.entries[0].entry_type, EntryType::ScriptBlock);
         assert_eq!(result.entries[0].name, "$block");
     }
 
@@ -1558,7 +1565,7 @@ C:\bin
         assert_eq!(result.entries.len(), 2);
         assert_eq!(result.entries[0].entry_type, EntryType::Comment);
         assert_eq!(result.entries[0].line_number, Some(1));
-        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+        assert_eq!(result.entries[1].entry_type, EntryType::ScriptBlock);
         assert_eq!(result.entries[1].line_number, Some(3));
     }
 
@@ -1571,7 +1578,7 @@ C:\bin
         assert_eq!(result.entries.len(), 2);
         assert_eq!(result.entries[0].entry_type, EntryType::Code);
         assert_eq!(result.entries[0].line_number, Some(1));
-        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+        assert_eq!(result.entries[1].entry_type, EntryType::ScriptBlock);
         assert_eq!(result.entries[1].line_number, Some(2));
     }
 
@@ -1586,7 +1593,7 @@ C:\bin
         assert_eq!(result.entries[0].line_number, Some(1));
         assert_eq!(result.entries[1].entry_type, EntryType::Code);
         assert_eq!(result.entries[1].line_number, Some(3));
-        assert_eq!(result.entries[2].entry_type, EntryType::Code);
+        assert_eq!(result.entries[2].entry_type, EntryType::ScriptBlock);
         assert_eq!(result.entries[2].line_number, Some(4));
     }
 
@@ -1614,5 +1621,86 @@ C:\bin
         assert_eq!(result.entries[0].line_number, Some(1));
         assert_eq!(result.entries[1].entry_type, EntryType::Code);
         assert_eq!(result.entries[1].line_number, Some(2));
+    }
+
+    #[test]
+    fn test_scriptblock_does_not_merge_trailing_code() {
+        let parser = PowerShellParser::new();
+        let content = "1..9 | ForEach-Object {\n    $_\n}\necho 123\necho 456";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::ScriptBlock);
+        assert_eq!(result.entries[0].name, "ForEach-Object");
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(3));
+        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+        assert_eq!(result.entries[1].line_number, Some(4));
+        assert_eq!(result.entries[1].end_line, Some(5));
+    }
+
+    #[test]
+    fn test_scriptblock_absorbs_trailing_blanks_then_code() {
+        let parser = PowerShellParser::new();
+        let content = "1..9 | ForEach-Object {\n    $_\n}\n\n\necho 123";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::ScriptBlock);
+        assert_eq!(result.entries[0].end_line, Some(5));
+        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+        assert_eq!(result.entries[1].line_number, Some(6));
+    }
+
+    #[test]
+    fn test_scriptblock_with_block_comment_and_trailing_code() {
+        let parser = PowerShellParser::new();
+        let content = concat!(
+            "1..9 | ForEach-Object {\n",
+            "    # comment\n",
+            "    <# block comment #>\n",
+            "\n",
+            "    $num = $_\n",
+            "    $dots = '.' * ($num + 1)\n",
+            "    $path = '..\\' * $num\n",
+            "    # dynamic func\n",
+            "    $code = \"function global:$dots { Set-Location\n",
+            "    Invoke-Expression $code\n",
+            "}\n",
+            "echo 123\n",
+            "echo 123",
+        );
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::ScriptBlock);
+        assert_eq!(result.entries[0].name, "ForEach-Object");
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(11));
+        assert!(result.entries[0].value.contains("# comment"));
+        assert!(result.entries[0].value.contains("<#"));
+        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+        assert_eq!(result.entries[1].line_number, Some(12));
+    }
+
+    #[test]
+    fn test_balanced_braces_scriptblock_is_code() {
+        let parser = PowerShellParser::new();
+        let content = "$items | Where-Object { $_.Name -eq 'test' }";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].entry_type, EntryType::Code);
+    }
+
+    #[test]
+    fn test_scriptblock_assign_type() {
+        let parser = PowerShellParser::new();
+        let content = "$block = {\n    Write-Host 'hi'\n}";
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].entry_type, EntryType::ScriptBlock);
+        assert_eq!(result.entries[0].name, "$block");
     }
 }

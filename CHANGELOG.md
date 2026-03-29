@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.14.0] - 2026-03-29
+
+### ✨ NEW FEATURES
+
+- Add PowerShell ScriptBlock entry type (`EntryType::ScriptBlock`) for pipeline blocks (`| ForEach-Object { ... }`) and scriptblock assignments (`$block = { ... }`), distinguished from generic Code entries with dedicated color (LightMagenta)
+- Add detail popup scrolling with j/k, PageUp/PageDown, Home/End keys for long entries that exceed screen height
+
 ## [v0.13.1] - 2026-03-28
 
 ### 🐛 FIXED

@@ -48,6 +48,8 @@ pub struct TuiApp {
     pub text_input: Option<crate::tui::state::TextInputState>,
     pub pending_create_path: Option<(String, std::path::PathBuf)>,
     pub file_move_state: Option<FileMovingState>,
+    pub detail_scroll_offset: u16,
+    pub detail_page_size: u16,
 }
 
 impl TuiApp {
@@ -81,6 +83,8 @@ impl TuiApp {
             text_input: None,
             pending_create_path: None,
             file_move_state: None,
+            detail_scroll_offset: 0,
+            detail_page_size: 10,
         })
     }
 
@@ -266,6 +270,7 @@ impl TuiApp {
                                 // Toggle open: save current mode and show detail
                                 self.previous_mode = Some(self.mode.clone());
                                 self.mode = AppMode::ShowingDetail;
+                                self.detail_scroll_offset = 0;
                             }
                         }
                     }
@@ -970,6 +975,28 @@ impl TuiApp {
                     }
                 }
                 // In ShowingDetail: stay in the popup (don't change mode)
+            }
+            Action::DetailScrollUp => {
+                self.detail_scroll_offset = self.detail_scroll_offset.saturating_sub(1);
+            }
+            Action::DetailScrollDown => {
+                self.detail_scroll_offset = self.detail_scroll_offset.saturating_add(1);
+            }
+            Action::DetailPageUp => {
+                self.detail_scroll_offset = self
+                    .detail_scroll_offset
+                    .saturating_sub(self.detail_page_size);
+            }
+            Action::DetailPageDown => {
+                self.detail_scroll_offset = self
+                    .detail_scroll_offset
+                    .saturating_add(self.detail_page_size);
+            }
+            Action::DetailHome => {
+                self.detail_scroll_offset = 0;
+            }
+            Action::DetailEnd => {
+                self.detail_scroll_offset = u16::MAX;
             }
             Action::AddFile => {
                 self.text_input = Some(crate::tui::state::TextInputState {

@@ -73,7 +73,7 @@ Shell-specific logic implemented via traits:
 ### Core Data Models (`src/model/`)
 
 ```rust
-EntryType { Alias, Function, EnvVar, Source, Code, Comment }
+EntryType { Alias, Function, EnvVar, Source, Code, Comment, ScriptBlock }
 ShellType { Bash, Zsh, PowerShell }
 Entry { entry_type, name, value, line_number, end_line, file_index }
 ```

@@ -9,8 +9,9 @@ pub enum EntryType {
     Function,
     EnvVar,
     Source,
-    Code,    // Raw code lines or control structures
-    Comment, // Pure comment lines
+    Code,        // Raw code lines or control structures
+    Comment,     // Pure comment lines
+    ScriptBlock, // Pipeline/assignment scriptblock (PowerShell-specific)
 }
 
 impl std::fmt::Display for EntryType {
@@ -22,6 +23,7 @@ impl std::fmt::Display for EntryType {
             EntryType::Source => write!(f, "source"),
             EntryType::Code => write!(f, "code"),
             EntryType::Comment => write!(f, "comment"),
+            EntryType::ScriptBlock => write!(f, "scriptblock"),
         }
     }
 }
@@ -37,6 +39,7 @@ impl std::str::FromStr for EntryType {
             "source" => Ok(EntryType::Source),
             "code" => Ok(EntryType::Code),
             "comment" => Ok(EntryType::Comment),
+            "scriptblock" => Ok(EntryType::ScriptBlock),
             _ => Err(format!("Unknown entry type: {}", s)),
         }
     }

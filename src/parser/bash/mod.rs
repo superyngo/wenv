@@ -134,6 +134,12 @@ impl BashParser {
                 // Use raw_content (includes all absorbed trailing blanks)
                 (name, raw_content)
             }
+            EntryType::ScriptBlock => {
+                let name = block
+                    .name
+                    .unwrap_or_else(|| format!("L{}", block.start_line));
+                (name, raw_content)
+            }
         };
 
         Entry::new(entry_type, name, value)

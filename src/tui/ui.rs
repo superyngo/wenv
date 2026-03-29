@@ -16,6 +16,7 @@ fn type_color(et: &EntryType) -> Color {
         EntryType::Source => Color::Magenta,
         EntryType::Code => Color::Cyan,
         EntryType::Comment => Color::White,
+        EntryType::ScriptBlock => Color::LightMagenta,
     }
 }
 
@@ -84,7 +85,7 @@ fn build_highlighted_spans<'a>(
     spans
 }
 
-pub fn draw(f: &mut Frame, app: &TuiApp) {
+pub fn draw(f: &mut Frame, app: &mut TuiApp) {
     let has_search = app.search.is_some();
     let has_text_input = app.text_input.is_some();
     let constraints = if has_search || has_text_input {
@@ -478,7 +479,7 @@ fn draw_text_input_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
     }
 }
 
-fn draw_detail_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
+fn draw_detail_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
     // Get the entry at cursor
     let (fi, ei) = match app.visible_items.get(app.cursor) {
         Some(ProfileListItem::Entry(fi, ei)) => (*fi, *ei),
@@ -532,9 +533,18 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
             (w.saturating_sub(1) / inner_width + 1).max(1)
         })
         .sum();
-    let popup_height = (visual_line_count as u16 + 2)
-        .min(max_height)
-        .min(area.height);
+
+    let needs_scroll = visual_line_count + 2 > max_height as usize;
+    let inner_height = if needs_scroll {
+        max_height - 2
+    } else {
+        visual_line_count as u16
+    };
+    let popup_height = inner_height + 2;
+
+    let max_scroll = (visual_line_count as u16).saturating_sub(inner_height);
+    app.detail_scroll_offset = app.detail_scroll_offset.min(max_scroll);
+    app.detail_page_size = inner_height.saturating_sub(1).max(1);
 
     let x = (area.width.saturating_sub(popup_width)) / 2;
     let y = (area.height.saturating_sub(popup_height)) / 2;
@@ -543,14 +553,17 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(" Entry Detail (e:edit r:remark Esc:close) ")
+        .title(" Entry Detail (e:edit r:remark ↑↓:scroll Esc:close) ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let text = Paragraph::new(lines)
+    let mut paragraph = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: false });
-    f.render_widget(text, popup_area);
+    if needs_scroll {
+        paragraph = paragraph.scroll((app.detail_scroll_offset, 0));
+    }
+    f.render_widget(paragraph, popup_area);
 }
 
 fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
