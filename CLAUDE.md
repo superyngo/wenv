@@ -141,7 +141,27 @@ paths = [
     "~/.zshrc",
     "~/.zsh_aliases"
 ]
+
+[snippets.zsh]
+[[snippets.zsh]]
+name = "Empty"
+description = "Blank entry"
+
+[[snippets.zsh]]
+name = "alias"
+description = "Define an alias"
+template = "# Set alias name and value\nalias NAME='VALUE'"
+
+[template_paths]
+paths = [
+    "~/.config/wenv/snippets/extra.toml"
+]
 ```
+
+**Snippets System:**
+- `[snippets.<shell>]` — inline snippet templates, auto-populated on first run for active shell
+- `[template_paths]` — external TOML files containing `[[snippets.<shell>]]` arrays, merged with inline (inline takes priority on name collision)
+- Loaded by `config::load_snippets_for_shell()`, used by TUI 'n' key
 
 ### TUI Key Bindings Reference
 
@@ -152,7 +172,7 @@ paths = [
 | `s` | Toggle selection |
 | `Shift+↑`/`↓` | Extend selection range |
 | `e` | Edit entry with $EDITOR |
-| `n` | New entry with $EDITOR |
+| `n` | New entry — shows snippet template menu, then $EDITOR |
 | `d` | Delete entries / Remove file from config |
 | `x` | Cut selected entries |
 | `c` | Copy selected entries |

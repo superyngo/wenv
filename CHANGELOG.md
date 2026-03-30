@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.15.0] - 2026-03-30
+
+### ✨ NEW FEATURES
+
+- Snippet template selection menu for new entry creation (press 'n' to choose from shell-specific templates)
+- Configurable snippet templates in config.toml with external file support via [template_paths]
+
 ## [v0.14.2] - 2026-03-30
 
 ### 🐛 FIXED

@@ -20,9 +20,9 @@ use crate::tui::state::{AppMode, ClipboardState, FileMovingState, MoveState};
 
 enum EditorRequest {
     None,
-    EditFile(usize),              // file index
-    EditEntry(usize, usize),      // file index, entry index
-    AddEntry(usize),              // target file index
+    EditFile(usize),                             // file index
+    EditEntry(usize, usize),                     // file index, entry index
+    AddEntry(usize),                             // target file index
     AddEntryWithTemplate(usize, Option<String>), // target file index, template content
 }
 

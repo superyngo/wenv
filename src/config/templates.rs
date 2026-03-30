@@ -40,6 +40,11 @@ pub fn generate_default_config(shell_key: &str) -> String {
 fn default_posix_snippets() -> Vec<Snippet> {
     vec![
         Snippet {
+            name: "blank".into(),
+            description: "Empty editor".into(),
+            template: None,
+        },
+        Snippet {
             name: "alias".into(),
             description: "alias NAME='VALUE'".into(),
             template: Some("alias NAME='VALUE'".into()),
@@ -59,17 +64,17 @@ fn default_posix_snippets() -> Vec<Snippet> {
             description: "source FILE".into(),
             template: Some("source ".into()),
         },
-        Snippet {
-            name: "blank".into(),
-            description: "Empty editor".into(),
-            template: None,
-        },
     ]
 }
 
 /// Default snippets for PowerShell
 fn default_pwsh_snippets() -> Vec<Snippet> {
     vec![
+        Snippet {
+            name: "blank".into(),
+            description: "Empty editor".into(),
+            template: None,
+        },
         Snippet {
             name: "alias".into(),
             description: "Set-Alias NAME VALUE".into(),
@@ -89,11 +94,6 @@ fn default_pwsh_snippets() -> Vec<Snippet> {
             name: "source".into(),
             description: ". FILE".into(),
             template: Some(". ".into()),
-        },
-        Snippet {
-            name: "blank".into(),
-            description: "Empty editor".into(),
-            template: None,
         },
     ]
 }
