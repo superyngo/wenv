@@ -92,6 +92,7 @@ pub fn count_braces_outside_quotes(line: &str) -> (usize, usize) {
 
     for c in line.chars() {
         match c {
+            '#' if !in_single_quote && !in_double_quote => break,
             '\'' if !in_double_quote => in_single_quote = !in_single_quote,
             '"' if !in_single_quote => in_double_quote = !in_double_quote,
             '{' if !in_single_quote && !in_double_quote => open_count += 1,
@@ -131,6 +132,7 @@ pub fn count_parens_outside_quotes(line: &str) -> (usize, usize) {
 
     for c in line.chars() {
         match c {
+            '#' if !in_single_quote && !in_double_quote => break,
             '\'' if !in_double_quote => in_single_quote = !in_single_quote,
             '"' if !in_single_quote => in_double_quote = !in_double_quote,
             '(' if !in_single_quote && !in_double_quote => open_count += 1,
@@ -256,6 +258,38 @@ mod tests {
         let (open, close) = count_braces_outside_quotes(r#"{ echo "}" }"#);
         assert_eq!(open, 1);
         assert_eq!(close, 1);
+    }
+
+    #[test]
+    fn test_count_braces_in_comment() {
+        // Braces in comments should be ignored
+        let (open, close) = count_braces_outside_quotes("# test {");
+        assert_eq!(open, 0);
+        assert_eq!(close, 0);
+
+        let (open, close) = count_braces_outside_quotes("# test }");
+        assert_eq!(open, 0);
+        assert_eq!(close, 0);
+
+        let (open, close) = count_braces_outside_quotes("# test {}");
+        assert_eq!(open, 0);
+        assert_eq!(close, 0);
+    }
+
+    #[test]
+    fn test_count_braces_code_then_comment() {
+        // Braces before comment counted, after ignored
+        let (open, close) = count_braces_outside_quotes("echo { # }");
+        assert_eq!(open, 1);
+        assert_eq!(close, 0);
+    }
+
+    #[test]
+    fn test_count_braces_comment_in_quotes() {
+        // # inside quotes is not a comment
+        let (open, close) = count_braces_outside_quotes("echo \"# not a comment {\"");
+        assert_eq!(open, 0);
+        assert_eq!(close, 0);
     }
 
     #[test]

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.14.2] - 2026-03-30
+
+### 🐛 FIXED
+
+- Fix Bash parser failing when comments inside function/scriptblock contain unbalanced braces (e.g. `# test {` or `# test }`). Braces in comments are now correctly ignored by `count_braces_outside_quotes` and `count_parens_outside_quotes`.
+
 ## [v0.14.1] - 2026-03-30
 
 ### 🐛 FIXED

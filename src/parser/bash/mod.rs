@@ -1417,4 +1417,53 @@ mod tests {
         let last = result.entries.last().unwrap();
         assert_eq!(last.value, "echo c");
     }
+
+    #[test]
+    fn test_function_with_comment_containing_unbalanced_brace() {
+        // Comments with unbalanced braces inside function body must not break parsing
+        let parser = BashParser::new();
+        let content = "foo() {\n    # test {\n    echo hi\n}";
+        let result = parser.parse(content);
+
+        let funcs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Function)
+            .collect();
+
+        assert_eq!(
+            funcs.len(),
+            1,
+            "Should parse exactly one function, got {} entries: {:?}",
+            result.entries.len(),
+            result.entries
+        );
+        assert_eq!(funcs[0].name, "foo");
+        assert_eq!(funcs[0].line_number, Some(1));
+        assert_eq!(funcs[0].end_line, Some(4));
+        assert!(funcs[0].value.contains("# test {"));
+    }
+
+    #[test]
+    fn test_function_with_comment_containing_close_brace() {
+        let parser = BashParser::new();
+        let content = "foo() {\n    # test }\n    echo hi\n}";
+        let result = parser.parse(content);
+
+        let funcs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Function)
+            .collect();
+
+        assert_eq!(
+            funcs.len(),
+            1,
+            "Should parse exactly one function, got {} entries: {:?}",
+            result.entries.len(),
+            result.entries
+        );
+        assert_eq!(funcs[0].name, "foo");
+        assert_eq!(funcs[0].end_line, Some(4));
+    }
 }
