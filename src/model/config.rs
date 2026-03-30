@@ -11,6 +11,10 @@ pub struct Config {
     pub ui: UiConfig,
     #[serde(default)]
     pub files: HashMap<String, FilesConfig>,
+    #[serde(default)]
+    pub snippets: HashMap<String, Vec<Snippet>>,
+    #[serde(default)]
+    pub template_paths: TemplatePathsConfig,
 }
 
 /// UI configuration options
@@ -26,6 +30,29 @@ pub struct FilesConfig {
     pub paths: Vec<String>,
 }
 
+/// A snippet template for new entry creation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snippet {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub template: Option<String>,
+}
+
+/// External template file paths
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplatePathsConfig {
+    #[serde(default)]
+    pub paths: Vec<String>,
+}
+
+impl Default for TemplatePathsConfig {
+    fn default() -> Self {
+        Self { paths: Vec::new() }
+    }
+}
+
 fn default_language() -> String {
     "en".to_string()
 }
@@ -37,6 +64,8 @@ impl Default for Config {
                 language: default_language(),
             },
             files: HashMap::new(),
+            snippets: HashMap::new(),
+            template_paths: TemplatePathsConfig::default(),
         }
     }
 }
@@ -105,5 +134,60 @@ mod tests {
         let toml_str = toml::to_string(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.ui.language, config.ui.language);
+    }
+
+    #[test]
+    fn test_snippet_serialization() {
+        use super::Snippet;
+
+        let snippet = Snippet {
+            name: "alias".into(),
+            description: "Define an alias".into(),
+            template: Some("alias NAME='VALUE'".into()),
+        };
+        let toml_str = toml::to_string(&snippet).unwrap();
+        let parsed: Snippet = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.name, "alias");
+        assert_eq!(parsed.template, Some("alias NAME='VALUE'".into()));
+    }
+
+    #[test]
+    fn test_config_with_snippets() {
+        use super::{Snippet, TemplatePathsConfig};
+
+        let mut config = Config::default();
+        let snippets = vec![
+            Snippet {
+                name: "Empty".into(),
+                description: "Blank entry".into(),
+                template: None,
+            },
+            Snippet {
+                name: "alias".into(),
+                description: "Define an alias".into(),
+                template: Some("alias NAME='VALUE'".into()),
+            },
+        ];
+        config.snippets.insert("zsh".into(), snippets);
+        config.template_paths = TemplatePathsConfig {
+            paths: vec!["~/.config/wenv/snippets/extra.toml".into()],
+        };
+
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        assert!(toml_str.contains("[snippets.zsh]"));
+        assert!(toml_str.contains("[template_paths]"));
+
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.snippets["zsh"].len(), 2);
+        assert!(parsed.snippets["zsh"][0].template.is_none());
+        assert_eq!(parsed.template_paths.paths.len(), 1);
+    }
+
+    #[test]
+    fn test_config_without_snippets_parses() {
+        let toml_str = "[ui]\nlanguage = \"en\"\n";
+        let parsed: Config = toml::from_str(toml_str).unwrap();
+        assert!(parsed.snippets.is_empty());
+        assert!(parsed.template_paths.paths.is_empty());
     }
 }
