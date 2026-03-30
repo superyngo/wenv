@@ -20,9 +20,10 @@ use crate::tui::state::{AppMode, ClipboardState, FileMovingState, MoveState};
 
 enum EditorRequest {
     None,
-    EditFile(usize),         // file index
-    EditEntry(usize, usize), // file index, entry index
-    AddEntry(usize),         // target file index
+    EditFile(usize),              // file index
+    EditEntry(usize, usize),      // file index, entry index
+    AddEntry(usize),              // target file index
+    AddEntryWithTemplate(usize, Option<String>), // target file index, template content
 }
 
 pub struct TuiApp {
@@ -50,6 +51,9 @@ pub struct TuiApp {
     pub file_move_state: Option<FileMovingState>,
     pub detail_scroll_offset: u16,
     pub detail_page_size: u16,
+    pub snippet_cursor: usize,
+    pub snippet_scroll_offset: usize,
+    pub snippets: Vec<crate::model::Snippet>,
 }
 
 impl TuiApp {
@@ -77,6 +81,9 @@ impl TuiApp {
             move_state: None,
             search: None,
             list_visible_height: 20,
+            snippet_cursor: 0,
+            snippet_scroll_offset: 0,
+            snippets: crate::config::load_snippets_for_shell(&config, &shell_key),
             config,
             shell_key,
             pending_remove_fi: None,
@@ -137,7 +144,13 @@ impl TuiApp {
                         }
                     }
                     EditorRequest::AddEntry(fi) => {
-                        self.run_add_entry(terminal, fi)?;
+                        self.run_add_entry(terminal, fi, None)?;
+                        if self.mode == AppMode::Searching {
+                            self.update_search_and_navigate();
+                        }
+                    }
+                    EditorRequest::AddEntryWithTemplate(fi, template) => {
+                        self.run_add_entry(terminal, fi, template.as_deref())?;
                         if self.mode == AppMode::Searching {
                             self.update_search_and_navigate();
                         }
@@ -334,8 +347,42 @@ impl TuiApp {
                     self.message = Some("File is read-only".into());
                     return Ok(EditorRequest::None);
                 }
+                if self.snippets.is_empty() {
+                    let fi = self.current_file_index();
+                    return Ok(EditorRequest::AddEntry(fi));
+                }
+                self.snippet_cursor = 0;
+                self.snippet_scroll_offset = 0;
+                self.mode = AppMode::SelectingSnippet;
+                return Ok(EditorRequest::None);
+            }
+            Action::SnippetUp => {
+                if self.snippet_cursor > 0 {
+                    self.snippet_cursor -= 1;
+                    if self.snippet_cursor < self.snippet_scroll_offset {
+                        self.snippet_scroll_offset = self.snippet_cursor;
+                    }
+                }
+                return Ok(EditorRequest::None);
+            }
+            Action::SnippetDown => {
+                if self.snippet_cursor < self.snippets.len().saturating_sub(1) {
+                    self.snippet_cursor += 1;
+                }
+                return Ok(EditorRequest::None);
+            }
+            Action::SnippetSelect => {
                 let fi = self.current_file_index();
-                return Ok(EditorRequest::AddEntry(fi));
+                let template = self
+                    .snippets
+                    .get(self.snippet_cursor)
+                    .and_then(|s| s.template.clone());
+                self.mode = AppMode::Normal;
+                return Ok(EditorRequest::AddEntryWithTemplate(fi, template));
+            }
+            Action::SnippetCancel => {
+                self.mode = AppMode::Normal;
+                return Ok(EditorRequest::None);
             }
             Action::Delete => {
                 if let Some(ListItem::FileHeader(fi)) = self.visible_items.get(self.cursor) {
@@ -790,6 +837,9 @@ impl TuiApp {
                         self.pending_create_path = None;
                         self.mode = AppMode::Normal;
                         self.message = Some("Cancelled".into());
+                    }
+                    AppMode::SelectingSnippet => {
+                        self.mode = AppMode::Normal;
                     }
                 }
             }
@@ -1582,11 +1632,12 @@ impl TuiApp {
         Ok(())
     }
 
-    /// Add a new entry: open empty temp file in $EDITOR, parse result, insert
+    /// Add a new entry: open empty (or template) temp file in $EDITOR, parse result, insert
     fn run_add_entry(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         fi: usize,
+        template: Option<&str>,
     ) -> Result<()> {
         let suffix = match self.profile.shell_type {
             crate::model::ShellType::PowerShell => ".ps1",
@@ -1594,7 +1645,8 @@ impl TuiApp {
         };
 
         Self::suspend_tui(terminal)?;
-        let result = crate::tui::editor::edit_temp_content("", suffix);
+        let initial_content = template.unwrap_or("");
+        let result = crate::tui::editor::edit_temp_content(initial_content, suffix);
         Self::resume_tui(terminal)?;
 
         match result {

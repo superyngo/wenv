@@ -112,6 +112,7 @@ fn main() -> Result<()> {
     if !config.files.contains_key(shell_key) {
         wenv::config::ensure_shell_files(&mut config, shell_key)?;
     }
+    wenv::config::ensure_shell_snippets(&mut config, shell_key)?;
 
     let messages = i18n::init_messages(&config.ui.language);
 

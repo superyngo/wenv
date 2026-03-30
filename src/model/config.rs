@@ -4,6 +4,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// A snippet template shown in the "new entry" picker
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snippet {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub template: Option<String>,
+}
+
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -11,6 +21,8 @@ pub struct Config {
     pub ui: UiConfig,
     #[serde(default)]
     pub files: HashMap<String, FilesConfig>,
+    #[serde(default)]
+    pub snippets: HashMap<String, Vec<Snippet>>,
 }
 
 /// UI configuration options
@@ -37,6 +49,7 @@ impl Default for Config {
                 language: default_language(),
             },
             files: HashMap::new(),
+            snippets: HashMap::new(),
         }
     }
 }
