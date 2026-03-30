@@ -138,8 +138,6 @@ mod tests {
 
     #[test]
     fn test_snippet_serialization() {
-        use super::Snippet;
-
         let snippet = Snippet {
             name: "alias".into(),
             description: "Define an alias".into(),
@@ -153,8 +151,6 @@ mod tests {
 
     #[test]
     fn test_config_with_snippets() {
-        use super::{Snippet, TemplatePathsConfig};
-
         let mut config = Config::default();
         let snippets = vec![
             Snippet {
@@ -185,6 +181,7 @@ mod tests {
 
     #[test]
     fn test_config_without_snippets_parses() {
+        // Existing config without snippets section should parse fine
         let toml_str = "[ui]\nlanguage = \"en\"\n";
         let parsed: Config = toml::from_str(toml_str).unwrap();
         assert!(parsed.snippets.is_empty());
