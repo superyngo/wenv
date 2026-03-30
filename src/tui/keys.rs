@@ -45,6 +45,10 @@ pub enum Action {
     DetailPageDown,
     DetailHome,
     DetailEnd,
+    SnippetUp,
+    SnippetDown,
+    SnippetSelect,
+    SnippetCancel,
     Noop,
 }
 
@@ -56,6 +60,7 @@ pub fn map_key(mode: &AppMode, key: KeyEvent) -> Action {
         AppMode::Searching => map_search_key(key),
         AppMode::ShowingDetail => map_detail_key(key),
         AppMode::TextInput => map_text_input_key(key),
+        AppMode::SelectingSnippet => map_snippet_key(key),
         _ => map_popup_key(key),
     }
 }
@@ -157,6 +162,16 @@ fn map_text_input_key(key: KeyEvent) -> Action {
         KeyCode::Left => Action::TextInputLeft,
         KeyCode::Right => Action::TextInputRight,
         KeyCode::Char(c) => Action::TextInputChar(c),
+        _ => Action::Noop,
+    }
+}
+
+fn map_snippet_key(key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => Action::SnippetUp,
+        KeyCode::Down | KeyCode::Char('j') => Action::SnippetDown,
+        KeyCode::Enter => Action::SnippetSelect,
+        KeyCode::Esc => Action::SnippetCancel,
         _ => Action::Noop,
     }
 }

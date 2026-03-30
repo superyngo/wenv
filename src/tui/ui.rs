@@ -135,6 +135,9 @@ pub fn draw(f: &mut Frame, app: &mut TuiApp) {
         AppMode::ShowingHelp => {
             draw_help_popup(f, f.size(), app);
         }
+        AppMode::SelectingSnippet => {
+            draw_snippet_popup(f, f.size(), app);
+        }
         _ => {}
     }
 }
@@ -627,4 +630,80 @@ fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
 
     let text = Paragraph::new(lines).block(block);
     f.render_widget(text, popup_area);
+}
+
+fn draw_snippet_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
+    let snippets = &app.snippets;
+    if snippets.is_empty() {
+        return;
+    }
+
+    let hint_line = " \u{2191}\u{2193} navigate  Enter select  Esc";
+    let mut lines: Vec<Line> = Vec::new();
+
+    let name_width = snippets.iter().map(|s| s.name.len()).max().unwrap_or(0);
+
+    for (i, snippet) in snippets.iter().enumerate() {
+        let is_selected = i == app.snippet_cursor;
+        let name_part = format!("  {:<width$}", snippet.name, width = name_width);
+        let desc_part = if snippet.description.is_empty() {
+            String::new()
+        } else {
+            format!(" \u{2014} {}", snippet.description)
+        };
+
+        let style = if is_selected {
+            Style::default().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::default()
+        };
+
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", name_part, desc_part),
+            style,
+        )));
+    }
+
+    // Blank separator + hint
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        hint_line,
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    // Calculate popup size
+    let max_line_width = snippets
+        .iter()
+        .map(|s| name_width + 3 + s.description.len())
+        .max()
+        .unwrap_or(20)
+        .max(hint_line.len());
+    let content_lines = lines.len() as u16;
+    let popup_width = ((max_line_width as u16) + 4)
+        .min((area.width * 4) / 5)
+        .min(area.width.saturating_sub(4));
+    let max_height = (area.height * 4) / 5;
+    let popup_height = (content_lines + 2).min(max_height);
+
+    let x = (area.width.saturating_sub(popup_width)) / 2;
+    let y = (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .title(" New Entry ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let inner_height = popup_height.saturating_sub(2);
+    let snippet_count = snippets.len() as u16;
+    let max_scroll = snippet_count.saturating_sub(inner_height.saturating_sub(2));
+    let scroll_offset = app.snippet_scroll_offset.min(max_scroll as usize) as u16;
+
+    let mut paragraph = Paragraph::new(lines).block(block);
+    if max_scroll > 0 {
+        paragraph = paragraph.scroll((scroll_offset, 0));
+    }
+    f.render_widget(paragraph, popup_area);
 }

@@ -13,6 +13,7 @@ pub enum AppMode {
     ConfirmRemoveFile,
     ConfirmCreateFile,
     MovingFile,
+    SelectingSnippet,
 }
 
 pub struct ClipboardState {
