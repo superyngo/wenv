@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🐛 FIXED
+
+- Fix PowerShell parser failing when `<# ... #>` block comments inside functions/classes/scriptblocks contain `{` or `}` braces. Block comment depth is now tracked within `BraceCounting` blocks so braces inside comments are correctly ignored.
+- Fix move-down off-by-one error: moving entries downward (via move or cut/paste) placed them further down than intended. The target position now correctly adjusts for entries removed before the insertion point in the same file.
+
 ## [v0.15.0] - 2026-03-30
 
 ### ✨ NEW FEATURES

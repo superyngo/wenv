@@ -105,13 +105,21 @@ impl Parser for PowerShellParser {
                 match &mut block.boundary {
                     BoundaryType::BraceCounting {
                         ref mut brace_count,
+                        ref mut block_comment_depth,
                     } => {
-                        // Function body
-                        let (open, close) = count_braces_outside_quotes(trimmed);
-                        *brace_count += open as i32;
-                        *brace_count = (*brace_count).saturating_sub(close as i32);
+                        if *block_comment_depth > 0 {
+                            if is_block_comment_end(trimmed) {
+                                *block_comment_depth -= 1;
+                            }
+                        } else if is_block_comment_start(trimmed) {
+                            *block_comment_depth += 1;
+                        } else {
+                            let (open, close) = count_braces_outside_quotes(trimmed);
+                            *brace_count += open as i32;
+                            *brace_count = (*brace_count).saturating_sub(close as i32);
+                        }
 
-                        if *brace_count == 0 {
+                        if *brace_count == 0 && *block_comment_depth == 0 {
                             let completed = active_block.take().unwrap();
                             pending_entry = Some(entry_to_trailing_pending(
                                 self.build_entry_from_pending(completed),
@@ -475,7 +483,10 @@ impl Parser for PowerShellParser {
                     let mut block = PendingBlock::new(
                         start_line,
                         &merged_first_line,
-                        BoundaryType::BraceCounting { brace_count },
+                        BoundaryType::BraceCounting {
+                            brace_count,
+                            block_comment_depth: 0,
+                        },
                     );
                     block.entry_hint = Some(EntryType::Code);
                     block.name = Some(class_name);
@@ -518,7 +529,10 @@ impl Parser for PowerShellParser {
                     let mut block = PendingBlock::new(
                         start_line,
                         &merged_first_line,
-                        BoundaryType::BraceCounting { brace_count },
+                        BoundaryType::BraceCounting {
+                            brace_count,
+                            block_comment_depth: 0,
+                        },
                     );
                     block.entry_hint = Some(EntryType::Code);
                     block.name = Some(enum_name);
@@ -566,7 +580,10 @@ impl Parser for PowerShellParser {
                         lines: merged_first_line,
                         start_line,
                         end_line: line_number,
-                        boundary: BoundaryType::BraceCounting { brace_count },
+                        boundary: BoundaryType::BraceCounting {
+                            brace_count,
+                            block_comment_depth: 0,
+                        },
                         entry_hint: Some(EntryType::ScriptBlock),
                         name: Some(block_name),
                         value: None,
@@ -1681,6 +1698,51 @@ C:\bin
         assert!(result.entries[0].value.contains("<#"));
         assert_eq!(result.entries[1].entry_type, EntryType::Code);
         assert_eq!(result.entries[1].line_number, Some(12));
+    }
+
+    #[test]
+    fn test_function_with_block_comment_containing_braces() {
+        let parser = PowerShellParser::new();
+        let content = concat!(
+            "function Test-Foo {\n",
+            "    <#\n",
+            "    This comment has { braces } inside\n",
+            "    #>\n",
+            "    Write-Host 'hello'\n",
+            "}\n",
+            "echo done",
+        );
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::Function);
+        assert_eq!(result.entries[0].name, "Test-Foo");
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(6));
+        assert_eq!(result.entries[1].entry_type, EntryType::Code);
+    }
+
+    #[test]
+    fn test_function_with_nested_block_comments() {
+        let parser = PowerShellParser::new();
+        let content = concat!(
+            "function Test-Bar {\n",
+            "    <# outer comment #>\n",
+            "    Write-Host 'a'\n",
+            "    <#\n",
+            "    inner { with } braces\n",
+            "    #>\n",
+            "    Write-Host 'b'\n",
+            "}\n",
+            "echo final",
+        );
+        let result = parser.parse(content);
+
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].entry_type, EntryType::Function);
+        assert_eq!(result.entries[0].name, "Test-Bar");
+        assert_eq!(result.entries[0].line_number, Some(1));
+        assert_eq!(result.entries[0].end_line, Some(8));
     }
 
     #[test]

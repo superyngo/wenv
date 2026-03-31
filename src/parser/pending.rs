@@ -34,6 +34,9 @@ pub enum BoundaryType {
     BraceCounting {
         /// Current brace count (open - close).
         brace_count: i32,
+        /// Depth of nested `<# ... #>` block comments.
+        /// Braces inside block comments are not counted.
+        block_comment_depth: usize,
     },
 
     /// Track parenthesis balance `( )` for multi-line structures like `plugins=(...)`.
@@ -136,7 +139,10 @@ impl PendingBlock {
         let mut block = Self::new(
             start_line,
             first_line,
-            BoundaryType::BraceCounting { brace_count },
+            BoundaryType::BraceCounting {
+                brace_count,
+                block_comment_depth: 0,
+            },
         );
         block.entry_hint = Some(EntryType::Function);
         block.name = Some(name);
@@ -239,7 +245,7 @@ impl PendingBlock {
     pub fn is_complete(&self) -> bool {
         match &self.boundary {
             BoundaryType::Complete => true,
-            BoundaryType::BraceCounting { brace_count } => *brace_count == 0,
+            BoundaryType::BraceCounting { brace_count, .. } => *brace_count == 0,
             BoundaryType::ParenthesisCounting { parenthesis_count } => *parenthesis_count == 0,
             BoundaryType::QuoteCounting { quote_count } => quote_count % 2 == 0,
             BoundaryType::KeywordTracking { depth } => *depth == 0,
@@ -254,6 +260,7 @@ impl PendingBlock {
     pub fn update_brace_count(&mut self, open: i32, close: i32) {
         if let BoundaryType::BraceCounting {
             ref mut brace_count,
+            ..
         } = self.boundary
         {
             *brace_count += open;

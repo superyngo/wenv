@@ -1272,7 +1272,7 @@ impl TuiApp {
                 by_file.entry(fi).or_default().push(ei);
             }
             let source_files: Vec<usize> = by_file.keys().cloned().collect();
-            for (fi, mut indices) in by_file {
+            for (&fi, indices) in &mut by_file {
                 indices.sort();
                 indices.dedup();
                 for &ei in indices.iter().rev() {
@@ -1284,10 +1284,12 @@ impl TuiApp {
             }
 
             // Adjust target_pos if removals in the same file shifted indices
-            // This is tricky — we need to recalculate since entries shifted.
-            // Safest approach: rebuild list, then find position by count.
-            // But simpler: just insert at target file, at min(target_pos, entries.len())
-            let adjusted_pos = target_pos.min(self.profile.files[target_fi].entries.len());
+            let removed_before_target = by_file
+                .get(&target_fi)
+                .map(|indices| indices.iter().filter(|&&ei| ei < target_pos).count())
+                .unwrap_or(0);
+            let adjusted_pos = (target_pos - removed_before_target)
+                .min(self.profile.files[target_fi].entries.len());
 
             // Insert at target
             for (i, mut entry) in entries_to_move.into_iter().enumerate() {

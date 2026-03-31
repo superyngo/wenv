@@ -551,3 +551,58 @@ fn test_redo_cleared_by_new_operation() {
 
     assert_eq!(redo_stack.len(), 0); // cleared
 }
+
+#[test]
+fn test_move_entry_down_adjusts_for_removal() {
+    // Simulates execute_move: move entry[0] after entry[1] in same file.
+    // Before: [A, B, C] — move A (index 0) to after B (target_pos = 2).
+    // After removal of A: [B, C] — target_pos should be adjusted to 1.
+    // Result: [B, A, C]
+    let mut profile = make_test_profile();
+    // file0 entries: [ll(0), gs(1), PATH(2)]
+    let items = profile.build_visible_list();
+    // items[1] = Entry(0,0)="ll", items[2] = Entry(0,1)="gs", items[3] = Entry(0,2)="PATH"
+
+    // Remove entry at index 0 from file 0 (ll)
+    let removed = operations::delete_entries(&mut profile, &items, &[1]);
+    assert_eq!(removed.len(), 1);
+    assert_eq!(removed[0].name, "ll");
+    // file0 entries now: [gs(0), PATH(1)]
+
+    // Simulate adjusted_pos: target was index 2 (after gs), one removal before target
+    let adjusted_pos = 2 - 1;
+    let items = profile.build_visible_list();
+    operations::paste_entries(&mut profile, &items, adjusted_pos, &removed);
+
+    // file0 entries should be: [gs, ll, PATH]
+    assert_eq!(profile.files[0].entries.len(), 3);
+    assert_eq!(profile.files[0].entries[0].name, "gs");
+    assert_eq!(profile.files[0].entries[1].name, "ll");
+    assert_eq!(profile.files[0].entries[2].name, "PATH");
+}
+
+#[test]
+fn test_move_multiple_entries_down_adjusts_for_removal() {
+    let mut profile = make_test_profile();
+    // file0 entries: [ll(0), gs(1), PATH(2)]
+
+    // Remove entries at visible indices 1 and 2 (ll and gs)
+    let items = profile.build_visible_list();
+    let removed = operations::delete_entries(&mut profile, &items, &[1, 2]);
+    assert_eq!(removed.len(), 2);
+    // delete_entries removes in reverse order, so removed = [gs, ll]
+    assert_eq!(removed[0].name, "gs");
+    assert_eq!(removed[1].name, "ll");
+    // file0 entries now: [PATH(0)]
+
+    // target_pos was 3 (after PATH), 2 removals before target → adjusted = 1
+    let adjusted_pos = 3 - 2;
+    let items = profile.build_visible_list();
+    operations::paste_entries(&mut profile, &items, adjusted_pos, &removed);
+
+    // file0 entries should be: [PATH, gs, ll]
+    assert_eq!(profile.files[0].entries.len(), 3);
+    assert_eq!(profile.files[0].entries[0].name, "PATH");
+    assert_eq!(profile.files[0].entries[1].name, "gs");
+    assert_eq!(profile.files[0].entries[2].name, "ll");
+}

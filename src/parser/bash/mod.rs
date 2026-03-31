@@ -203,6 +203,7 @@ impl Parser for BashParser {
                 match &mut block.boundary {
                     BoundaryType::BraceCounting {
                         ref mut brace_count,
+                        ..
                     } => {
                         // Function body
                         let (open, close) = count_braces_outside_quotes(trimmed);
@@ -559,7 +560,10 @@ impl Parser for BashParser {
                         lines: vec![merged_first_line],
                         start_line,
                         end_line: line_number,
-                        boundary: BoundaryType::BraceCounting { brace_count },
+                        boundary: BoundaryType::BraceCounting {
+                            brace_count,
+                            block_comment_depth: 0,
+                        },
                         entry_hint: Some(EntryType::Function),
                         name: Some(name),
                         value: None,
