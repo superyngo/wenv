@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.15.1] - 2026-03-31
+
 ### 🐛 FIXED
 
 - Fix PowerShell parser failing when `<# ... #>` block comments inside functions/classes/scriptblocks contain `{` or `}` braces. Block comment depth is now tracked within `BraceCounting` blocks so braces inside comments are correctly ignored.
