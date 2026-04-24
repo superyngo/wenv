@@ -57,7 +57,8 @@ pub fn map_key(mode: &AppMode, key: KeyEvent) -> Action {
         AppMode::Normal => map_normal_key(key),
         AppMode::Moving => map_moving_key(key),
         AppMode::MovingFile => map_moving_key(key),
-        AppMode::Searching => map_search_key(key),
+        AppMode::FilterInput => map_filter_input_key(key),
+        AppMode::FilterActive => map_filter_active_key(key),
         AppMode::ShowingDetail => map_detail_key(key),
         AppMode::TextInput => map_text_input_key(key),
         AppMode::SelectingSnippet => map_snippet_key(key),
@@ -123,19 +124,21 @@ fn map_moving_key(key: KeyEvent) -> Action {
     }
 }
 
-fn map_search_key(key: KeyEvent) -> Action {
+fn map_filter_input_key(key: KeyEvent) -> Action {
+    // During filter input, only typing, backspace, enter to confirm, and esc to cancel.
     match key.code {
         KeyCode::Esc => Action::Cancel,
+        KeyCode::Enter => Action::Confirm,
         KeyCode::Backspace => Action::SearchBackspace,
-        KeyCode::Up | KeyCode::PageUp => Action::NavigateUp,
-        KeyCode::Down | KeyCode::PageDown => Action::NavigateDown,
-        KeyCode::Home => Action::Home,
-        KeyCode::End => Action::End,
-        // Toggle info popup
-        KeyCode::Enter | KeyCode::Char(' ') => Action::ToggleExpand,
         KeyCode::Char(c) => Action::SearchInput(c),
         _ => Action::Noop,
     }
+}
+
+fn map_filter_active_key(key: KeyEvent) -> Action {
+    // In filter-active mode, normal navigation and operations are available.
+    // '/' re-opens filter input to edit the query; Esc clears the filter.
+    map_normal_key(key)
 }
 
 fn map_detail_key(key: KeyEvent) -> Action {

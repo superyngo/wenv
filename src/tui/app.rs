@@ -133,26 +133,26 @@ impl TuiApp {
                 match request {
                     EditorRequest::EditFile(fi) => {
                         self.run_edit_file(terminal, fi)?;
-                        if self.mode == AppMode::Searching {
-                            self.update_search_and_navigate();
+                        if self.is_filter_mode() {
+                            self.update_filter();
                         }
                     }
                     EditorRequest::EditEntry(fi, ei) => {
                         self.run_edit_entry(terminal, fi, ei)?;
-                        if self.mode == AppMode::Searching {
-                            self.update_search_and_navigate();
+                        if self.is_filter_mode() {
+                            self.update_filter();
                         }
                     }
                     EditorRequest::AddEntry(fi) => {
                         self.run_add_entry(terminal, fi, None)?;
-                        if self.mode == AppMode::Searching {
-                            self.update_search_and_navigate();
+                        if self.is_filter_mode() {
+                            self.update_filter();
                         }
                     }
                     EditorRequest::AddEntryWithTemplate(fi, template) => {
                         self.run_add_entry(terminal, fi, template.as_deref())?;
-                        if self.mode == AppMode::Searching {
-                            self.update_search_and_navigate();
+                        if self.is_filter_mode() {
+                            self.update_filter();
                         }
                     }
                     EditorRequest::None => {}
@@ -167,12 +167,7 @@ impl TuiApp {
 
         match action {
             Action::NavigateUp => {
-                if self.mode == AppMode::Searching {
-                    if let Some(ref mut search) = self.search {
-                        search.select_prev();
-                    }
-                    self.navigate_to_search_match();
-                } else if self.mode == AppMode::MovingFile {
+                if self.mode == AppMode::MovingFile {
                     if let Some(ref mut fms) = self.file_move_state {
                         if fms.insertion_cursor > 0 {
                             fms.insertion_cursor -= 1;
@@ -187,12 +182,7 @@ impl TuiApp {
                 }
             }
             Action::NavigateDown => {
-                if self.mode == AppMode::Searching {
-                    if let Some(ref mut search) = self.search {
-                        search.select_next();
-                    }
-                    self.navigate_to_search_match();
-                } else if self.mode == AppMode::MovingFile {
+                if self.mode == AppMode::MovingFile {
                     if let Some(ref mut fms) = self.file_move_state {
                         let max_idx = self.visible_items.len().saturating_sub(1);
                         if fms.insertion_cursor < max_idx {
@@ -244,34 +234,20 @@ impl TuiApp {
                 }
             }
             Action::Home => {
-                if self.mode == AppMode::Searching {
-                    if let Some(ref mut search) = self.search {
-                        search.select_first();
-                    }
-                    self.navigate_to_search_match();
-                } else {
-                    self.selection.commit_range();
-                    self.cursor = list::navigate_home();
-                    self.clamp_scroll_offset();
-                }
+                self.selection.commit_range();
+                self.cursor = list::navigate_home();
+                self.clamp_scroll_offset();
             }
             Action::End => {
-                if self.mode == AppMode::Searching {
-                    if let Some(ref mut search) = self.search {
-                        search.select_last();
-                    }
-                    self.navigate_to_search_match();
-                } else {
-                    self.selection.commit_range();
-                    self.cursor = list::navigate_end(&self.visible_items);
-                    self.clamp_scroll_offset();
-                }
+                self.selection.commit_range();
+                self.cursor = list::navigate_end(&self.visible_items);
+                self.clamp_scroll_offset();
             }
             Action::ToggleExpand => {
                 if let Some(item) = self.visible_items.get(self.cursor) {
                     match item {
                         ListItem::FileHeader(_) => {
-                            if self.mode != AppMode::Searching {
+                            if !self.is_filter_mode() {
                                 self.toggle_at_cursor();
                             }
                         }
@@ -353,6 +329,7 @@ impl TuiApp {
                 }
                 self.snippet_cursor = 0;
                 self.snippet_scroll_offset = 0;
+                self.previous_mode = Some(self.mode.clone());
                 self.mode = AppMode::SelectingSnippet;
                 return Ok(EditorRequest::None);
             }
@@ -377,11 +354,21 @@ impl TuiApp {
                     .snippets
                     .get(self.snippet_cursor)
                     .and_then(|s| s.template.clone());
-                self.mode = AppMode::Normal;
+                let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+                self.mode = if matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive) {
+                    AppMode::FilterActive
+                } else {
+                    AppMode::Normal
+                };
                 return Ok(EditorRequest::AddEntryWithTemplate(fi, template));
             }
             Action::SnippetCancel => {
-                self.mode = AppMode::Normal;
+                let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+                self.mode = if matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive) {
+                    AppMode::FilterActive
+                } else {
+                    AppMode::Normal
+                };
                 return Ok(EditorRequest::None);
             }
             Action::Delete => {
@@ -511,6 +498,7 @@ impl TuiApp {
                         insertion_cursor: cursor_pos,
                         saved_expanded,
                     });
+                    self.previous_mode = Some(self.mode.clone());
                     self.mode = AppMode::MovingFile;
                     self.message =
                         Some("File move: ↑↓ to position, Enter to drop, Esc to cancel".into());
@@ -553,6 +541,7 @@ impl TuiApp {
                             insertion_cursor: self.cursor,
                             from_selection: has_selection,
                         });
+                        self.previous_mode = Some(self.mode.clone());
                         self.mode = AppMode::Moving;
                         self.message =
                             Some("Move mode: ↑↓ to position, Enter to drop, Esc to cancel".into());
@@ -625,11 +614,9 @@ impl TuiApp {
             },
             Action::Confirm => {
                 match &self.mode {
-                    AppMode::Searching => {
-                        // Jump to current match and exit search
-                        self.navigate_to_search_match();
-                        self.search = None;
-                        self.mode = AppMode::Normal;
+                    AppMode::FilterInput => {
+                        // Commit: enter browsing mode with the active filter
+                        self.mode = AppMode::FilterActive;
                     }
                     AppMode::MovingFile => {
                         self.execute_file_move();
@@ -645,17 +632,20 @@ impl TuiApp {
                             &targets,
                         );
                         self.selection.clear();
-                        let return_to_search =
-                            matches!(self.previous_mode, Some(AppMode::Searching));
-                        self.mode = if return_to_search {
-                            AppMode::Searching
+                        let return_to_filter = matches!(
+                            self.previous_mode,
+                            Some(AppMode::FilterInput) | Some(AppMode::FilterActive)
+                        );
+                        self.mode = if return_to_filter {
+                            AppMode::FilterActive
                         } else {
                             AppMode::Normal
                         };
                         self.previous_mode = None;
-                        self.rebuild_list();
-                        if return_to_search {
-                            self.update_search_and_navigate();
+                        if return_to_filter {
+                            self.update_filter();
+                        } else {
+                            self.rebuild_list();
                         }
                         self.message = Some("Deleted".into());
                     }
@@ -782,9 +772,11 @@ impl TuiApp {
             }
             Action::Cancel => {
                 match &self.mode {
-                    AppMode::Searching => {
+                    AppMode::FilterInput | AppMode::FilterActive => {
+                        // Clear filter and restore full list
                         self.search = None;
                         self.mode = AppMode::Normal;
+                        self.rebuild_list();
                         self.message = None;
                     }
                     AppMode::MovingFile => {
@@ -797,8 +789,19 @@ impl TuiApp {
                             crate::tui::operations::restore_snapshot(&mut self.profile, snapshot);
                         }
                         self.move_state = None;
-                        self.mode = AppMode::Normal;
-                        self.rebuild_list();
+                        let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+                        let in_filter =
+                            matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive);
+                        self.mode = if in_filter {
+                            AppMode::FilterActive
+                        } else {
+                            AppMode::Normal
+                        };
+                        if in_filter {
+                            self.update_filter();
+                        } else {
+                            self.rebuild_list();
+                        }
                         if from_sel {
                             // First Esc: keep selection, user can Esc again to clear
                             self.message =
@@ -839,7 +842,15 @@ impl TuiApp {
                         self.message = Some("Cancelled".into());
                     }
                     AppMode::SelectingSnippet => {
-                        self.mode = AppMode::Normal;
+                        let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+                        self.mode = if matches!(
+                            return_mode,
+                            AppMode::FilterInput | AppMode::FilterActive
+                        ) {
+                            AppMode::FilterActive
+                        } else {
+                            AppMode::Normal
+                        };
                     }
                 }
             }
@@ -861,26 +872,26 @@ impl TuiApp {
                 }
             }
             Action::Search => {
-                self.search = Some(SearchState::new());
-                self.mode = AppMode::Searching;
-                self.message = None;
+                if self.mode == AppMode::FilterActive {
+                    // Re-open input to edit the existing filter query
+                    self.mode = AppMode::FilterInput;
+                } else {
+                    self.search = Some(SearchState::new());
+                    self.mode = AppMode::FilterInput;
+                    self.message = None;
+                }
             }
             Action::SearchInput(c) => {
                 if let Some(ref mut search) = self.search {
                     search.input_char(c);
                 }
-                self.update_search_and_navigate();
+                self.update_filter();
             }
             Action::SearchBackspace => {
                 if let Some(ref mut search) = self.search {
                     search.backspace();
-                    if search.query.is_empty() {
-                        self.search = None;
-                        self.mode = AppMode::Normal;
-                        return Ok(EditorRequest::None);
-                    }
                 }
-                self.update_search_and_navigate();
+                self.update_filter();
             }
             Action::Help => {
                 self.mode = AppMode::ShowingHelp;
@@ -1114,7 +1125,28 @@ impl TuiApp {
     }
 
     pub fn rebuild_list(&mut self) {
+        // When a filter query is active, expand files with matches and collapse others.
+        if let Some(ref search) = self.search {
+            if !search.query.is_empty() {
+                let matched_files = search.matched_file_indices();
+                for (i, file) in self.profile.files.iter_mut().enumerate() {
+                    file.expanded = matched_files.contains(&i);
+                }
+            }
+        }
+
         self.visible_items = self.profile.build_visible_list();
+
+        // Post-filter: remove non-matching entries (and empty file headers) from the list.
+        if let Some(ref search) = self.search {
+            if !search.query.is_empty() {
+                self.visible_items.retain(|item| match item {
+                    ListItem::FileHeader(_) => true, // only matched-file headers are present
+                    ListItem::Entry(fi, ei) => search.is_match(*fi, *ei),
+                });
+            }
+        }
+
         if self.cursor >= self.visible_items.len() {
             self.cursor = self.visible_items.len().saturating_sub(1);
         }
@@ -1191,43 +1223,17 @@ impl TuiApp {
         fi < self.profile.files.len() && self.profile.files[fi].writable
     }
 
-    /// Navigate cursor to the currently selected search match
-    fn navigate_to_search_match(&mut self) {
-        if let Some(ref search) = self.search {
-            if let Some((fi, ei)) = search.current_match() {
-                // Ensure the file is expanded
-                self.profile.files[fi].expanded = true;
-                self.rebuild_list();
-                // Find the entry in visible_items
-                for (i, item) in self.visible_items.iter().enumerate() {
-                    if matches!(item, ListItem::Entry(f, e) if *f == fi && *e == ei) {
-                        self.cursor = i;
-                        self.clamp_scroll_offset();
-                        break;
-                    }
-                }
-            }
-        }
+    /// Returns true when either filter mode is active.
+    pub fn is_filter_mode(&self) -> bool {
+        matches!(self.mode, AppMode::FilterInput | AppMode::FilterActive)
     }
 
-    /// Expand files with search matches, collapse files without
-    fn toggle_files_by_search(&mut self) {
-        if let Some(ref search) = self.search {
-            let matched_files = search.matched_file_indices();
-            for (i, file) in self.profile.files.iter_mut().enumerate() {
-                file.expanded = matched_files.contains(&i);
-            }
-            self.rebuild_list();
-        }
-    }
-
-    /// Combined: update search matches, toggle files, navigate to match
-    fn update_search_and_navigate(&mut self) {
+    /// Update fuzzy-match results and rebuild the filtered list.
+    fn update_filter(&mut self) {
         if let Some(ref mut search) = self.search {
             search.update_matches(&self.profile);
         }
-        self.toggle_files_by_search();
-        self.navigate_to_search_match();
+        self.rebuild_list();
     }
 
     /// Get visible-list indices for operation targets.
@@ -1311,8 +1317,18 @@ impl TuiApp {
             }
 
             self.selection.clear();
-            self.mode = AppMode::Normal;
-            self.rebuild_list();
+            let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+            let in_filter = matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive);
+            self.mode = if in_filter {
+                AppMode::FilterActive
+            } else {
+                AppMode::Normal
+            };
+            if in_filter {
+                self.update_filter();
+            } else {
+                self.rebuild_list();
+            }
             self.cursor = ms
                 .insertion_cursor
                 .min(self.visible_items.len().saturating_sub(1));
@@ -1332,8 +1348,18 @@ impl TuiApp {
             if target_fi == fms.original_fi {
                 // No change — just restore expanded states
                 self.restore_expanded(&fms.saved_expanded);
-                self.mode = AppMode::Normal;
-                self.rebuild_list();
+                let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+                let in_filter = matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive);
+                self.mode = if in_filter {
+                    AppMode::FilterActive
+                } else {
+                    AppMode::Normal
+                };
+                if in_filter {
+                    self.update_filter();
+                } else {
+                    self.rebuild_list();
+                }
                 self.message = Some("No change".into());
                 return;
             }
@@ -1367,8 +1393,18 @@ impl TuiApp {
             new_expanded.insert(target_fi, removed);
             self.restore_expanded(&new_expanded);
 
-            self.mode = AppMode::Normal;
-            self.rebuild_list();
+            let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+            let in_filter = matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive);
+            self.mode = if in_filter {
+                AppMode::FilterActive
+            } else {
+                AppMode::Normal
+            };
+            if in_filter {
+                self.update_filter();
+            } else {
+                self.rebuild_list();
+            }
 
             // Place cursor on the moved file's new header
             let cursor_pos = self
@@ -1386,8 +1422,18 @@ impl TuiApp {
     fn cancel_file_move(&mut self) {
         if let Some(fms) = self.file_move_state.take() {
             self.restore_expanded(&fms.saved_expanded);
-            self.mode = AppMode::Normal;
-            self.rebuild_list();
+            let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+            let in_filter = matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive);
+            self.mode = if in_filter {
+                AppMode::FilterActive
+            } else {
+                AppMode::Normal
+            };
+            if in_filter {
+                self.update_filter();
+            } else {
+                self.rebuild_list();
+            }
             // Place cursor on original file's header
             let cursor_pos = self
                 .visible_items

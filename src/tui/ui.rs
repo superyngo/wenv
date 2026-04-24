@@ -284,14 +284,10 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     let value_str = format_value_display(&entry.value);
                     let tc = type_color(&entry.entry_type);
 
-                    // Search mode styling
-                    let is_search_match = app.search.as_ref().is_some_and(|s| s.is_match(*fi, *ei));
-                    let is_search_selected = app
-                        .search
-                        .as_ref()
-                        .is_some_and(|s| s.is_selected_match(*fi, *ei));
+                    // In filter mode, all visible entries are matches — apply keyword highlight.
+                    let filter_active = app.search.as_ref().is_some_and(|s| !s.query.is_empty());
 
-                    // Build line with per-character highlighting for search matches
+                    // Build line with per-character highlighting when filter is active
                     let line = if is_readonly {
                         let grey = if is_cursor {
                             Style::default().fg(Color::Gray)
@@ -308,7 +304,7 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                             Span::raw(" "),
                             Span::styled(value_str, grey),
                         ])
-                    } else if app.mode == AppMode::Searching && is_search_match {
+                    } else if filter_active {
                         let hl_style = Style::default()
                             .fg(Color::Yellow)
                             .add_modifier(Modifier::BOLD);
@@ -359,32 +355,16 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                         ])
                     };
 
-                    let mut style = if app.mode == AppMode::Searching {
-                        if is_search_selected {
-                            Style::default()
-                                .bg(Color::Rgb(80, 80, 0))
-                                .fg(Color::White)
-                                .add_modifier(Modifier::BOLD)
-                        } else if is_search_match {
-                            Style::default().bg(Color::Rgb(50, 50, 90))
-                        } else {
-                            Style::default().fg(Color::DarkGray)
-                        }
-                    } else {
-                        match (is_cursor, is_selected) {
-                            (true, true) => Style::default()
-                                .bg(Color::Blue)
-                                .fg(Color::White)
-                                .add_modifier(Modifier::BOLD),
-                            (true, false) => Style::default()
-                                .bg(Color::Blue)
-                                .fg(Color::White)
-                                .add_modifier(Modifier::BOLD),
-                            (false, true) => Style::default()
-                                .bg(Color::DarkGray)
-                                .add_modifier(Modifier::BOLD),
-                            (false, false) => Style::default(),
-                        }
+                    // Row background: use normal cursor/selection styling in all modes.
+                    let mut style = match (is_cursor, is_selected) {
+                        (true, _) => Style::default()
+                            .bg(Color::Blue)
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                        (false, true) => Style::default()
+                            .bg(Color::DarkGray)
+                            .add_modifier(Modifier::BOLD),
+                        (false, false) => Style::default(),
                     };
 
                     if is_move_target {
@@ -465,9 +445,20 @@ fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
 fn draw_search_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
     if let Some(ref search) = app.search {
         let match_count = search.matches.len();
-        let text = format!(" / {}  [{} matches]", search.query, match_count);
-        let style = Style::default().bg(Color::Black).fg(Color::Yellow);
-        f.render_widget(Paragraph::new(text).style(style), area);
+        if app.mode == AppMode::FilterInput {
+            // Show typing cursor indicator and match count
+            let text = format!(" / {}█  [{} matches]", search.query, match_count);
+            let style = Style::default().bg(Color::Black).fg(Color::Yellow);
+            f.render_widget(Paragraph::new(text).style(style), area);
+        } else {
+            // FilterActive: show filter badge with Esc hint
+            let text = format!(
+                " [FILTER: {}  |  {} matches]  Esc to clear",
+                search.query, match_count
+            );
+            let style = Style::default().bg(Color::Black).fg(Color::Cyan);
+            f.render_widget(Paragraph::new(text).style(style), area);
+        }
     }
 }
 
@@ -609,7 +600,7 @@ fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("  /           Fuzzy search"),
+        Line::from("  /           Filter entries (fuzzy match)"),
         Line::from("  w/Ctrl+s    Save all changes"),
         Line::from("  q           Quit"),
         Line::from("  ?           Show this help"),

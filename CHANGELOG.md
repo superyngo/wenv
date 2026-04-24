@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.16.0] - 2026-04-24
+
+### ✨ NEW FEATURES
+
+- **Filter mode** replaces the previous fuzzy search. Press `/` to open the filter input bar; entries not matching the query are removed from the list in real time. Press `Enter` to commit and enter `FilterActive` mode where normal navigation and all entry operations work on the filtered list. Press `Esc` (from either filter stage) to clear the filter and restore the full list. Keyword characters are highlighted in all visible entries; the old match/selected-match background highlights are removed.
+
 ## [v0.15.1] - 2026-03-31
 
 ### 🐛 FIXED

@@ -61,7 +61,7 @@ Interactive terminal interface with these modules:
 - **`selection.rs`** - Multi-selection with visual indicators
 - **`state.rs`** - Application modes and clipboard/undo state
 - **`editor.rs`** - External $EDITOR integration
-- **`search.rs`** - Fuzzy search with filtering
+- **`search.rs`** - Fuzzy filter state and matching
 
 ### Trait-Based Parsing/Formatting
 
@@ -183,7 +183,9 @@ paths = [
 | `0` | Collapse all files |
 | `9` | Expand all files |
 | `z` | Undo last operation |
-| `/` | Search/filter entries |
+| `/` | Open filter input (fuzzy-match; non-matching entries hidden) |
+| `Enter` (in filter) | Commit filter — enter FilterActive mode for normal operations |
+| `Esc` (in filter) | Clear filter and restore full list |
 | `Esc` | Clear selection/exit modes |
 | `w` | Save all changes |
 | `?` | Show help |

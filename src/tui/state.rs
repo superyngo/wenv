@@ -3,7 +3,10 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppMode {
     Normal,
-    Searching,
+    /// Typing filter query — navigation and entry operations are disabled.
+    FilterInput,
+    /// Browsing filtered results — normal navigation and operations apply.
+    FilterActive,
     ShowingDetail,
     ShowingHelp,
     ConfirmDelete,
