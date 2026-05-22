@@ -3,6 +3,15 @@
 **Date:** 2026-05-22
 **Status:** Draft (pending review)
 **Scope:** wenv v0.17 — breaking changes
+**Related:** `docs/adr/0001-config-resolution-strategy.md`
+
+## Terminology
+
+Per `CONTEXT.md`:
+- **Group** — top-level TUI tree node bundling files from a single glob/dir/var pattern. Internal struct is `DirGroup` (name predates glossary); user-facing copy says "group", not "directory".
+- **File** — single shell-config file on disk. Internal struct is `ProfileFile`.
+- **Entry** — parsed item within a File. Internal struct is `Entry`.
+- **Pattern** — raw string from `config.toml` under `[files.<shell>].paths`.
 
 ---
 
@@ -137,6 +146,19 @@ For each `pattern`:
    - Directory → equivalent to `<expanded>/*`: `read_dir` → keep `is_file()` only → binary filter → sort by path → `Dir`.
    - File / not found → `File`.
 
+### 3.2.1 Deduplication (Q2)
+
+`resolve_patterns()` is called once per profile load with the full ordered `paths` list. After all patterns are resolved, walk the results in config order maintaining a `HashSet<PathBuf>` of seen paths:
+
+- For each `Dir.files` entry: if already seen → drop silently from this Group's `files` vec and `eprintln!` a warning naming the earlier-pattern. Group header still renders (possibly with empty `files`).
+- For each `File`: if already seen → drop the `ResolvedPattern::File` entirely and warn. (No header — a top-level File with no path makes no sense.)
+
+Warning format: `"⚠ Path X already loaded from pattern Y; skipping duplicate from pattern Z"`.
+
+### 3.2.2 Top-level order (Q4)
+
+`tree` is built in **config-order**: pattern at index N in `config.files.<shell>.paths` becomes `tree[N]` (a `Dir` or `File` node). User controls ordering via `m` on top-level Files (existing behavior) or by editing `config.toml` directly via `wenv config`. `m` on `DirHeader` is **not supported** for v0.17 (§6.2); reordering Groups requires editing config.
+
 ### 3.3 Display label rules
 
 - If original pattern matches `\$[A-Za-z_][A-Za-z0-9_]*` or `%[A-Za-z_][A-Za-z0-9_]*%` (var-bearing — same regex as `expand_env_vars` at `src/config/path_resolver.rs:18`):
@@ -173,15 +195,24 @@ Applied **only** during dir expansion (`ResolvedPattern::Dir.files`). Single-fil
 
 ### 4.1 Fallback paths (`src/model/config.rs`)
 
+`WENV_CONFIG_DIR` env var (when set and non-empty) prepends `<value>/config.toml` to the chain — used for development isolation (`WENV_CONFIG_DIR=$(pwd)/Resources cargo run`). Documented in README "Development" section. See ADR-0001.
+
 ```rust
 impl Config {
     fn fallback_paths() -> Vec<PathBuf> {
         let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf));
         let home = dirs::home_dir();
+        let mut v: Vec<PathBuf> = Vec::new();
+
+        // WENV_CONFIG_DIR override (highest priority when set and non-empty)
+        if let Ok(d) = std::env::var("WENV_CONFIG_DIR") {
+            if !d.trim().is_empty() {
+                v.push(PathBuf::from(&d).join("config.toml"));
+            }
+        }
 
         #[cfg(not(target_os = "windows"))]
         {
-            let mut v = Vec::new();
             if let Some(d) = &exe_dir { v.push(d.join("Resources/config.toml")); }
             if let Some(h) = &home {
                 v.push(h.join(".wenget/apps/wenv/Resources/config.toml"));
@@ -189,20 +220,19 @@ impl Config {
             }
             v.push(PathBuf::from("/opt/wenget/apps/wenv/Resources/config.toml"));
             v.push(PathBuf::from("/usr/local/bin/config/config.toml"));
-            v
         }
 
         #[cfg(target_os = "windows")]
         {
             let env = |k: &str| std::env::var(k).ok().map(PathBuf::from);
-            let mut v = Vec::new();
             if let Some(d) = &exe_dir { v.push(d.join("Resources").join("config.toml")); }
             if let Some(p) = env("USERPROFILE")  { v.push(p.join(".wenget/apps/wenv/Resources/config.toml")); }
             if let Some(p) = env("LOCALAPPDATA") { v.push(p.join("Programs/wenv/Resources/config.toml")); }
             if let Some(p) = env("ProgramW6432") { v.push(p.join("wenget/apps/wenv/Resources/config.toml")); }
             if let Some(p) = env("ProgramFiles") { v.push(p.join("gpinstall/Resources/config.toml")); }
-            v
         }
+
+        v
     }
 }
 ```
@@ -251,15 +281,36 @@ impl Config {
         anyhow::bail!("No writable config location among fallback paths")
     }
 
-    pub fn save(&self) -> anyhow::Result<()> {
+    pub fn save(&mut self) -> anyhow::Result<()> {
         if let Some(parent) = self.source_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&self.source_path, toml::to_string_pretty(self)?)?;
-        Ok(())
+        let serialized = toml::to_string_pretty(self)?;
+        match std::fs::write(&self.source_path, &serialized) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied
+                  || e.kind() == std::io::ErrorKind::ReadOnlyFilesystem => {
+                // Copy-up: walk fallback chain, write to first writable, update source_path.
+                for p in Self::fallback_paths() {
+                    if p == self.source_path { continue; }
+                    let Some(parent) = p.parent() else { continue };
+                    if std::fs::create_dir_all(parent).is_err() { continue; }
+                    if std::fs::write(&p, &serialized).is_ok() {
+                        eprintln!("⚠ Config at {} is read-only; saved to {} instead.",
+                                  self.source_path.display(), p.display());
+                        self.source_path = p;
+                        return Ok(());
+                    }
+                }
+                Err(anyhow::anyhow!("Config save failed: {} is read-only and no writable fallback is available", self.source_path.display()))
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 }
 ```
+
+`save()` takes `&mut self` because copy-up mutates `source_path`. Existing call sites holding `&Config` are updated to `&mut Config`. See ADR-0001 for rationale.
 
 ### 4.4 Cache file (`src/config/cache.rs`, new)
 
@@ -305,6 +356,8 @@ impl Cache {
 ```
 
 If `config.source_path.parent()` is read-only, `Cache::save()` returns `Err`; callers log a warning and continue (PowerShell `$PROFILE` falls back to live query).
+
+**Lazy invalidation (Q5):** at startup, when `cache.pwsh_profile` (or `powershell_profile`) is `Some(p)`, check `std::path::Path::new(&p).exists()` once. If it exists → use cached value. If not → drop the cached value, re-run `query_powershell_profile()` (existing function in `path_resolver.rs`), update the in-memory `Cache`, and `Cache::save()` on shutdown (best-effort; failure is non-fatal). Single syscall per cached entry; covers the realistic failure mode of pwsh upgrade or profile relocation.
 
 ### 4.5 Removals / redirections
 
@@ -423,18 +476,29 @@ No deprecation alias. CHANGELOG records this as breaking.
 ### 6.3 `a` key prompt text
 Update the dialoguer prompt to:
 ```
-Add path to config (file, directory, glob, or $VAR):
+Add file, group, glob, or $VAR to config:
 ```
-After accepting input: append raw string to `config.files.{shell_key}.paths`, `config.save()`, reload profile (rebuild `tree` + `files`). Best-effort `expanded` state migration: match files by path; new files default to collapsed.
+After accepting input: append raw string to `config.files.{shell_key}.paths`, `config.save()`, then **targeted patch reload** (see §6.8). Other in-memory dirty files are preserved.
+
+### 6.3.1 User-facing terminology (Q1)
+The TUI status text, dialoguer prompts, `--help`, README, CHANGELOG use **"group"** rather than "directory" when referring to a `DirGroup` node:
+- `a` prompt → "Add file, group, glob, or $VAR to config"
+- `d` on DirHeader confirm → "Remove group '{pattern}' from config? ({N} files will be hidden)"
+- `m` on DirHeader → "Move is not supported on groups"
+- `m` on File-inside-Group → "Files inside a group are sorted alphabetically; move is not supported"
+- Help footer / `?` modal: describe the three-layer tree as "groups → files → entries"
+
+Internal struct names (`DirGroup`, `DirHeader`) keep their existing identifiers; rename is out of scope.
 
 ### 6.4 `d` on DirHeader
 ```text
 1. dialoguer Confirm:
-   "Remove pattern '{source_pattern}' from config? ({N} files will be hidden)"
+   "Remove group '{source_pattern}' from config? ({N} files will be hidden)"
 2. If confirmed:
    a. config.files.{shell_key}.paths.retain(|p| p != source_pattern);
    b. config.save();
-   c. reload profile (rebuild tree).
+   c. targeted patch reload (§6.8): drop this Group's tree node + ProfileFiles
+      that no other pattern references.
 3. If cancelled: no-op.
 ```
 The removal key is the *raw* pattern string, not the expanded path.
@@ -468,10 +532,36 @@ Top-level FileHeader:
 
 `[N files]` and `[N entries]` are right-aligned and truncated if terminal width is insufficient.
 
-### 6.6 Filter / search interaction
+### 6.6 Filter / search interaction (Q8)
 - When filter is active, a file matching the query forces both that file and its parent `DirGroup` (if any) to render as expanded.
 - A `DirGroup` with zero matching descendants is hidden from the filtered list.
+- Non-matching files inside an expanded `DirGroup` are **also hidden** (mirrors the existing two-layer behavior at `src/tui/app.rs:1133` where `file.expanded = matched_files.contains(&i)`).
 - Existing `saved_expanded` mechanism is extended to record both `DirGroup.expanded` and `ProfileFile.expanded`, restored on filter exit.
+
+### 6.8 Targeted patch reload (Q7)
+
+Triggered by `a` (add pattern), `d` on DirHeader (remove pattern), `d` on FileHeader (remove single path), and `startup_file_check` pruning.
+
+**Add pattern X:**
+1. Resolve X via `resolve_patterns(&[X])` → either `Dir` or `File`.
+2. Apply dedup (§3.2.1) against existing `tree` paths; warn on overlap.
+3. Construct new `ProfileFile`s, parse contents, append to `ShellProfile.files`.
+4. Construct new `TreeNode` (Dir or File), append to `tree`.
+5. `Config::save()` (write paths list).
+
+**Remove pattern X:**
+1. Find the `tree` node whose `source_pattern == X` (Dir) or whose backing `ProfileFile.path` corresponds to X-resolved (File).
+2. For each `ProfileFile` referenced by this node: check whether any *other* `tree` node also references the same path. If unique → mark for removal; if shared → leave in `files`.
+3. Drop the `tree` node. Compact `files` (shift remaining), and update every retained `Entry.file_index` to match the new indices.
+4. Invalidate clipboard / undo entries that referenced dropped `file_index` values — print a one-line status: `"Clipboard cleared (referenced removed file)"`.
+5. `Config::save()`.
+
+**Preservation guarantees:**
+- Dirty files **not touched by the patch** retain their unsaved edits.
+- Cursor stays on the same `ListItem` if possible; otherwise lands on the nearest valid item.
+- `DirGroup.expanded` / `ProfileFile.expanded` state preserved for unaffected nodes.
+
+**`file_index` reindexing:** because `ShellProfile.files` is `Vec` and removal shifts indices, every consumer (entries, undo, clipboard) must be reindexed. Implementation builds a `HashMap<old_idx, Option<new_idx>>` and walks all reference sites.
 
 ### 6.7 Move file mode
 - `m` on a top-level `File` node: existing behavior.
@@ -577,6 +667,15 @@ Plan phase: reconcile against `/Volumes/Home/Users/wen/repos/agd/.github/workflo
 
 `tests/config_fallback.rs`
 - Mock HOME + env vars + exe path; assert `resolve_or_create` chooses expected file.
+- `WENV_CONFIG_DIR` set → first fallback entry; unset → not in chain.
+- All fallbacks read-only at save time → copy-up writes to next writable + updates `source_path`.
+
+`tests/dedup.rs`
+- Config with overlapping patterns `["~/.zshrc.d/01.sh", "~/.zshrc.d/*"]` → File appears once; warning emitted.
+
+`tests/targeted_reload.rs`
+- Add pattern: tree gains node; existing dirty file in another node unchanged.
+- Remove pattern: only its files dropped; entries in other files retain correct `file_index`.
 
 ### 8.3 Manual checklist (run after Task 4 / Task 5 / Task 6)
 
