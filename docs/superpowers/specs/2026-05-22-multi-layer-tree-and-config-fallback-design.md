@@ -161,9 +161,10 @@ Warning format: `"⚠ Path X already loaded from pattern Y; skipping duplicate f
 
 ### 3.3 Display label rules
 
-- If original pattern matches `\$[A-Za-z_][A-Za-z0-9_]*` or `%[A-Za-z_][A-Za-z0-9_]*%` (var-bearing — same regex as `expand_env_vars` at `src/config/path_resolver.rs:18`):
-  - `display = format!("{} ({})", expanded_form_with_tilde, original_with_vars)`
+- **Test:** does the original `pattern` string contain at least one `$VAR` or `%VAR%` token (regex `\$[A-Za-z_][A-Za-z0-9_]*` or `%[A-Za-z_][A-Za-z0-9_]*%`, same as `expand_env_vars` at `src/config/path_resolver.rs:18`)?
+- **If yes (var-bearing):** `display = format!("{} ({})", expanded_form_with_tilde, original_pattern_unchanged)`. The parenthesized portion is the **entire original pattern** (including surrounding glob/path bits), not just the variable name.
   - Example: `$ZDOTDIR/*` → `~/.zsh/* ($ZDOTDIR/*)`
+  - Example: `~/.config/$USER.rc` → `~/.config/wen.rc (~/.config/$USER.rc)`
 - Else: `display = tilde_collapse(expanded)`. `~` collapse uses the same logic as `ProfileFile::display_name`.
 
 ### 3.4 Binary / non-text filter
@@ -242,7 +243,7 @@ impl Config {
 ```rust
 #[derive(Serialize, Deserialize, ...)]
 pub struct Config {
-    // existing: ui, files, snippets, template_paths, ...
+    // existing: ui, files, snippets
     #[serde(skip)]
     pub source_path: PathBuf,
 }
@@ -328,6 +329,9 @@ pub struct Cache {
 impl Cache {
     /// Derive cache path from the resolved config path.
     pub fn cache_path_for(config: &Config) -> PathBuf {
+        // source_path is always absolute in practice (fallback chain produces
+        // absolute paths via dirs::home_dir() / env vars / current_exe()).
+        // The unwrap_or fallback to a bare "cache.toml" is defensive only.
         config.source_path
             .parent()
             .map(|p| p.join("cache.toml"))
@@ -378,6 +382,12 @@ This is the intended behavior:
 - Users who want to preserve prior customization must manually copy fields from their old `~/.config/wenv/config.toml` into the new fallback location, then delete the old file.
 
 This is called out in CHANGELOG as a breaking change.
+
+**Runtime warning (UX nicety):** when `Config::resolve_or_create` returns a config from `<exe_dir>/Resources/config.toml` *and* `~/.config/wenv/config.toml` also exists, print one stderr line at startup:
+```
+Note: ~/.config/wenv/config.toml exists but is shadowed by <source_path>.
+```
+This is best-effort (no error on stat failure); helps users discover the breaking change without reading CHANGELOG.
 
 ### 4.7 Failure modes
 
