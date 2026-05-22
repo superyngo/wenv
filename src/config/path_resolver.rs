@@ -1,6 +1,5 @@
 //! Resolve config path patterns to concrete file paths
 
-use std::path::PathBuf;
 
 pub fn expand_tilde(path: &str) -> String {
     if path.starts_with("~/") || path == "~" {
@@ -78,18 +77,6 @@ pub(crate) fn has_unresolved_vars(path: &str) -> bool {
     re_unix.is_match(path) || re_win.is_match(path)
 }
 
-/// DEPRECATED transitional shim — flattens resolve_patterns output to the
-/// old (path, exists) tuple list. Task 3 removes this entirely.
-pub fn resolve_paths(patterns: &[String]) -> Vec<(PathBuf, bool)> {
-    let mut out = Vec::new();
-    for p in resolve_patterns(patterns) {
-        match p {
-            ResolvedPattern::File { path, exists, .. } => out.push((path, exists)),
-            ResolvedPattern::Dir { files, .. } => out.extend(files),
-        }
-    }
-    out
-}
 
 use std::fmt;
 

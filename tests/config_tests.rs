@@ -50,9 +50,13 @@ fn test_expand_env_vars() {
 
 #[test]
 fn test_resolve_nonexistent_path() {
-    let results = path_resolver::resolve_paths(&["/nonexistent/path/file.txt".to_string()]);
+    use path_resolver::ResolvedPattern;
+    let results = path_resolver::resolve_patterns(&["/nonexistent/path/file.txt".to_string()]);
     assert_eq!(results.len(), 1);
-    assert!(!results[0].1);
+    match &results[0] {
+        ResolvedPattern::File { exists, .. } => assert!(!exists),
+        _ => panic!("expected File variant"),
+    }
 }
 
 #[test]

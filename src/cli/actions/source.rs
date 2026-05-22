@@ -14,13 +14,26 @@ pub fn execute(config: &Config, shell_type: ShellType, _messages: &'static Messa
         .get(shell_key)
         .ok_or_else(|| anyhow::anyhow!("No file list configured for shell: {}", shell_key))?;
 
-    let resolved = path_resolver::resolve_paths(&file_configs.paths);
+    let resolved = path_resolver::resolve_patterns(&file_configs.paths);
     if resolved.is_empty() {
         println!("No files configured for {}", shell_key);
         return Ok(());
     }
 
-    let items: Vec<String> = resolved
+    // Flatten to (path, exists) for display
+    let flat: Vec<(std::path::PathBuf, bool)> = resolved.iter().flat_map(|rp| match rp {
+        path_resolver::ResolvedPattern::File { path, exists, .. } => {
+            vec![(path.clone(), *exists)]
+        }
+        path_resolver::ResolvedPattern::Dir { files, .. } => files.clone(),
+    }).collect();
+
+    if flat.is_empty() {
+        println!("No files configured for {}", shell_key);
+        return Ok(());
+    }
+
+    let items: Vec<String> = flat
         .iter()
         .map(|(path, exists)| {
             let display = path.display();
@@ -38,7 +51,7 @@ pub fn execute(config: &Config, shell_type: ShellType, _messages: &'static Messa
         .default(0)
         .interact()?;
 
-    let (path, exists) = &resolved[selection];
+    let (path, exists) = &flat[selection];
     if !exists {
         println!("File does not exist: {}", path.display());
         return Ok(());
