@@ -14,6 +14,7 @@ pub enum AppMode {
     Moving,
     TextInput,
     ConfirmRemoveFile,
+    ConfirmRemoveGroup,
     ConfirmCreateFile,
     MovingFile,
     SelectingSnippet,

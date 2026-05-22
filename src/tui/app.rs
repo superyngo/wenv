@@ -46,6 +46,7 @@ pub struct TuiApp {
     pub config: crate::model::Config,
     pub shell_key: String,
     pub pending_remove_fi: Option<usize>,
+    pub pending_remove_group_pattern: Option<String>,
     pub text_input: Option<crate::tui::state::TextInputState>,
     pub pending_create_path: Option<(String, std::path::PathBuf)>,
     pub file_move_state: Option<FileMovingState>,
@@ -87,6 +88,7 @@ impl TuiApp {
             config,
             shell_key,
             pending_remove_fi: None,
+            pending_remove_group_pattern: None,
             text_input: None,
             pending_create_path: None,
             file_move_state: None,
@@ -253,7 +255,7 @@ impl TuiApp {
                         }
                         ListItem::DirHeader(ti) => {
                             // Toggle group expand/collapse
-                            if let Some(node) = self.profile.tree.get(*ti) {
+                            if self.profile.tree.get(*ti).is_some() {
                                 if let crate::model::profile::TreeNode::Dir(ref mut g) = &mut self.profile.tree[*ti] {
                                     g.expanded = !g.expanded;
                                     // Mirror file expanded state to contained files
@@ -388,7 +390,20 @@ impl TuiApp {
                 return Ok(EditorRequest::None);
             }
             Action::Delete => {
-                if let Some(ListItem::FileHeader(fi)) = self.visible_items.get(self.cursor) {
+                if let Some(ListItem::DirHeader(ti)) = self.visible_items.get(self.cursor) {
+                    let ti = *ti;
+                    if let Some(crate::model::profile::TreeNode::Dir(g)) = self.profile.tree.get(ti) {
+                        let pattern = g.source_pattern.clone();
+                        let file_count = g.file_indices.len();
+                        self.pending_remove_group_pattern = Some(pattern.clone());
+                        self.previous_mode = Some(self.mode.clone());
+                        self.mode = AppMode::ConfirmRemoveGroup;
+                        self.message = Some(format!(
+                            "Remove group '{}' from config? ({} files will be hidden) (y/n)",
+                            pattern, file_count
+                        ));
+                    }
+                } else if let Some(ListItem::FileHeader(fi)) = self.visible_items.get(self.cursor) {
                     let fi = *fi;
                     let resolved_path = &self.profile.files[fi].path;
 
@@ -490,6 +505,11 @@ impl TuiApp {
                 }
             }
             Action::StartMove => {
+                // DirHeader: move not supported on groups
+                if matches!(self.visible_items.get(self.cursor), Some(ListItem::DirHeader(_))) {
+                    self.message = Some("Move is not supported on groups".into());
+                    return Ok(EditorRequest::None);
+                }
                 // Check if cursor is on a FileHeader → enter file move mode
                 if let Some(ListItem::FileHeader(fi)) = self.visible_items.get(self.cursor) {
                     let fi = *fi;
@@ -729,6 +749,23 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
                         self.mode = AppMode::Normal;
                         self.previous_mode = None;
                     }
+                    AppMode::ConfirmRemoveGroup => {
+                        if let Some(pattern) = self.pending_remove_group_pattern.take() {
+                            let shell_key = self.shell_key.clone();
+                            if let Some(files_config) = self.config.files.get_mut(&shell_key) {
+                                files_config.paths.retain(|p| p != &pattern);
+                            }
+                            if let Err(e) = self.config.save() {
+                                self.message = Some(format!("Config save error: {}", e));
+                            } else {
+                                self.selection.clear();
+                                self.reload_profile()?;
+                                self.message = Some(format!("Group '{}' removed from config", pattern));
+                            }
+                        }
+                        self.mode = AppMode::Normal;
+                        self.previous_mode = None;
+                    }
                     AppMode::ConfirmCreateFile => {
                         if let Some((raw_path, path)) = self.pending_create_path.take() {
                             if let Some(parent) = path.parent() {
@@ -855,8 +892,9 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
                         self.mode = AppMode::Normal;
                         self.message = None;
                     }
-                    AppMode::ConfirmRemoveFile | AppMode::ConfirmCreateFile => {
+                    AppMode::ConfirmRemoveFile | AppMode::ConfirmRemoveGroup | AppMode::ConfirmCreateFile => {
                         self.pending_remove_fi = None;
+                        self.pending_remove_group_pattern = None;
                         self.pending_create_path = None;
                         self.mode = AppMode::Normal;
                         self.message = Some("Cancelled".into());
