@@ -1461,7 +1461,7 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
 
             if target_fi == fms.original_fi {
                 // No change — just restore expanded states
-                self.restore_expanded(&fms.saved_expanded.files);
+                self.restore_expanded(&fms.saved_expanded);
                 let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
                 let in_filter = matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive);
                 self.mode = if in_filter {
@@ -1502,9 +1502,12 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
             let _ = self.config.save();
 
             // Restore expanded states mapped to new positions
-            let mut new_expanded = fms.saved_expanded.files.clone();
-            let removed = new_expanded.remove(fms.original_fi);
-            new_expanded.insert(target_fi, removed);
+            let mut new_expanded = crate::tui::state::ExpandedSnapshot {
+                files: fms.saved_expanded.files.clone(),
+                dirs: fms.saved_expanded.dirs.clone(),
+            };
+            let removed = new_expanded.files.remove(fms.original_fi);
+            new_expanded.files.insert(target_fi, removed);
             self.restore_expanded(&new_expanded);
 
             let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
@@ -1535,7 +1538,7 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
     /// Cancel file move: restore expanded states
     fn cancel_file_move(&mut self) {
         if let Some(fms) = self.file_move_state.take() {
-            self.restore_expanded(&fms.saved_expanded.files);
+            self.restore_expanded(&fms.saved_expanded);
             let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
             let in_filter = matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive);
             self.mode = if in_filter {
@@ -1560,11 +1563,20 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
         }
     }
 
-    /// Restore per-file expanded states
-    fn restore_expanded(&mut self, states: &[bool]) {
+    /// Restore per-file and per-dir expanded states from a snapshot
+    fn restore_expanded(&mut self, snap: &crate::tui::state::ExpandedSnapshot) {
         for (i, file) in self.profile.files.iter_mut().enumerate() {
-            if let Some(&expanded) = states.get(i) {
+            if let Some(&expanded) = snap.files.get(i) {
                 file.expanded = expanded;
+            }
+        }
+        let mut dir_i = 0;
+        for n in &mut self.profile.tree {
+            if let crate::model::profile::TreeNode::Dir(g) = n {
+                if let Some(&v) = snap.dirs.get(dir_i) {
+                    g.expanded = v;
+                }
+                dir_i += 1;
             }
         }
     }
