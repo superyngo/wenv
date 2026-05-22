@@ -11,7 +11,7 @@
 ### In scope
 1. **CLI** — remove `-c/--config` flag; add `wenv config` subcommand that opens the active config file in `$EDITOR`.
 2. **Config loader** — drop the hardcoded `~/.config/wenv/config.toml` path; introduce an OS-conditional fallback search chain; when no file exists in any fallback, create a default config at the first writable fallback location.
-3. **Cache split** — move `[cache]` data (PowerShell `$PROFILE` resolution) out of `config.toml` into a sibling `cache.toml`. Cache file uses the same fallback chain but lands at the first writable location.
+3. **Cache file (new)** — introduce a new `cache.toml` sibling-to-`config.toml` to persist resolved PowerShell `$PROFILE` paths so subsequent runs skip the `pwsh -NoProfile` shell-out. Today this path is queried live every run via `query_powershell_profile()`; there is no existing `[cache]` field on `Config` to migrate. The new cache lives in the same directory as the resolved config.
 4. **Resources/config.toml** — checked into repo root; serves both as the runtime first-search location (when binary is launched from a directory containing `Resources/config.toml`) and as the release tarball template.
 5. **TUI three-layer tree** — `DirGroup → ProfileFile → Entry`, replacing the existing two-layer `ProfileFile → Entry` model.
 6. **Startup collapsed** — all dirs and files start collapsed; no auto-expand based on file existence.
@@ -139,7 +139,7 @@ For each `pattern`:
 
 ### 3.3 Display label rules
 
-- If original pattern matches `\$[A-Za-z_]\w*` or `%[A-Za-z_]\w*%` (var-bearing):
+- If original pattern matches `\$[A-Za-z_][A-Za-z0-9_]*` or `%[A-Za-z_][A-Za-z0-9_]*%` (var-bearing — same regex as `expand_env_vars` at `src/config/path_resolver.rs:18`):
   - `display = format!("{} ({})", expanded_form_with_tilde, original_with_vars)`
   - Example: `$ZDOTDIR/*` → `~/.zsh/* ($ZDOTDIR/*)`
 - Else: `display = tilde_collapse(expanded)`. `~` collapse uses the same logic as `ProfileFile::display_name`.
@@ -159,6 +159,8 @@ pub fn is_likely_text(path: &Path) -> bool {
 ```
 
 Applied **only** during dir expansion (`ResolvedPattern::Dir.files`). Single-file patterns (`ResolvedPattern::File`) bypass the filter — if the user explicitly named the file, render it regardless. Non-existent paths return `true` so first-run "create this file?" flow remains intact.
+
+**Accepted tradeoff:** the 8 KiB probe is sufficient for shell-config files in practice — binaries that might end up in `profile.d/` (ELF, Mach-O, PE) all contain null bytes in their first block. Files with a text header followed by binary content past 8 KiB will not be filtered; this is acceptable given the cost of a full scan per dir entry.
 
 ### 3.5 Old API removal
 
@@ -230,13 +232,17 @@ impl Config {
                 return Ok(cfg);
             }
         }
-        // Phase 2: create default at first writable location
+        // Phase 2: create default at first writable location.
+        // Construct Config directly (skip parse round-trip) and serialize once for disk write.
         for p in Self::fallback_paths() {
             let Some(parent) = p.parent() else { continue };
             if std::fs::create_dir_all(parent).is_err() { continue; }
-            let template = templates::generate_default_config(shell_key);
-            if std::fs::write(&p, &template).is_ok() {
-                let mut cfg: Config = toml::from_str(&template)?;
+            let mut cfg = Config::default();
+            if let Some(paths) = templates::default_paths(shell_key) {
+                cfg.files.insert(shell_key.to_string(), FilesConfig { paths });
+            }
+            let serialized = toml::to_string_pretty(&cfg)?;
+            if std::fs::write(&p, &serialized).is_ok() {
                 cfg.source_path = p.clone();
                 eprintln!("✓ Created default config at: {}", p.display());
                 return Ok(cfg);
@@ -257,6 +263,8 @@ impl Config {
 
 ### 4.4 Cache file (`src/config/cache.rs`, new)
 
+`cache.toml` lives **next to the resolved `config.toml`** — i.e., in `cfg.source_path.parent()`. This guarantees config and cache always sit together; the cache is not an independent search.
+
 ```rust
 #[derive(Default, Serialize, Deserialize)]
 pub struct Cache {
@@ -267,21 +275,36 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn cache_path() -> anyhow::Result<PathBuf> {
-        for p in Config::fallback_paths() {
-            let Some(parent) = p.parent() else { continue };
-            if is_dir_writable(parent) {
-                return Ok(parent.join("cache.toml"));
-            }
-        }
-        anyhow::bail!("No writable cache location")
+    /// Derive cache path from the resolved config path.
+    pub fn cache_path_for(config: &Config) -> PathBuf {
+        config.source_path
+            .parent()
+            .map(|p| p.join("cache.toml"))
+            .unwrap_or_else(|| PathBuf::from("cache.toml"))
     }
-    pub fn load_or_default() -> Self { /* read cache_path() if exists; else default + source_path */ }
-    pub fn save(&self) -> anyhow::Result<()> { /* write to source_path */ }
+    pub fn load_or_default(config: &Config) -> Self {
+        let p = Self::cache_path_for(config);
+        let mut cache: Cache = if p.exists() {
+            std::fs::read_to_string(&p).ok()
+                .and_then(|s| toml::from_str(&s).ok())
+                .unwrap_or_default()
+        } else {
+            Cache::default()
+        };
+        cache.source_path = p;
+        cache
+    }
+    pub fn save(&self) -> anyhow::Result<()> {
+        if let Some(parent) = self.source_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&self.source_path, toml::to_string_pretty(self)?)?;
+        Ok(())
+    }
 }
 ```
 
-`is_dir_writable(&Path) -> bool` lives in `src/utils/path.rs` and probes via a temp file create+delete (sandbox-safe variant: `OpenOptions::new().write(true).create(true).open(probe)` followed by `remove_file`).
+If `config.source_path.parent()` is read-only, `Cache::save()` returns `Err`; callers log a warning and continue (PowerShell `$PROFILE` falls back to live query).
 
 ### 4.5 Removals / redirections
 
@@ -289,10 +312,21 @@ impl Cache {
 - `Config::config_path()` — deleted (callers use `cfg.source_path`).
 - `config::ensure_config_dir()` — deleted (`resolve_or_create` handles it).
 - `config::load_or_create_config()` — replaced by `Config::resolve_or_create(shell_key)`.
-- Any `[cache]` field on `Config` struct — moved to `Cache`.
-- Legacy `.path_cache.toml` migration code — deleted.
+- (No existing `[cache]` field on `Config` to remove — feature is new.)
+- (No legacy `.path_cache.toml` migration code in the current codebase — nothing to delete.)
 
-### 4.6 Failure modes
+### 4.6 Accepted risk — shadowing pre-existing user configs
+
+Putting `<exe_dir>/Resources/config.toml` first in the fallback chain means a user with an existing `~/.config/wenv/config.toml` who installs the new tarball will have their old config silently shadowed by the bundled default (since the release tarball ships `Resources/config.toml`). The old file is **not** read, **not** migrated, and **not** deleted.
+
+This is the intended behavior:
+- The user explicitly chose no migration (see decisions captured in §1 Out of scope).
+- The bundled `Resources/config.toml` is the source of truth for tarball installations.
+- Users who want to preserve prior customization must manually copy fields from their old `~/.config/wenv/config.toml` into the new fallback location, then delete the old file.
+
+This is called out in CHANGELOG as a breaking change.
+
+### 4.7 Failure modes
 
 | Situation | Behavior |
 |---|---|
@@ -575,8 +609,8 @@ Six tasks; each maintains a green `cargo build` + `cargo test`.
 - Add `source_path` to `Config`.
 - Add `Config::fallback_paths()` and `Config::resolve_or_create()`.
 - Rewrite `Config::save()` to use `source_path`.
-- Remove `config_dir()` / `config_path()` / legacy cache migration code.
-- Add `src/config/cache.rs` with `Cache::cache_path` / `load_or_default` / `save`.
+- Remove `config_dir()` / `config_path()` (no existing cache or legacy migration code to delete).
+- Add `src/config/cache.rs` with `Cache::cache_path_for(config)` / `load_or_default(config)` / `save`.
 - Update PowerShell `$PROFILE` caching to use the new `Cache`.
 - Add `Resources/config.toml` to repo.
 - Integration tests per §8.2 config_fallback.
