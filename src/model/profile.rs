@@ -158,6 +158,43 @@ impl ShellProfile {
         items
     }
 
+    pub fn build_visible_list_filtered(
+        &self,
+        matched_files: &std::collections::HashSet<usize>,
+    ) -> Vec<ListItem> {
+        let mut items = Vec::new();
+        for (ti, node) in self.tree.iter().enumerate() {
+            match node {
+                TreeNode::Dir(g) => {
+                    let any_match = g.file_indices.iter().any(|fi| matched_files.contains(fi));
+                    if !any_match { continue; }
+                    items.push(ListItem::DirHeader(ti));
+                    if g.expanded {
+                        for &fi in &g.file_indices {
+                            if !matched_files.contains(&fi) { continue; }
+                            items.push(ListItem::FileHeader(fi));
+                            if self.files[fi].expanded {
+                                for ei in 0..self.files[fi].entries.len() {
+                                    items.push(ListItem::Entry(fi, ei));
+                                }
+                            }
+                        }
+                    }
+                }
+                TreeNode::File(fi) => {
+                    if !matched_files.contains(fi) { continue; }
+                    items.push(ListItem::FileHeader(*fi));
+                    if self.files[*fi].expanded {
+                        for ei in 0..self.files[*fi].entries.len() {
+                            items.push(ListItem::Entry(*fi, ei));
+                        }
+                    }
+                }
+            }
+        }
+        items
+    }
+
     pub fn total_entries(&self) -> usize {
         self.files.iter().map(|f| f.entries.len()).sum()
     }

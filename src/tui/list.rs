@@ -34,5 +34,6 @@ pub fn file_index_of(item: &ListItem) -> usize {
     match item {
         ListItem::FileHeader(fi) => *fi,
         ListItem::Entry(fi, _) => *fi,
+        ListItem::DirHeader(_) => 0, // DirHeader doesn't map to a file
     }
 }

@@ -497,8 +497,12 @@ impl TuiApp {
                         self.message = Some("Only one file, nothing to move".into());
                         return Ok(EditorRequest::None);
                     }
-                    let saved_expanded: Vec<bool> =
-                        self.profile.files.iter().map(|f| f.expanded).collect();
+                    let saved_expanded_files: Vec<bool> = self.profile.files.iter().map(|f| f.expanded).collect();
+let saved_expanded_dirs: Vec<bool> = self.profile.tree.iter().map(|n| match n {
+    crate::model::profile::TreeNode::Dir(g) => g.expanded,
+    _ => false,
+}).collect();
+let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded_files, dirs: saved_expanded_dirs };
                     self.profile.toggle_all(false);
                     self.rebuild_list();
                     // Find cursor for the file header after collapse
@@ -1077,7 +1081,7 @@ impl TuiApp {
             }
             Action::AddFile => {
                 self.text_input = Some(crate::tui::state::TextInputState {
-                    prompt: "New file path: ".into(),
+                    prompt: "Add file, group, glob, or $VAR to config".into(),
                     value: String::new(),
                     cursor_pos: 0,
                     purpose: crate::tui::state::InputPurpose::AddFilePath,
@@ -1160,6 +1164,18 @@ impl TuiApp {
                 for (i, file) in self.profile.files.iter_mut().enumerate() {
                     file.expanded = matched_files.contains(&i);
                 }
+            }
+        }
+
+        if let Some(ref search) = self.search {
+            if !search.query.is_empty() {
+                let matched_files = search.matched_file_indices();
+                // Expand files that have matches
+                for (i, file) in self.profile.files.iter_mut().enumerate() {
+                    file.expanded = matched_files.contains(&i);
+                }
+                self.visible_items = self.profile.build_visible_list_filtered(&matched_files);
+                return;
             }
         }
 
@@ -1390,7 +1406,7 @@ impl TuiApp {
 
             if target_fi == fms.original_fi {
                 // No change — just restore expanded states
-                self.restore_expanded(&fms.saved_expanded);
+                self.restore_expanded(&fms.saved_expanded.files);
                 let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
                 let in_filter = matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive);
                 self.mode = if in_filter {
@@ -1431,7 +1447,7 @@ impl TuiApp {
             let _ = self.config.save();
 
             // Restore expanded states mapped to new positions
-            let mut new_expanded = fms.saved_expanded.clone();
+            let mut new_expanded = fms.saved_expanded.files.clone();
             let removed = new_expanded.remove(fms.original_fi);
             new_expanded.insert(target_fi, removed);
             self.restore_expanded(&new_expanded);
@@ -1464,7 +1480,7 @@ impl TuiApp {
     /// Cancel file move: restore expanded states
     fn cancel_file_move(&mut self) {
         if let Some(fms) = self.file_move_state.take() {
-            self.restore_expanded(&fms.saved_expanded);
+            self.restore_expanded(&fms.saved_expanded.files);
             let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
             let in_filter = matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive);
             self.mode = if in_filter {
@@ -1496,6 +1512,74 @@ impl TuiApp {
                 file.expanded = expanded;
             }
         }
+    }
+
+    fn reload_profile(&mut self) -> anyhow::Result<()> {
+        use std::collections::{HashMap, HashSet};
+        use crate::model::profile::{TreeNode, ProfileFile};
+
+        let old_file_expanded: HashMap<std::path::PathBuf, bool> = self
+            .profile
+            .files
+            .iter()
+            .map(|f| (f.path.clone(), f.expanded))
+            .collect();
+        let old_dir_expanded: HashMap<String, bool> = self
+            .profile
+            .tree
+            .iter()
+            .filter_map(|n| match n {
+                TreeNode::Dir(g) => Some((g.source_pattern.clone(), g.expanded)),
+                _ => None,
+            })
+            .collect();
+
+        let old_path_set: HashSet<std::path::PathBuf> =
+            self.profile.files.iter().map(|f| f.path.clone()).collect();
+        let mut dirty_snapshot: HashMap<std::path::PathBuf, ProfileFile> = HashMap::new();
+        let old_files = std::mem::take(&mut self.profile.files);
+        for f in old_files {
+            if f.dirty {
+                dirty_snapshot.insert(f.path.clone(), f);
+            }
+        }
+
+        let mut new_profile = crate::model::profile::load_shell_profile(&self.config, self.profile.shell_type)?;
+
+        for f in &mut new_profile.files {
+            if let Some(&e) = old_file_expanded.get(&f.path) { f.expanded = e; }
+        }
+        for n in &mut new_profile.tree {
+            if let TreeNode::Dir(g) = n {
+                if let Some(&e) = old_dir_expanded.get(&g.source_pattern) {
+                    g.expanded = e;
+                }
+            }
+        }
+
+        for (new_fi, nf) in new_profile.files.iter_mut().enumerate() {
+            if let Some(mut old_pf) = dirty_snapshot.remove(&nf.path) {
+                for e in &mut old_pf.entries { e.file_index = new_fi; }
+                nf.entries = old_pf.entries;
+                nf.content = old_pf.content;
+                nf.dirty = true;
+            }
+        }
+
+        let new_path_set: HashSet<std::path::PathBuf> =
+            new_profile.files.iter().map(|f| f.path.clone()).collect();
+        if old_path_set != new_path_set {
+            self.clipboard.entries.clear();
+            self.undo_stack.clear();
+            self.message = Some("Clipboard and undo cleared (file set changed)".into());
+        }
+
+        self.profile = new_profile;
+        self.visible_items = self.profile.build_visible_list();
+        if self.cursor >= self.visible_items.len() {
+            self.cursor = self.visible_items.len().saturating_sub(1);
+        }
+        Ok(())
     }
 
     /// Check if a visible-list position belongs to a blocked file

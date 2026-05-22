@@ -63,8 +63,14 @@ pub struct TextInputState {
     pub purpose: InputPurpose,
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ExpandedSnapshot {
+    pub files: Vec<bool>,
+    pub dirs: Vec<bool>,
+}
+
 pub struct FileMovingState {
     pub original_fi: usize,        // file index being moved
     pub insertion_cursor: usize,   // visible-list index for drop target
-    pub saved_expanded: Vec<bool>, // original expanded state per file
+    pub saved_expanded: ExpandedSnapshot, // original expanded state per file + dirs
 }

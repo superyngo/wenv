@@ -144,7 +144,7 @@ static MESSAGES: OnceLock<Messages> = OnceLock::new();
 fn load_messages_from_toml(lang: &str) -> Messages {
     // If not English, try external file first
     if lang != "en" {
-        let config_dir = crate::Config::config_dir();
+        let config_dir = crate::Config::config_dir(); // fallback: Config::config_dir retained for i18n; not used by resolve_or_create
         let lang_file = config_dir.join("i18n").join(format!("{}.toml", lang));
 
         match std::fs::read_to_string(&lang_file) {
