@@ -50,6 +50,7 @@ pub struct TuiApp {
     pub text_input: Option<crate::tui::state::TextInputState>,
     pub pending_create_path: Option<(String, std::path::PathBuf)>,
     pub file_move_state: Option<FileMovingState>,
+    pub expanded_snapshot: Option<crate::tui::state::ExpandedSnapshot>,
     pub detail_scroll_offset: u16,
     pub detail_page_size: u16,
     pub snippet_cursor: usize,
@@ -92,6 +93,7 @@ impl TuiApp {
             text_input: None,
             pending_create_path: None,
             file_move_state: None,
+            expanded_snapshot: None,
             detail_scroll_offset: 0,
             detail_page_size: 10,
         })
@@ -513,6 +515,13 @@ impl TuiApp {
                 // Check if cursor is on a FileHeader → enter file move mode
                 if let Some(ListItem::FileHeader(fi)) = self.visible_items.get(self.cursor) {
                     let fi = *fi;
+                    let is_inside_group = self.profile.tree.iter().any(|n|
+                        matches!(n, crate::model::profile::TreeNode::Dir(g) if g.file_indices.contains(&fi))
+                    );
+                    if is_inside_group {
+                        self.message = Some("Files inside a group are sorted alphabetically; move is not supported".into());
+                        return Ok(EditorRequest::None);
+                    }
                     if self.profile.files.len() < 2 {
                         self.message = Some("Only one file, nothing to move".into());
                         return Ok(EditorRequest::None);
@@ -830,7 +839,23 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
             Action::Cancel => {
                 match &self.mode {
                     AppMode::FilterInput | AppMode::FilterActive => {
-                        // Clear filter and restore full list
+                        // Restore expanded state from snapshot, then clear filter
+                        if let Some(snap) = self.expanded_snapshot.take() {
+                            for (i, file) in self.profile.files.iter_mut().enumerate() {
+                                if let Some(&v) = snap.files.get(i) {
+                                    file.expanded = v;
+                                }
+                            }
+                            let mut dir_i = 0;
+                            for n in &mut self.profile.tree {
+                                if let crate::model::profile::TreeNode::Dir(g) = n {
+                                    if let Some(&v) = snap.dirs.get(dir_i) {
+                                        g.expanded = v;
+                                    }
+                                    dir_i += 1;
+                                }
+                            }
+                        }
                         self.search = None;
                         self.mode = AppMode::Normal;
                         self.rebuild_list();
@@ -934,6 +959,13 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
                     // Re-open input to edit the existing filter query
                     self.mode = AppMode::FilterInput;
                 } else {
+                    // Capture expanded state before filter
+                    let files: Vec<bool> = self.profile.files.iter().map(|f| f.expanded).collect();
+                    let dirs: Vec<bool> = self.profile.tree.iter().map(|n| match n {
+                        crate::model::profile::TreeNode::Dir(g) => g.expanded,
+                        _ => false,
+                    }).collect();
+                    self.expanded_snapshot = Some(crate::tui::state::ExpandedSnapshot { files, dirs });
                     self.search = Some(SearchState::new());
                     self.mode = AppMode::FilterInput;
                     self.message = None;
@@ -1195,22 +1227,18 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
     }
 
     pub fn rebuild_list(&mut self) {
-        // When a filter query is active, expand files with matches and collapse others.
         if let Some(ref search) = self.search {
             if !search.query.is_empty() {
                 let matched_files = search.matched_file_indices();
+                // Expand files that have matches, collapse others
                 for (i, file) in self.profile.files.iter_mut().enumerate() {
                     file.expanded = matched_files.contains(&i);
                 }
-            }
-        }
-
-        if let Some(ref search) = self.search {
-            if !search.query.is_empty() {
-                let matched_files = search.matched_file_indices();
-                // Expand files that have matches
-                for (i, file) in self.profile.files.iter_mut().enumerate() {
-                    file.expanded = matched_files.contains(&i);
+                // Expand DirGroups that contain any matched file
+                for n in &mut self.profile.tree {
+                    if let crate::model::profile::TreeNode::Dir(g) = n {
+                        g.expanded = g.file_indices.iter().any(|fi| matched_files.contains(fi));
+                    }
                 }
                 self.visible_items = self.profile.build_visible_list_filtered(&matched_files);
                 return;
@@ -1218,17 +1246,6 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
         }
 
         self.visible_items = self.profile.build_visible_list();
-
-        // Post-filter: remove non-matching entries (and empty file headers) from the list.
-        if let Some(ref search) = self.search {
-            if !search.query.is_empty() {
-                self.visible_items.retain(|item| match item {
-                    ListItem::FileHeader(_) => true, // only matched-file headers are present
-                    ListItem::DirHeader(_) => true,
-                    ListItem::Entry(fi, ei) => search.is_match(*fi, *ei),
-                });
-            }
-        }
 
         if self.cursor >= self.visible_items.len() {
             self.cursor = self.visible_items.len().saturating_sub(1);

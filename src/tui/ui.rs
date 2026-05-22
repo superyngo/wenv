@@ -231,12 +231,17 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
 
             match item {
                 ProfileListItem::FileHeader(fi) => {
+                    let in_group = app.profile.tree.iter().any(|n|
+                        matches!(n, crate::model::profile::TreeNode::Dir(g) if g.file_indices.contains(fi))
+                    );
+                    let indent = if in_group { "  " } else { "" };
                     let file = &app.profile.files[*fi];
                     let icon = if file.expanded { "▼" } else { "▶" };
                     let dirty = if file.dirty { " ●" } else { "" };
                     let readonly = if !file.writable { " 🔒" } else { "" };
                     let text = format!(
-                        "📜 {} {} [{} entries]{}{}",
+                        "{}📜 {} {} [{} entries]{}{}",
+                        indent,
                         icon,
                         file.display_name(),
                         file.entry_count(),
@@ -273,11 +278,15 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     ratatui::widgets::ListItem::new(text).style(style)
                 }
                 ProfileListItem::Entry(fi, ei) => {
+                    let in_group = app.profile.tree.iter().any(|n|
+                        matches!(n, crate::model::profile::TreeNode::Dir(g) if g.file_indices.contains(fi))
+                    );
+                    let entry_indent = if in_group { "    " } else { "" };
                     let file = &app.profile.files[*fi];
                     let entry = &file.entries[*ei];
                     let is_readonly = !file.writable;
 
-                    let prefix = if is_selected { "● " } else { "  " };
+                    let prefix = if is_selected { format!("{}● ", entry_indent) } else { format!("{}  ", entry_indent) };
                     let name_str = format!("{:<20}", entry.name);
                     let type_str = format!("{:<10}", entry.entry_type.to_string());
                     let line_str = format!("{:<10}", format_line_info(entry));
