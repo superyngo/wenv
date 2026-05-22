@@ -251,6 +251,21 @@ impl TuiApp {
                                 self.toggle_at_cursor();
                             }
                         }
+                        ListItem::DirHeader(ti) => {
+                            // Toggle group expand/collapse
+                            if let Some(node) = self.profile.tree.get(*ti) {
+                                if let crate::model::profile::TreeNode::Dir(ref mut g) = &mut self.profile.tree[*ti] {
+                                    g.expanded = !g.expanded;
+                                    // Mirror file expanded state to contained files
+                                    for &fi in &g.file_indices {
+                                        if let Some(f) = self.profile.files.get_mut(fi) {
+                                            f.expanded = g.expanded;
+                                        }
+                                    }
+                                    self.rebuild_list();
+                                }
+                            }
+                        }
                         ListItem::Entry(_, _) => {
                             if self.mode == AppMode::ShowingDetail {
                                 // Toggle close: return to previous mode
@@ -308,6 +323,7 @@ impl TuiApp {
                 if let Some(item) = self.visible_items.get(self.cursor) {
                     match item {
                         ListItem::FileHeader(fi) => return Ok(EditorRequest::EditFile(*fi)),
+                        ListItem::DirHeader(_) => return Ok(EditorRequest::None),
                         ListItem::Entry(fi, ei) => {
                             if !self.profile.files[*fi].writable {
                                 self.message = Some("File is read-only".into());
@@ -1115,6 +1131,18 @@ impl TuiApp {
                 self.profile.files[fi].expanded = !self.profile.files[fi].expanded;
                 self.rebuild_list();
             }
+            ListItem::DirHeader(ti) => {
+                // Toggle group expand/collapse
+                if let Some(crate::model::profile::TreeNode::Dir(ref mut g)) = self.profile.tree.get_mut(*ti) {
+                    g.expanded = !g.expanded;
+                    for &fi in &g.file_indices {
+                        if let Some(f) = self.profile.files.get_mut(fi) {
+                            f.expanded = g.expanded;
+                        }
+                    }
+                    self.rebuild_list();
+                }
+            }
             ListItem::Entry(fi, _) => {
                 // On Entry, toggle the parent file
                 let fi = *fi;
@@ -1142,6 +1170,7 @@ impl TuiApp {
             if !search.query.is_empty() {
                 self.visible_items.retain(|item| match item {
                     ListItem::FileHeader(_) => true, // only matched-file headers are present
+                    ListItem::DirHeader(_) => true,
                     ListItem::Entry(fi, ei) => search.is_match(*fi, *ei),
                 });
             }
@@ -1168,6 +1197,7 @@ impl TuiApp {
         match self.visible_items.get(self.cursor) {
             Some(ListItem::FileHeader(fi)) => *fi,
             Some(ListItem::Entry(fi, _)) => *fi,
+            Some(ListItem::DirHeader(_)) => 0, // DirHeader doesn't map to a single file; default to 0
             None => 0,
         }
     }
@@ -1205,7 +1235,7 @@ impl TuiApp {
             })
             .collect();
 
-        let mut file = crate::model::profile::ProfileFile::new(path.clone(), exists);
+        let mut file = crate::model::profile::ProfileFile::new(path.clone(), exists, crate::config::path_resolver::tilde_collapse(&path.to_string_lossy()));
         file.entries = entries;
         file.content = content;
         file.expanded = true;
@@ -1256,6 +1286,19 @@ impl TuiApp {
             let (target_fi, target_pos) = match self.visible_items.get(ms.insertion_cursor) {
                 Some(ListItem::Entry(fi, ei)) => (*fi, ei + 1), // Insert after this entry
                 Some(ListItem::FileHeader(fi)) => (*fi, 0),     // Insert at start of file
+                Some(ListItem::DirHeader(ti)) => {
+                    if let Some(crate::model::profile::TreeNode::Dir(g)) = self.profile.tree.get(*ti) {
+                        if let Some(&first_fi) = g.file_indices.first() {
+                            (first_fi, 0)
+                        } else {
+                            let fi = self.profile.files.len().saturating_sub(1);
+                            (fi, self.profile.files[fi].entries.len())
+                        }
+                    } else {
+                        let fi = self.profile.files.len().saturating_sub(1);
+                        (fi, self.profile.files[fi].entries.len())
+                    }
+                }
                 None => {
                     let fi = self.profile.files.len().saturating_sub(1);
                     (fi, self.profile.files[fi].entries.len())
@@ -1463,6 +1506,7 @@ impl TuiApp {
     ) -> bool {
         let fi = match items.get(pos) {
             Some(ListItem::FileHeader(fi)) | Some(ListItem::Entry(fi, _)) => *fi,
+            Some(ListItem::DirHeader(_)) => return false,
             None => return true,
         };
         fi < files.len() && (!files[fi].exists || !files[fi].writable)

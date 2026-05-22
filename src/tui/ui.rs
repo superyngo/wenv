@@ -373,6 +373,21 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
 
                     ratatui::widgets::ListItem::new(line).style(style)
                 }
+                ProfileListItem::DirHeader(ti) => {
+                    let group = if let Some(crate::model::profile::TreeNode::Dir(g)) = app.profile.tree.get(*ti) {
+                        g
+                    } else {
+                        return ratatui::widgets::ListItem::new("").style(Style::default());
+                    };
+                    let icon = if group.expanded { "▼" } else { "▶" };
+                    let text = format!("📁 {} {} [{} files]", icon, group.display_label, group.file_indices.len());
+                    let style = if is_cursor {
+                        Style::default().fg(Color::Black).bg(Color::Cyan)
+                    } else {
+                        Style::default().fg(Color::Cyan)
+                    };
+                    ratatui::widgets::ListItem::new(text).style(style)
+                }
             }
         })
         .collect();

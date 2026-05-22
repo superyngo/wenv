@@ -127,7 +127,7 @@ fn contains_var(pat: &str) -> bool {
     re_unix.is_match(pat) || re_win.is_match(pat)
 }
 
-fn tilde_collapse(expanded: &str) -> String {
+pub fn tilde_collapse(expanded: &str) -> String {
     if let Some(home) = dirs::home_dir() {
         let h = home.to_string_lossy();
         if expanded.starts_with(h.as_ref()) {

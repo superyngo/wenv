@@ -40,10 +40,7 @@ fn make_test_profile() -> ShellProfile {
         ],
         true,
     );
-    ShellProfile {
-        shell_type: ShellType::Bash,
-        files: vec![file1, file2],
-    }
+    ShellProfile::from_files(ShellType::Bash, vec![file1, file2])
 }
 
 #[test]
@@ -244,7 +241,7 @@ fn test_recalculate_line_numbers_single_line_entries() {
 
 #[test]
 fn test_recalculate_line_numbers_multiline_entries() {
-    let mut file = ProfileFile::new(PathBuf::from("/test"), true);
+    let mut file = ProfileFile::new(PathBuf::from("/test"), true, String::new());
     file.entries = vec![
         make_test_entry("foo", "foo() {\n  echo hi\n}", EntryType::Function, 0),
         make_test_entry("bar", "alias bar='baz'", EntryType::Alias, 0),
@@ -259,7 +256,7 @@ fn test_recalculate_line_numbers_multiline_entries() {
 
 #[test]
 fn test_recalculate_updates_code_comment_names() {
-    let mut file = ProfileFile::new(PathBuf::from("/test"), true);
+    let mut file = ProfileFile::new(PathBuf::from("/test"), true, String::new());
     file.entries = vec![
         make_test_entry("alias1", "alias a='b'", EntryType::Alias, 0),
         {
@@ -286,7 +283,7 @@ fn test_recalculate_updates_code_comment_names() {
 fn test_replace_entry_with_parsed_multiple() {
     use wenv::tui::operations::replace_entry_with_parsed;
 
-    let mut file = ProfileFile::new(PathBuf::from("/tmp/test"), true);
+    let mut file = ProfileFile::new(PathBuf::from("/tmp/test"), true, String::new());
     file.entries = vec![
         make_test_entry("a", "alias a='1'", EntryType::Alias, 0),
         make_test_entry("b", "alias b='2'", EntryType::Alias, 0),
@@ -313,7 +310,7 @@ fn test_replace_entry_with_parsed_multiple() {
 fn test_replace_entry_with_empty_deletes() {
     use wenv::tui::operations::replace_entry_with_parsed;
 
-    let mut file = ProfileFile::new(PathBuf::from("/tmp/test"), true);
+    let mut file = ProfileFile::new(PathBuf::from("/tmp/test"), true, String::new());
     file.entries = vec![
         make_test_entry("a", "alias a='1'", EntryType::Alias, 0),
         make_test_entry("b", "alias b='2'", EntryType::Alias, 0),
