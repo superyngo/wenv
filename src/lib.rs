@@ -14,6 +14,7 @@
 
 pub mod cli;
 pub mod config;
+pub use crate::config::cache;
 pub mod formatter;
 pub mod i18n;
 pub mod model;

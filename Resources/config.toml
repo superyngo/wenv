@@ -1,0 +1,25 @@
+[ui]
+language = "en"
+
+[files.zsh]
+paths = [
+    "/etc/zshenv",
+    "/etc/zprofile",
+    "/etc/zshrc",
+    "~/.zshenv",
+    "~/.zprofile",
+    "~/.zshrc",
+    "~/.zsh_aliases",
+]
+
+[files.bash]
+paths = [
+    "/etc/profile",
+    "/etc/profile.d/*.sh",
+    "~/.profile",
+    "~/.bashrc",
+    "~/.bash_aliases",
+]
+
+[files.powershell]
+paths = ["$PROFILE"]

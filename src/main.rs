@@ -105,7 +105,7 @@ fn main() -> Result<()> {
     let shell_type = get_shell_type(cli.shell.map(|s| s.into()), None);
 
     // Load or create config
-    let mut config = wenv::config::load_or_create_config()?;
+    let mut config = wenv::model::Config::resolve_or_create(shell_type.config_key())?;
     let shell_key = shell_type.config_key();
 
     // Ensure file list exists for this shell
@@ -113,6 +113,7 @@ fn main() -> Result<()> {
         wenv::config::ensure_shell_files(&mut config, shell_key)?;
     }
     wenv::config::ensure_shell_snippets(&mut config, shell_key)?;
+    eprintln!("⚠ Config loaded from: {}", config.source_path.display());
 
     let messages = i18n::init_messages(&config.ui.language);
 
