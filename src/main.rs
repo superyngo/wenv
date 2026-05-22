@@ -106,6 +106,24 @@ fn main() -> Result<()> {
 
     // Load or create config
     let mut config = wenv::model::Config::resolve_or_create(shell_type.config_key())?;
+
+    // Spec §4.6: warn if exe_dir-resolved config shadows a pre-existing
+    // ~/.config/wenv/config.toml.
+    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())) {
+        let exe_cfg = exe_dir.join("Resources").join("config.toml");
+        if config.source_path == exe_cfg {
+            if let Some(home) = dirs::home_dir() {
+                let legacy = home.join(".config").join("wenv").join("config.toml");
+                if legacy.exists() {
+                    eprintln!(
+                        "Note: {} exists but is shadowed by {}",
+                        legacy.display(), config.source_path.display()
+                    );
+                }
+            }
+        }
+    }
+
     let shell_key = shell_type.config_key();
 
     // Ensure file list exists for this shell

@@ -55,7 +55,8 @@ impl Default for UiConfig {
 }
 
 impl Config {
-    /// Get the wenv configuration directory path (legacy fallback used by some modules)
+    /// Get the wenv configuration directory path (legacy fallback used by i18n / cli.config).
+    /// TODO(Task 5): migrate callers to use `config.source_path.parent()` and remove.
     pub fn config_dir() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("~"))
@@ -63,22 +64,10 @@ impl Config {
             .join("wenv")
     }
 
-    /// Get the configuration file path (legacy fallback)
+    /// Get the configuration file path (legacy fallback used by i18n / cli.config).
+    /// TODO(Task 5): remove once all callers migrate to `config.source_path`.
     pub fn config_path() -> PathBuf {
         Self::config_dir().join("config.toml")
-    }
-
-    /// Load configuration from the legacy config path
-    pub fn load() -> anyhow::Result<Self> {
-        let path = Self::config_path();
-        if path.exists() {
-            let content = std::fs::read_to_string(&path)?;
-            let mut cfg: Config = toml::from_str(&content)?;
-            cfg.source_path = path;
-            Ok(cfg)
-        } else {
-            Ok(Config::default())
-        }
     }
 
     /// Fallback search chain for config.toml.
@@ -120,49 +109,30 @@ impl Config {
     }
 
     pub fn resolve_or_create(shell_key: &str) -> anyhow::Result<Self> {
-        // If WENV_CONFIG_DIR is set, prefer it for both reading and creating.
-        if let Ok(d) = std::env::var("WENV_CONFIG_DIR") {
-            if !d.trim().is_empty() {
-                let p = PathBuf::from(&d).join("config.toml");
-                if p.exists() {
-                    let content = std::fs::read_to_string(&p)?;
-                    let mut cfg: Config = toml::from_str(&content)?;
-                    cfg.source_path = p;
-                    return Ok(cfg);
-                }
-                // Try to create in WENV_CONFIG_DIR first
-                if let Some(parent) = p.parent() {
-                    if std::fs::create_dir_all(parent).is_ok() {
-                        let mut cfg = Config::default();
-                        if let Some(paths) = crate::config::templates::default_paths(shell_key) {
-                            cfg.files.insert(
-                                shell_key.to_string(),
-                                crate::model::FilesConfig { paths },
-                            );
-                        }
-                        let serialized = toml::to_string_pretty(&cfg)?;
-                        if std::fs::write(&p, &serialized).is_ok() {
-                            cfg.source_path = p.clone();
-                            eprintln!("✓ Created default config at: {}", p.display());
-                            return Ok(cfg);
-                        }
-                    }
-                }
-            }
-        }
+        // When WENV_CONFIG_DIR is set it is the exclusive location: read from it
+        // if the file exists, otherwise create there.  We do not fall through to
+        // other locations so that the env var truly acts as an override.
+        let wenv_dir = std::env::var("WENV_CONFIG_DIR")
+            .ok()
+            .filter(|d| !d.trim().is_empty());
+        let search_paths: Vec<PathBuf> = if let Some(ref d) = wenv_dir {
+            vec![PathBuf::from(d).join("config.toml")]
+        } else {
+            Self::fallback_paths()
+        };
 
-        // Next, look for any existing fallback file and return the first we can read.
-        for p in Self::fallback_paths() {
+        // Phase 1: return the first existing readable config.
+        for p in &search_paths {
             if p.exists() {
-                let content = std::fs::read_to_string(&p)?;
+                let content = std::fs::read_to_string(p)?;
                 let mut cfg: Config = toml::from_str(&content)?;
-                cfg.source_path = p;
+                cfg.source_path = p.clone();
                 return Ok(cfg);
             }
         }
 
-        // Finally, attempt to create in the first writable fallback path.
-        for p in Self::fallback_paths() {
+        // Phase 2: create at the first writable location.
+        for p in &search_paths {
             let Some(parent) = p.parent() else { continue };
             if std::fs::create_dir_all(parent).is_err() { continue; }
             let mut cfg = Config::default();
@@ -173,7 +143,7 @@ impl Config {
                 );
             }
             let serialized = toml::to_string_pretty(&cfg)?;
-            if std::fs::write(&p, &serialized).is_ok() {
+            if std::fs::write(p, &serialized).is_ok() {
                 cfg.source_path = p.clone();
                 eprintln!("✓ Created default config at: {}", p.display());
                 return Ok(cfg);
