@@ -85,9 +85,14 @@ fn startup_file_check(
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Early exit: open wenv config in $EDITOR
+    // Determine shell type (runtime decision, no config dependency)
+    let shell_type = get_shell_type(cli.shell.map(|s| s.into()), None);
+
+    // Load or create config
+    let mut config = wenv::model::Config::resolve_or_create(shell_type.config_key())?;
+
+    // Early exit: open resolved wenv config in $EDITOR
     if cli.config {
-        let config_path = wenv::Config::config_path();
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
             if cfg!(windows) {
                 "notepad".to_string()
@@ -96,16 +101,10 @@ fn main() -> Result<()> {
             }
         });
         std::process::Command::new(&editor)
-            .arg(&config_path)
+            .arg(&config.source_path)
             .status()?;
         return Ok(());
     }
-
-    // Determine shell type (runtime decision, no config dependency)
-    let shell_type = get_shell_type(cli.shell.map(|s| s.into()), None);
-
-    // Load or create config
-    let mut config = wenv::model::Config::resolve_or_create(shell_type.config_key())?;
 
     // Spec §4.6: warn if exe_dir-resolved config shadows a pre-existing
     // ~/.config/wenv/config.toml.
@@ -131,7 +130,6 @@ fn main() -> Result<()> {
         wenv::config::ensure_shell_files(&mut config, shell_key)?;
     }
     wenv::config::ensure_shell_snippets(&mut config, shell_key)?;
-    eprintln!("⚠ Config loaded from: {}", config.source_path.display());
 
     let messages = i18n::init_messages(&config.ui.language);
 
