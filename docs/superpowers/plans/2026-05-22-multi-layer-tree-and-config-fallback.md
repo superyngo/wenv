@@ -516,6 +516,8 @@ remains as a transitional shim that flattens; Task 3 removes it."
 mkdir -p Resources
 ```
 
+The spec §7.3 suggests zsh-only defaults (matching `templates::generate_default_config("zsh")`). For a tarball that may be used by users of any shell, bundling all three shells' defaults is more useful — Phase 2 of `resolve_or_create` only writes to the active shell on first run anyway, but a pre-populated multi-shell file lets a user open `wenv config` and edit paths for shells they'll switch to later. This is an intentional plan-vs-spec divergence; if the spec author wants zsh-only, remove the `[files.bash]` and `[files.powershell]` sections.
+
 Create `Resources/config.toml` with:
 
 ```toml
@@ -1360,6 +1362,50 @@ use crate::config::path_resolver::{self, ResolvedPattern};
 use crate::model::Config;
 use crate::parser::get_parser;
 
+/// Build the display label for a file inside a Group.
+/// - If the group's `original` pattern has no `$VAR` / `%VAR%`, return the
+///   tilde-collapsed file path.
+/// - If it does, take the leading var-bearing portion (everything up to
+///   the last `/` of `original`), append the file's basename, and emit
+///   `<tilde-collapsed-path> (<reconstructed-var-form>)`.
+fn derive_file_display_in_group(path: &std::path::Path, original: &str) -> String {
+    let tilde = {
+        let s = path.to_string_lossy();
+        if let Some(home) = dirs::home_dir() {
+            let h = home.to_string_lossy();
+            if s.starts_with(h.as_ref()) {
+                format!("~{}", &s[h.len()..])
+            } else { s.into_owned() }
+        } else { s.into_owned() }
+    };
+
+    let re_unix = regex::Regex::new(r"\$[A-Za-z_][A-Za-z0-9_]*").unwrap();
+    let re_win = regex::Regex::new(r"%[A-Za-z_][A-Za-z0-9_]*%").unwrap();
+    let var_bearing = re_unix.is_match(original) || re_win.is_match(original);
+    if !var_bearing { return tilde; }
+
+    // Strip trailing glob component from `original` if present.
+    let prefix = if let Some(idx) = original.rfind('/') {
+        let head = &original[..idx];
+        // If the part after '/' is purely a glob (* or *.ext), drop it;
+        // otherwise the original had a fixed tail and we use the head only.
+        head.to_string()
+    } else {
+        original.to_string()
+    };
+
+    let basename = path.file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let var_form = if prefix.ends_with('/') {
+        format!("{}{}", prefix, basename)
+    } else {
+        format!("{}/{}", prefix, basename)
+    };
+
+    format!("{} ({})", tilde, var_form)
+}
+
 pub fn load_shell_profile(config: &Config, shell_type: ShellType) -> anyhow::Result<ShellProfile> {
     let shell_key = shell_type.config_key();
     let file_configs = config
@@ -1398,17 +1444,12 @@ pub fn load_shell_profile(config: &Config, shell_type: ShellType) -> anyhow::Res
                     let mut pf = ProfileFile::new(
                         path.clone(),
                         exists,
-                        // Each file inside a Group uses the file's own
-                        // tilde-collapsed path as its display_label.
-                        {
-                            let s = path.to_string_lossy();
-                            if let Some(home) = dirs::home_dir() {
-                                let h = home.to_string_lossy();
-                                if s.starts_with(h.as_ref()) {
-                                    format!("~{}", &s[h.len()..])
-                                } else { s.into_owned() }
-                            } else { s.into_owned() }
-                        },
+                        // For a Group whose source pattern is var-bearing
+                        // (e.g. "$ZDOTDIR/*"), reconstruct a per-file
+                        // var-bearing label so the file shows as
+                        // "~/.zsh/path.sh ($ZDOTDIR/path.sh)" — matching
+                        // spec §6.5 rendering example.
+                        derive_file_display_in_group(&path, &original),
                     );
                     if exists {
                         let content = std::fs::read_to_string(&path)?;
@@ -1685,22 +1726,43 @@ Some(ListItem::FileHeader(fi)) => {
 Insert in `src/tui/app.rs` (anywhere in `impl TuiApp { ... }`):
 
 ```rust
-/// Spec §6.8 — targeted patch reload after `a` / `d` / startup_file_check.
+/// Spec §6.8 — reload after `a` / `d` / startup_file_check.
 ///
-/// Strategy for v0.17: rebuild profile from scratch via load_shell_profile,
-/// but preserve `expanded` state for files whose `path` survives, and clear
-/// clipboard/undo if any cut/copy targeted a removed file.
+/// Implementation note (deviation from a fully-surgical patch):
+/// we rebuild the profile via load_shell_profile, then **restore dirty
+/// in-memory state** for files whose `path` survives the rebuild.
+/// Surviving files keep their parsed `entries` (carrying any unsaved
+/// edits) and their `dirty: true` flag — so the spec's promise
+/// "Dirty files not touched by the patch retain their unsaved edits"
+/// is satisfied. Removed-pattern files are dropped (they were going
+/// away anyway). Newly-added files come in fresh from disk.
+///
+/// Clipboard + undo are cleared whenever the file set changes, since
+/// they hold file_index references that the rebuild has invalidated.
 fn reload_profile(&mut self) -> anyhow::Result<()> {
     use std::collections::HashMap;
-    // Snapshot expanded state by path.
+    use crate::model::profile::{TreeNode, ProfileFile};
+
+    // Snapshot expanded state.
     let old_file_expanded: HashMap<std::path::PathBuf, bool> = self.profile.files
         .iter().map(|f| (f.path.clone(), f.expanded)).collect();
     let old_dir_expanded: HashMap<String, bool> = self.profile.tree.iter()
         .filter_map(|n| match n {
-            crate::model::profile::TreeNode::Dir(g) =>
-                Some((g.source_pattern.clone(), g.expanded)),
+            TreeNode::Dir(g) => Some((g.source_pattern.clone(), g.expanded)),
             _ => None,
         }).collect();
+
+    // Snapshot old path set + dirty file state.
+    // Move dirty files out; the rest is dropped.
+    let old_path_set: std::collections::HashSet<std::path::PathBuf> =
+        self.profile.files.iter().map(|f| f.path.clone()).collect();
+    let mut dirty_snapshot: HashMap<std::path::PathBuf, ProfileFile> = HashMap::new();
+    let old_files = std::mem::take(&mut self.profile.files);
+    for f in old_files {
+        if f.dirty {
+            dirty_snapshot.insert(f.path.clone(), f);
+        }
+    }
 
     let mut new_profile = crate::model::profile::load_shell_profile(
         &self.config, self.profile.shell_type)?;
@@ -1710,22 +1772,31 @@ fn reload_profile(&mut self) -> anyhow::Result<()> {
         if let Some(&e) = old_file_expanded.get(&f.path) { f.expanded = e; }
     }
     for n in &mut new_profile.tree {
-        if let crate::model::profile::TreeNode::Dir(g) = n {
+        if let TreeNode::Dir(g) = n {
             if let Some(&e) = old_dir_expanded.get(&g.source_pattern) {
                 g.expanded = e;
             }
         }
     }
 
-    // Clipboard/undo invalidation: if old file_index references no longer
-    // resolve to the same path, clear the buffers and notify.
-    let old_paths: Vec<std::path::PathBuf> = self.profile.files
-        .iter().map(|f| f.path.clone()).collect();
-    let new_paths: Vec<std::path::PathBuf> = new_profile.files
-        .iter().map(|f| f.path.clone()).collect();
-    if old_paths != new_paths {
-        // Conservative: clear clipboard + undo so stale file_index refs
-        // can't surface (the buffers are bounded; loss is acceptable).
+    // Restore dirty entries for surviving paths. We preserve entries,
+    // content, dirty flag; file_index inside Entry is updated to the
+    // new ProfileFile position.
+    for (new_fi, nf) in new_profile.files.iter_mut().enumerate() {
+        if let Some(mut old_pf) = dirty_snapshot.remove(&nf.path) {
+            // Reindex Entry.file_index to the new position
+            for e in &mut old_pf.entries { e.file_index = new_fi; }
+            nf.entries = old_pf.entries;
+            nf.content = old_pf.content;
+            nf.dirty = true;
+            // path / exists / writable / display_label come from the fresh load.
+        }
+    }
+
+    // Clipboard / undo invalidation: clear whenever the path set changed.
+    let new_path_set: std::collections::HashSet<std::path::PathBuf> =
+        new_profile.files.iter().map(|f| f.path.clone()).collect();
+    if old_path_set != new_path_set {
         self.state.clipboard.clear();
         self.state.undo_stack.clear();
         self.status_line = "Clipboard and undo cleared (file set changed)".into();
@@ -1733,7 +1804,6 @@ fn reload_profile(&mut self) -> anyhow::Result<()> {
 
     self.profile = new_profile;
     self.visible_items = self.profile.build_visible_list();
-    // Clamp cursor.
     if self.cursor >= self.visible_items.len() {
         self.cursor = self.visible_items.len().saturating_sub(1);
     }
