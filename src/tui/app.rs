@@ -258,7 +258,9 @@ impl TuiApp {
                         ListItem::DirHeader(ti) => {
                             // Toggle group expand/collapse
                             if self.profile.tree.get(*ti).is_some() {
-                                if let crate::model::profile::TreeNode::Dir(ref mut g) = &mut self.profile.tree[*ti] {
+                                if let crate::model::profile::TreeNode::Dir(ref mut g) =
+                                    &mut self.profile.tree[*ti]
+                                {
                                     g.expanded = !g.expanded;
                                     // Mirror file expanded state to contained files
                                     for &fi in &g.file_indices {
@@ -394,7 +396,8 @@ impl TuiApp {
             Action::Delete => {
                 if let Some(ListItem::DirHeader(ti)) = self.visible_items.get(self.cursor) {
                     let ti = *ti;
-                    if let Some(crate::model::profile::TreeNode::Dir(g)) = self.profile.tree.get(ti) {
+                    if let Some(crate::model::profile::TreeNode::Dir(g)) = self.profile.tree.get(ti)
+                    {
                         let pattern = g.source_pattern.clone();
                         let file_count = g.file_indices.len();
                         self.pending_remove_group_pattern = Some(pattern.clone());
@@ -508,7 +511,10 @@ impl TuiApp {
             }
             Action::StartMove => {
                 // DirHeader: move not supported on groups
-                if matches!(self.visible_items.get(self.cursor), Some(ListItem::DirHeader(_))) {
+                if matches!(
+                    self.visible_items.get(self.cursor),
+                    Some(ListItem::DirHeader(_))
+                ) {
                     self.message = Some("Move is not supported on groups".into());
                     return Ok(EditorRequest::None);
                 }
@@ -519,19 +525,31 @@ impl TuiApp {
                         matches!(n, crate::model::profile::TreeNode::Dir(g) if g.file_indices.contains(&fi))
                     );
                     if is_inside_group {
-                        self.message = Some("Files inside a group are sorted alphabetically; move is not supported".into());
+                        self.message = Some(
+                            "Files inside a group are sorted alphabetically; move is not supported"
+                                .into(),
+                        );
                         return Ok(EditorRequest::None);
                     }
                     if self.profile.files.len() < 2 {
                         self.message = Some("Only one file, nothing to move".into());
                         return Ok(EditorRequest::None);
                     }
-                    let saved_expanded_files: Vec<bool> = self.profile.files.iter().map(|f| f.expanded).collect();
-let saved_expanded_dirs: Vec<bool> = self.profile.tree.iter().map(|n| match n {
-    crate::model::profile::TreeNode::Dir(g) => g.expanded,
-    _ => false,
-}).collect();
-let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded_files, dirs: saved_expanded_dirs };
+                    let saved_expanded_files: Vec<bool> =
+                        self.profile.files.iter().map(|f| f.expanded).collect();
+                    let saved_expanded_dirs: Vec<bool> = self
+                        .profile
+                        .tree
+                        .iter()
+                        .map(|n| match n {
+                            crate::model::profile::TreeNode::Dir(g) => g.expanded,
+                            _ => false,
+                        })
+                        .collect();
+                    let saved_expanded = crate::tui::state::ExpandedSnapshot {
+                        files: saved_expanded_files,
+                        dirs: saved_expanded_dirs,
+                    };
                     self.profile.toggle_all(false);
                     self.rebuild_list();
                     // Find cursor for the file header after collapse
@@ -769,7 +787,8 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
                             } else {
                                 self.selection.clear();
                                 self.reload_profile()?;
-                                self.message = Some(format!("Group '{}' removed from config", pattern));
+                                self.message =
+                                    Some(format!("Group '{}' removed from config", pattern));
                             }
                         }
                         self.mode = AppMode::Normal;
@@ -917,7 +936,9 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
                         self.mode = AppMode::Normal;
                         self.message = None;
                     }
-                    AppMode::ConfirmRemoveFile | AppMode::ConfirmRemoveGroup | AppMode::ConfirmCreateFile => {
+                    AppMode::ConfirmRemoveFile
+                    | AppMode::ConfirmRemoveGroup
+                    | AppMode::ConfirmCreateFile => {
                         self.pending_remove_fi = None;
                         self.pending_remove_group_pattern = None;
                         self.pending_create_path = None;
@@ -961,11 +982,17 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
                 } else {
                     // Capture expanded state before filter
                     let files: Vec<bool> = self.profile.files.iter().map(|f| f.expanded).collect();
-                    let dirs: Vec<bool> = self.profile.tree.iter().map(|n| match n {
-                        crate::model::profile::TreeNode::Dir(g) => g.expanded,
-                        _ => false,
-                    }).collect();
-                    self.expanded_snapshot = Some(crate::tui::state::ExpandedSnapshot { files, dirs });
+                    let dirs: Vec<bool> = self
+                        .profile
+                        .tree
+                        .iter()
+                        .map(|n| match n {
+                            crate::model::profile::TreeNode::Dir(g) => g.expanded,
+                            _ => false,
+                        })
+                        .collect();
+                    self.expanded_snapshot =
+                        Some(crate::tui::state::ExpandedSnapshot { files, dirs });
                     self.search = Some(SearchState::new());
                     self.mode = AppMode::FilterInput;
                     self.message = None;
@@ -1207,7 +1234,9 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
             }
             ListItem::DirHeader(ti) => {
                 // Toggle group expand/collapse
-                if let Some(crate::model::profile::TreeNode::Dir(ref mut g)) = self.profile.tree.get_mut(*ti) {
+                if let Some(crate::model::profile::TreeNode::Dir(ref mut g)) =
+                    self.profile.tree.get_mut(*ti)
+                {
                     g.expanded = !g.expanded;
                     for &fi in &g.file_indices {
                         if let Some(f) = self.profile.files.get_mut(fi) {
@@ -1306,7 +1335,11 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
             })
             .collect();
 
-        let mut file = crate::model::profile::ProfileFile::new(path.clone(), exists, crate::config::path_resolver::tilde_collapse(&path.to_string_lossy()));
+        let mut file = crate::model::profile::ProfileFile::new(
+            path.clone(),
+            exists,
+            crate::config::path_resolver::tilde_collapse(&path.to_string_lossy()),
+        );
         file.entries = entries;
         file.content = content;
         file.expanded = true;
@@ -1358,7 +1391,9 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
                 Some(ListItem::Entry(fi, ei)) => (*fi, ei + 1), // Insert after this entry
                 Some(ListItem::FileHeader(fi)) => (*fi, 0),     // Insert at start of file
                 Some(ListItem::DirHeader(ti)) => {
-                    if let Some(crate::model::profile::TreeNode::Dir(g)) = self.profile.tree.get(*ti) {
+                    if let Some(crate::model::profile::TreeNode::Dir(g)) =
+                        self.profile.tree.get(*ti)
+                    {
                         if let Some(&first_fi) = g.file_indices.first() {
                             (first_fi, 0)
                         } else {
@@ -1582,8 +1617,8 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
     }
 
     fn reload_profile(&mut self) -> anyhow::Result<()> {
+        use crate::model::profile::{ProfileFile, TreeNode};
         use std::collections::{HashMap, HashSet};
-        use crate::model::profile::{TreeNode, ProfileFile};
 
         let old_file_expanded: HashMap<std::path::PathBuf, bool> = self
             .profile
@@ -1611,10 +1646,13 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
             }
         }
 
-        let mut new_profile = crate::model::profile::load_shell_profile(&self.config, self.profile.shell_type)?;
+        let mut new_profile =
+            crate::model::profile::load_shell_profile(&self.config, self.profile.shell_type)?;
 
         for f in &mut new_profile.files {
-            if let Some(&e) = old_file_expanded.get(&f.path) { f.expanded = e; }
+            if let Some(&e) = old_file_expanded.get(&f.path) {
+                f.expanded = e;
+            }
         }
         for n in &mut new_profile.tree {
             if let TreeNode::Dir(g) = n {
@@ -1626,7 +1664,9 @@ let saved_expanded = crate::tui::state::ExpandedSnapshot { files: saved_expanded
 
         for (new_fi, nf) in new_profile.files.iter_mut().enumerate() {
             if let Some(mut old_pf) = dirty_snapshot.remove(&nf.path) {
-                for e in &mut old_pf.entries { e.file_index = new_fi; }
+                for e in &mut old_pf.entries {
+                    e.file_index = new_fi;
+                }
                 nf.entries = old_pf.entries;
                 nf.content = old_pf.content;
                 nf.dirty = true;

@@ -1148,7 +1148,7 @@ C:\bin
 
         let blank = &result.entries[0];
         assert_eq!(blank.entry_type, EntryType::Code);
-        assert_eq!(blank.is_blank(), true);
+        assert!(blank.is_blank());
         assert_eq!(blank.line_number, Some(1));
 
         let code = &result.entries[1];

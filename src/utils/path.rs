@@ -74,7 +74,9 @@ pub fn check_writable(path: &Path) -> bool {
 /// entries.
 pub fn is_likely_text(path: &std::path::Path) -> bool {
     use std::io::Read;
-    let Ok(mut f) = std::fs::File::open(path) else { return true; };
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return true;
+    };
     let mut buf = [0u8; 8192];
     let n = f.read(&mut buf).unwrap_or(0);
     !buf[..n].contains(&0)
@@ -83,12 +85,19 @@ pub fn is_likely_text(path: &std::path::Path) -> bool {
 /// Probe whether `dir` is writable by attempting to create and delete a
 /// unique temporary file. Used by Cache::cache_path_for fallback logic.
 pub fn is_dir_writable(dir: &std::path::Path) -> bool {
-    if !dir.exists() { return false; }
+    if !dir.exists() {
+        return false;
+    }
     let probe = dir.join(format!(".wenv-probe-{}", std::process::id()));
     match std::fs::OpenOptions::new()
-        .write(true).create_new(true).open(&probe)
+        .write(true)
+        .create_new(true)
+        .open(&probe)
     {
-        Ok(_) => { let _ = std::fs::remove_file(&probe); true }
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
         Err(_) => false,
     }
 }

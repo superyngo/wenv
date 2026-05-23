@@ -17,7 +17,8 @@ pub struct Cache {
 
 impl Cache {
     pub fn cache_path_for(config: &Config) -> PathBuf {
-        config.source_path
+        config
+            .source_path
             .parent()
             .map(|p| p.join("cache.toml"))
             .unwrap_or_else(|| PathBuf::from("cache.toml"))
@@ -35,10 +36,14 @@ impl Cache {
         };
         cache.source_path = p;
         if let Some(ref pp) = cache.pwsh_profile {
-            if !std::path::Path::new(pp).exists() { cache.pwsh_profile = None; }
+            if !std::path::Path::new(pp).exists() {
+                cache.pwsh_profile = None;
+            }
         }
         if let Some(ref pp) = cache.powershell_profile {
-            if !std::path::Path::new(pp).exists() { cache.powershell_profile = None; }
+            if !std::path::Path::new(pp).exists() {
+                cache.powershell_profile = None;
+            }
         }
         cache
     }

@@ -71,7 +71,7 @@ pub struct ExpandedSnapshot {
 }
 
 pub struct FileMovingState {
-    pub original_fi: usize,        // file index being moved
-    pub insertion_cursor: usize,   // visible-list index for drop target
+    pub original_fi: usize,               // file index being moved
+    pub insertion_cursor: usize,          // visible-list index for drop target
     pub saved_expanded: ExpandedSnapshot, // original expanded state per file + dirs
 }

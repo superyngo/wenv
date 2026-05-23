@@ -50,7 +50,11 @@ pub fn restore_snapshot(profile: &mut ShellProfile, snapshot: UndoSnapshot) {
         .map(|(path, content, entries, dirty)| {
             // Carry over UI-state from matching old file if it exists
             let old = old_files.iter().find(|f| f.path == path);
-            let mut file = ProfileFile::new(path.clone(), old.is_none_or(|f| f.exists), crate::config::path_resolver::tilde_collapse(&path.to_string_lossy()));
+            let mut file = ProfileFile::new(
+                path.clone(),
+                old.is_none_or(|f| f.exists),
+                crate::config::path_resolver::tilde_collapse(&path.to_string_lossy()),
+            );
             file.content = content;
             file.entries = entries;
             file.dirty = dirty;
@@ -250,14 +254,17 @@ pub fn find_matching_config_pattern(
     for raw_pattern in &files_config.paths {
         let resolved =
             crate::config::path_resolver::resolve_patterns(std::slice::from_ref(raw_pattern));
-        let all_paths: Vec<std::path::PathBuf> = resolved.iter().flat_map(|rp| match rp {
-            crate::config::path_resolver::ResolvedPattern::File { path, .. } => {
-                vec![path.clone()]
-            }
-            crate::config::path_resolver::ResolvedPattern::Dir { files, .. } => {
-                files.iter().map(|(p, _)| p.clone()).collect()
-            }
-        }).collect();
+        let all_paths: Vec<std::path::PathBuf> = resolved
+            .iter()
+            .flat_map(|rp| match rp {
+                crate::config::path_resolver::ResolvedPattern::File { path, .. } => {
+                    vec![path.clone()]
+                }
+                crate::config::path_resolver::ResolvedPattern::Dir { files, .. } => {
+                    files.iter().map(|(p, _)| p.clone()).collect()
+                }
+            })
+            .collect();
         if all_paths.iter().any(|p| p == resolved_path) {
             return Some((raw_pattern.clone(), all_paths));
         }

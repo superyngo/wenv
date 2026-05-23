@@ -108,7 +108,10 @@ fn main() -> Result<()> {
 
     // Spec §4.6: warn if exe_dir-resolved config shadows a pre-existing
     // ~/.config/wenv/config.toml.
-    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())) {
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+    {
         let exe_cfg = exe_dir.join("Resources").join("config.toml");
         if config.source_path == exe_cfg {
             if let Some(home) = dirs::home_dir() {
@@ -116,7 +119,8 @@ fn main() -> Result<()> {
                 if legacy.exists() {
                     eprintln!(
                         "Note: {} exists but is shadowed by {}",
-                        legacy.display(), config.source_path.display()
+                        legacy.display(),
+                        config.source_path.display()
                     );
                 }
             }

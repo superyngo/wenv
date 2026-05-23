@@ -23,8 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - (None — feature release.)
 
-## [Unreleased]
-
 ## [v0.16.0] - 2026-04-24
 
 ### ✨ NEW FEATURES
@@ -245,8 +243,6 @@ This release represents a complete architectural overhaul to support multi-file 
   - Now correctly merges: `export PATH="/dir1:/dir2:$PATH"`
 
 ---
-
-## [Unreleased]
 
 ## [0.9.0] - 2026-01-27
 

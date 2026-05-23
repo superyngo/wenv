@@ -55,35 +55,7 @@ wenv --shell zsh
 wenv --shell powershell
 
 # Open configuration file in editor
-wenv --config
-```
-
-### Configuration
-
-On first run, wenv creates `~/.config/wenv/config.toml` where you define which files to manage:
-
-```toml
-[ui]
-language = "en"
-
-[files.bash]
-paths = [
-    "~/.bashrc",
-    "~/.bash_aliases", 
-    "~/.profile"
-]
-
-[files.zsh]
-paths = [
-    "~/.zshrc",
-    "~/.zsh_aliases"
-]
-
-[files.powershell]
-paths = [
-    "$PROFILE",
-    "~/profile-extra.ps1"
-]
+wenv config
 ```
 
 ### TUI Key Bindings
@@ -174,9 +146,6 @@ cargo test --test integration # Integration tests
 cargo test tui_logic_tests # TUI operations tests
 ```
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 ## Configuration
 
 wenv searches for `config.toml` in an OS-conditional fallback chain and creates a default at the first writable location if none exist. On Linux/macOS the chain is:
@@ -205,8 +174,6 @@ wenv-vX.Y.Z-<target>/
     └── config.toml
 ```
 
-## Development
-
 To run a development build against an isolated config, set `WENV_CONFIG_DIR`:
 
 ```bash
@@ -214,3 +181,7 @@ WENV_CONFIG_DIR=$(pwd)/Resources cargo run
 ```
 
 This prepends the in-repo `Resources/config.toml` to the fallback chain so `cargo run` never touches your installed config.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

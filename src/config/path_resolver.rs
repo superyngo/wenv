@@ -1,6 +1,5 @@
 //! Resolve config path patterns to concrete file paths
 
-
 pub fn expand_tilde(path: &str) -> String {
     if path.starts_with("~/") || path == "~" {
         if let Some(home) = dirs::home_dir() {
@@ -77,7 +76,6 @@ pub(crate) fn has_unresolved_vars(path: &str) -> bool {
     re_unix.is_match(path) || re_win.is_match(path)
 }
 
-
 use std::fmt;
 
 /// Result of resolving a single config pattern. Preserves the original
@@ -146,7 +144,10 @@ pub fn resolve_patterns(patterns: &[String]) -> Vec<ResolvedPattern> {
     for original in patterns {
         let expanded = expand_env_vars(&expand_tilde(original));
         if expanded.trim().is_empty() {
-            eprintln!("⚠ Skipping config path (empty after expansion): {:?}", original);
+            eprintln!(
+                "⚠ Skipping config path (empty after expansion): {:?}",
+                original
+            );
             continue;
         }
         if has_unresolved_vars(&expanded) {
@@ -180,7 +181,11 @@ pub fn resolve_patterns(patterns: &[String]) -> Vec<ResolvedPattern> {
                 }
             }
             files.sort_by(|a, b| a.0.cmp(&b.0));
-            out.push(ResolvedPattern::Dir { original: original.clone(), display, files });
+            out.push(ResolvedPattern::Dir {
+                original: original.clone(),
+                display,
+                files,
+            });
             continue;
         }
 
@@ -192,8 +197,12 @@ pub fn resolve_patterns(patterns: &[String]) -> Vec<ResolvedPattern> {
                 if let Ok(rd) = std::fs::read_dir(&path) {
                     for entry in rd.flatten() {
                         let ep = entry.path();
-                        if !ep.is_file() { continue; }
-                        if !crate::utils::path::is_likely_text(&ep) { continue; }
+                        if !ep.is_file() {
+                            continue;
+                        }
+                        if !crate::utils::path::is_likely_text(&ep) {
+                            continue;
+                        }
                         if let Some(prev) = seen.get(&ep) {
                             eprintln!(
                                 "⚠ Path {} already loaded from pattern {:?}; skipping duplicate from pattern {:?}",
@@ -206,7 +215,11 @@ pub fn resolve_patterns(patterns: &[String]) -> Vec<ResolvedPattern> {
                     }
                 }
                 files.sort_by(|a, b| a.0.cmp(&b.0));
-                out.push(ResolvedPattern::Dir { original: original.clone(), display, files });
+                out.push(ResolvedPattern::Dir {
+                    original: original.clone(),
+                    display,
+                    files,
+                });
             }
             _ => {
                 // File (existing or not)
@@ -219,7 +232,12 @@ pub fn resolve_patterns(patterns: &[String]) -> Vec<ResolvedPattern> {
                     continue;
                 }
                 seen.insert(path.clone(), original.clone());
-                out.push(ResolvedPattern::File { original: original.clone(), display, path, exists });
+                out.push(ResolvedPattern::File {
+                    original: original.clone(),
+                    display,
+                    path,
+                    exists,
+                });
             }
         }
     }

@@ -11,14 +11,19 @@ fn glob_and_literal_overlap_dedups_keeping_first() {
     let a = sub.join("a.sh");
     fs::write(&a, "echo a\n").unwrap();
 
-    let mut cfg = Config::default();
-    cfg.source_path = std::path::PathBuf::from("/tmp/x.toml");
-    cfg.files.insert("zsh".into(), FilesConfig {
-        paths: vec![
-            format!("{}/*", sub.display()),   // captures a.sh
-            a.to_string_lossy().to_string(),   // duplicate — should be dropped
-        ],
-    });
+    let mut cfg = Config {
+        source_path: std::path::PathBuf::from("/tmp/x.toml"),
+        ..Config::default()
+    };
+    cfg.files.insert(
+        "zsh".into(),
+        FilesConfig {
+            paths: vec![
+                format!("{}/*", sub.display()),  // captures a.sh
+                a.to_string_lossy().to_string(), // duplicate — should be dropped
+            ],
+        },
+    );
 
     let prof = load_shell_profile(&cfg, ShellType::Zsh).unwrap();
     // First node: Dir(a.sh). Second node: File but the path was already

@@ -69,7 +69,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: wenv.exe
-            asset_name: wenv-windows-x86_64.exe
+            asset_name: wenv-windows-x86_64
             rustflags: "-C target-feature=+crt-static"
             opt_level: "3"
             lto: "thin"
@@ -79,7 +79,7 @@ jobs:
           - os: windows-latest
             target: i686-pc-windows-msvc
             artifact_name: wenv.exe
-            asset_name: wenv-windows-i686.exe
+            asset_name: wenv-windows-i686
             rustflags: "-C target-feature=+crt-static"
             opt_level: "3"
             lto: "thin"

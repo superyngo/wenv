@@ -45,7 +45,6 @@ fn default_language() -> String {
     "en".to_string()
 }
 
-
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
@@ -86,7 +85,9 @@ impl Config {
 
         #[cfg(not(target_os = "windows"))]
         {
-            if let Some(d) = &exe_dir { v.push(d.join("Resources/config.toml")); }
+            if let Some(d) = &exe_dir {
+                v.push(d.join("Resources/config.toml"));
+            }
             if let Some(h) = &home {
                 v.push(h.join(".wenget/apps/wenv/Resources/config.toml"));
                 v.push(h.join(".local/bin/Resources/config.toml"));
@@ -98,11 +99,21 @@ impl Config {
         #[cfg(target_os = "windows")]
         {
             let env = |k: &str| std::env::var(k).ok().map(PathBuf::from);
-            if let Some(d) = &exe_dir { v.push(d.join("Resources").join("config.toml")); }
-            if let Some(p) = env("USERPROFILE")  { v.push(p.join(".wenget/apps/wenv/Resources/config.toml")); }
-            if let Some(p) = env("LOCALAPPDATA") { v.push(p.join("Programs/wenv/Resources/config.toml")); }
-            if let Some(p) = env("ProgramW6432") { v.push(p.join("wenget/apps/wenv/Resources/config.toml")); }
-            if let Some(p) = env("ProgramFiles") { v.push(p.join("gpinstall/Resources/config.toml")); }
+            if let Some(d) = &exe_dir {
+                v.push(d.join("Resources").join("config.toml"));
+            }
+            if let Some(p) = env("USERPROFILE") {
+                v.push(p.join(".wenget/apps/wenv/Resources/config.toml"));
+            }
+            if let Some(p) = env("LOCALAPPDATA") {
+                v.push(p.join("Programs/wenv/Resources/config.toml"));
+            }
+            if let Some(p) = env("ProgramW6432") {
+                v.push(p.join("wenget/apps/wenv/Resources/config.toml"));
+            }
+            if let Some(p) = env("ProgramFiles") {
+                v.push(p.join("gpinstall/Resources/config.toml"));
+            }
         }
 
         v
@@ -134,13 +145,13 @@ impl Config {
         // Phase 2: create at the first writable location.
         for p in &search_paths {
             let Some(parent) = p.parent() else { continue };
-            if std::fs::create_dir_all(parent).is_err() { continue; }
+            if std::fs::create_dir_all(parent).is_err() {
+                continue;
+            }
             let mut cfg = Config::default();
             if let Some(paths) = crate::config::templates::default_paths(shell_key) {
-                cfg.files.insert(
-                    shell_key.to_string(),
-                    crate::model::FilesConfig { paths },
-                );
+                cfg.files
+                    .insert(shell_key.to_string(), crate::model::FilesConfig { paths });
             }
             let serialized = toml::to_string_pretty(&cfg)?;
             if std::fs::write(p, &serialized).is_ok() {
@@ -159,18 +170,25 @@ impl Config {
         let serialized = toml::to_string_pretty(self)?;
         match std::fs::write(&self.source_path, &serialized) {
             Ok(()) => Ok(()),
-            Err(e) if matches!(e.kind(),
-                std::io::ErrorKind::PermissionDenied
-                | std::io::ErrorKind::ReadOnlyFilesystem) =>
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+                ) =>
             {
                 for p in Self::fallback_paths() {
-                    if p == self.source_path { continue; }
+                    if p == self.source_path {
+                        continue;
+                    }
                     let Some(parent) = p.parent() else { continue };
-                    if std::fs::create_dir_all(parent).is_err() { continue; }
+                    if std::fs::create_dir_all(parent).is_err() {
+                        continue;
+                    }
                     if std::fs::write(&p, &serialized).is_ok() {
                         eprintln!(
                             "⚠ Config at {} is read-only; saved to {} instead.",
-                            self.source_path.display(), p.display()
+                            self.source_path.display(),
+                            p.display()
                         );
                         self.source_path = p;
                         return Ok(());

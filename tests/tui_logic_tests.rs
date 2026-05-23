@@ -336,7 +336,7 @@ fn test_copy_entries() {
         .unwrap();
 
     // Copy the entry
-    let copied: Vec<Entry> = vec![entry_idx]
+    let copied: Vec<Entry> = [entry_idx]
         .iter()
         .filter_map(|&idx| match items.get(idx) {
             Some(ListItem::Entry(fi, ei)) => Some(profile.files[*fi].entries[*ei].clone()),

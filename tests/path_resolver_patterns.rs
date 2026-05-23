@@ -25,10 +25,12 @@ fn glob_pattern_resolves_to_dir_with_sorted_files() {
     fs::write(dir.path().join("b.sh"), b"x").unwrap();
     fs::write(dir.path().join("a.sh"), b"x").unwrap();
     let glob = format!("{}/*", dir.path().display());
-    let out = resolve_patterns(&[glob.clone()]);
+    let out = resolve_patterns(std::slice::from_ref(&glob));
     assert_eq!(out.len(), 1);
     match &out[0] {
-        ResolvedPattern::Dir { original, files, .. } => {
+        ResolvedPattern::Dir {
+            original, files, ..
+        } => {
             assert_eq!(original, &glob);
             assert_eq!(files.len(), 2);
             assert!(files[0].0.ends_with("a.sh"));
@@ -97,10 +99,14 @@ fn duplicate_file_path_dropped_with_warning() {
 
 #[test]
 fn display_has_var_suffix_when_var_bearing() {
-    std::env::set_var("WENV_TEST_VAR_A", "/tmp");
+    unsafe {
+        std::env::set_var("WENV_TEST_VAR_A", "/tmp");
+    }
     let out = resolve_patterns(&["$WENV_TEST_VAR_A/wenv_synth.sh".to_string()]);
     assert_eq!(out.len(), 1);
     let s = format!("{}", out[0]);
     assert!(s.contains("($WENV_TEST_VAR_A/wenv_synth.sh)"), "got: {}", s);
-    std::env::remove_var("WENV_TEST_VAR_A");
+    unsafe {
+        std::env::remove_var("WENV_TEST_VAR_A");
+    }
 }

@@ -21,12 +21,15 @@ pub fn execute(config: &Config, shell_type: ShellType, _messages: &'static Messa
     }
 
     // Flatten to (path, exists) for display
-    let flat: Vec<(std::path::PathBuf, bool)> = resolved.iter().flat_map(|rp| match rp {
-        path_resolver::ResolvedPattern::File { path, exists, .. } => {
-            vec![(path.clone(), *exists)]
-        }
-        path_resolver::ResolvedPattern::Dir { files, .. } => files.clone(),
-    }).collect();
+    let flat: Vec<(std::path::PathBuf, bool)> = resolved
+        .iter()
+        .flat_map(|rp| match rp {
+            path_resolver::ResolvedPattern::File { path, exists, .. } => {
+                vec![(path.clone(), *exists)]
+            }
+            path_resolver::ResolvedPattern::Dir { files, .. } => files.clone(),
+        })
+        .collect();
 
     if flat.is_empty() {
         println!("No files configured for {}", shell_key);

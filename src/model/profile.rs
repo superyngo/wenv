@@ -6,9 +6,9 @@ use std::path::PathBuf;
 /// Item in the flat visible list for TUI navigation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ListItem {
-    DirHeader(usize),         // index into ShellProfile.tree (must be Dir)
-    FileHeader(usize),        // index into ShellProfile.files
-    Entry(usize, usize),      // (file_index, entry_index)
+    DirHeader(usize),    // index into ShellProfile.tree (must be Dir)
+    FileHeader(usize),   // index into ShellProfile.files
+    Entry(usize, usize), // (file_index, entry_index)
 }
 
 /// A single configuration file with its parsed entries.
@@ -88,7 +88,11 @@ impl ProfileFile {
             let line_count = entry.value.split('\n').count();
             entry.line_number = Some(current_line);
             let end = current_line + line_count - 1;
-            entry.end_line = if end > current_line { Some(end) } else { entry.line_number };
+            entry.end_line = if end > current_line {
+                Some(end)
+            } else {
+                entry.line_number
+            };
 
             match entry.entry_type {
                 crate::model::EntryType::Comment => {
@@ -167,11 +171,15 @@ impl ShellProfile {
             match node {
                 TreeNode::Dir(g) => {
                     let any_match = g.file_indices.iter().any(|fi| matched_files.contains(fi));
-                    if !any_match { continue; }
+                    if !any_match {
+                        continue;
+                    }
                     items.push(ListItem::DirHeader(ti));
                     if g.expanded {
                         for &fi in &g.file_indices {
-                            if !matched_files.contains(&fi) { continue; }
+                            if !matched_files.contains(&fi) {
+                                continue;
+                            }
                             items.push(ListItem::FileHeader(fi));
                             if self.files[fi].expanded {
                                 for ei in 0..self.files[fi].entries.len() {
@@ -182,7 +190,9 @@ impl ShellProfile {
                     }
                 }
                 TreeNode::File(fi) => {
-                    if !matched_files.contains(fi) { continue; }
+                    if !matched_files.contains(fi) {
+                        continue;
+                    }
                     items.push(ListItem::FileHeader(*fi));
                     if self.files[*fi].expanded {
                         for ei in 0..self.files[*fi].entries.len() {
@@ -208,9 +218,13 @@ impl ShellProfile {
     }
 
     pub fn toggle_all(&mut self, expanded: bool) {
-        for f in &mut self.files { f.expanded = expanded; }
+        for f in &mut self.files {
+            f.expanded = expanded;
+        }
         for n in &mut self.tree {
-            if let TreeNode::Dir(g) = n { g.expanded = expanded; }
+            if let TreeNode::Dir(g) = n {
+                g.expanded = expanded;
+            }
         }
     }
 
@@ -218,7 +232,11 @@ impl ShellProfile {
     /// Convenience for tests and legacy construction.
     pub fn from_files(shell_type: ShellType, files: Vec<ProfileFile>) -> Self {
         let tree = (0..files.len()).map(TreeNode::File).collect();
-        Self { shell_type, files, tree }
+        Self {
+            shell_type,
+            files,
+            tree,
+        }
     }
 }
 
@@ -233,14 +251,20 @@ fn derive_file_display_in_group(path: &std::path::Path, original: &str) -> Strin
             let h = home.to_string_lossy();
             if s.starts_with(h.as_ref()) {
                 format!("~{}", &s[h.len()..])
-            } else { s.into_owned() }
-        } else { s.into_owned() }
+            } else {
+                s.into_owned()
+            }
+        } else {
+            s.into_owned()
+        }
     };
 
     let re_unix = regex::Regex::new(r"\$[A-Za-z_][A-Za-z0-9_]*").unwrap();
     let re_win = regex::Regex::new(r"%[A-Za-z_][A-Za-z0-9_]*%").unwrap();
     let var_bearing = re_unix.is_match(original) || re_win.is_match(original);
-    if !var_bearing { return tilde; }
+    if !var_bearing {
+        return tilde;
+    }
 
     let prefix = if let Some(idx) = original.rfind('/') {
         original[..idx].to_string()
@@ -248,7 +272,8 @@ fn derive_file_display_in_group(path: &std::path::Path, original: &str) -> Strin
         original.to_string()
     };
 
-    let basename = path.file_name()
+    let basename = path
+        .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
     let var_form = if prefix.ends_with('/') {
@@ -276,7 +301,12 @@ pub fn load_shell_profile(config: &Config, shell_type: ShellType) -> anyhow::Res
 
     for rp in resolved {
         match rp {
-            ResolvedPattern::File { path, exists, display, .. } => {
+            ResolvedPattern::File {
+                path,
+                exists,
+                display,
+                ..
+            } => {
                 if seen_paths.contains(&path) {
                     continue; // dedup
                 }
@@ -296,7 +326,11 @@ pub fn load_shell_profile(config: &Config, shell_type: ShellType) -> anyhow::Res
                 files.push(pf);
                 tree.push(TreeNode::File(fi));
             }
-            ResolvedPattern::Dir { original, display, files: dir_files } => {
+            ResolvedPattern::Dir {
+                original,
+                display,
+                files: dir_files,
+            } => {
                 let mut indices: Vec<usize> = Vec::new();
                 for (path, exists) in dir_files {
                     if seen_paths.contains(&path) {
@@ -332,5 +366,9 @@ pub fn load_shell_profile(config: &Config, shell_type: ShellType) -> anyhow::Res
         }
     }
 
-    Ok(ShellProfile { shell_type, files, tree })
+    Ok(ShellProfile {
+        shell_type,
+        files,
+        tree,
+    })
 }

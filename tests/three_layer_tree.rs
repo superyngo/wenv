@@ -45,10 +45,13 @@ fn top_level_file_and_group_interleave_in_config_order() {
     fs::create_dir_all(&sub).unwrap();
     fs::write(sub.join("k.sh"), "echo\n").unwrap();
 
-    let cfg = cfg_with("zsh", vec![
-        zrc.to_string_lossy().to_string(),
-        format!("{}/*", sub.display()),
-    ]);
+    let cfg = cfg_with(
+        "zsh",
+        vec![
+            zrc.to_string_lossy().to_string(),
+            format!("{}/*", sub.display()),
+        ],
+    );
     let prof = load_shell_profile(&cfg, ShellType::Zsh).unwrap();
     assert_eq!(prof.tree.len(), 2);
     assert!(matches!(prof.tree[0], TreeNode::File(_)));
