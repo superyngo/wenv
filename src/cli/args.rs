@@ -1,6 +1,6 @@
 //! CLI argument definitions
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(name = "wenv")]
@@ -8,20 +8,25 @@ use clap::{Parser, ValueEnum};
 #[command(version, author)]
 pub struct Cli {
     /// Specify shell type
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     pub shell: Option<ShellArg>,
 
     /// Open source file in $EDITOR (same as "wenv .")
-    #[arg(long, group = "action")]
+    #[arg(long)]
     pub source: bool,
-
-    /// Open wenv config file in $EDITOR
-    #[arg(short = 'c', long, group = "action")]
-    pub config: bool,
 
     /// "." to open editor
     #[arg(value_name = "COMMAND")]
     pub command: Option<String>,
+
+    #[command(subcommand)]
+    pub subcommand: Option<SubCmd>,
+}
+
+#[derive(Subcommand)]
+pub enum SubCmd {
+    /// Open wenv config file in $EDITOR
+    Config,
 }
 
 #[derive(Clone, Copy, ValueEnum)]

@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use wenv::cli::actions;
-use wenv::cli::args::Cli;
+use wenv::cli::args::{Cli, SubCmd};
 use wenv::i18n;
 use wenv::model;
 use wenv::model::profile::ShellProfile;
@@ -92,7 +92,7 @@ fn main() -> Result<()> {
     let mut config = wenv::model::Config::resolve_or_create(shell_type.config_key())?;
 
     // Early exit: open resolved wenv config in $EDITOR
-    if cli.config {
+    if matches!(cli.subcommand, Some(SubCmd::Config)) {
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
             if cfg!(windows) {
                 "notepad".to_string()
