@@ -188,12 +188,29 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: echo "Skipping strip for cross-compiled ${{ matrix.target }} (already stripped by cross)"
 
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          STAGE="${{ matrix.asset_name }}-staged"
+          mkdir -p "$STAGE/Resources"
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            cp "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" "$STAGE/"
+          else
+            cp "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" "$STAGE/"
+          fi
+          cp Resources/config.toml "$STAGE/Resources/config.toml"
+          echo "STAGE=$STAGE" >> "$GITHUB_ENV"
+
       - name: Create tarball (Linux and macOS)
         if: matrix.os != 'windows-latest'
         run: |
-          cd target/${{ matrix.target }}/release
-          tar czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.artifact_name }}
-          mv ${{ matrix.asset_name }}.tar.gz ../../../
+          tar czf "${{ matrix.asset_name }}.tar.gz" -C "$STAGE" .
+
+      - name: Create zip (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "$env:STAGE/*" -DestinationPath "${{ matrix.asset_name }}.zip"
 
       - name: Upload artifacts (Linux and macOS)
         if: matrix.os != 'windows-latest'
@@ -207,7 +224,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+          path: ${{ matrix.asset_name }}.zip
 
   release:
     name: Create Release
@@ -236,18 +253,10 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p release_files
-          # Copy all tar.gz files to release_files directory
+          # Tarballs from Linux/macOS builds
           find artifacts -type f -name "*.tar.gz" -exec cp {} release_files/ \;
-          # Handle Windows exe files by renaming with platform suffix
-          for dir in artifacts/*; do
-            if [ -d "$dir" ] && [[ "$dir" == *"windows"* ]]; then
-              asset_name=$(basename "$dir")
-              exe_file="$dir/wenv.exe"
-              if [ -f "$exe_file" ]; then
-                cp "$exe_file" "release_files/$asset_name"
-              fi
-            fi
-          done
+          # Zips from Windows builds
+          find artifacts -type f -name "*.zip" -exec cp {} release_files/ \;
           echo "Files in release_files:"
           ls -la release_files/
 

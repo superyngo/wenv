@@ -177,3 +177,40 @@ cargo test tui_logic_tests # TUI operations tests
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Configuration
+
+wenv searches for `config.toml` in an OS-conditional fallback chain and creates a default at the first writable location if none exist. On Linux/macOS the chain is:
+
+1. `$WENV_CONFIG_DIR/config.toml` (when set, for development)
+2. `<binary_dir>/Resources/config.toml` (bundled with release tarballs)
+3. `$HOME/.wenget/apps/wenv/Resources/config.toml`
+4. `$HOME/.local/bin/Resources/config.toml`
+5. `/opt/wenget/apps/wenv/Resources/config.toml`
+6. `/usr/local/bin/config/config.toml`
+
+Run `wenv config` to open the currently-resolved file in `$EDITOR`.
+
+If the resolved config sits on a read-only filesystem and you make changes in the TUI, wenv writes to the next writable fallback and prints a notice; subsequent runs find the new copy.
+
+See `docs/adr/0001-config-resolution-strategy.md` for the rationale.
+
+## Release tarball layout
+
+Each release tarball unpacks to:
+
+```
+wenv-vX.Y.Z-<target>/
+├── wenv (or wenv.exe)
+└── Resources/
+    └── config.toml
+```
+
+## Development
+
+To run a development build against an isolated config, set `WENV_CONFIG_DIR`:
+
+```bash
+WENV_CONFIG_DIR=$(pwd)/Resources cargo run
+```
+
+This prepends the in-repo `Resources/config.toml` to the fallback chain so `cargo run` never touches your installed config.

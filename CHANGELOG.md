@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Breaking changes
+- `-c, --config` flag removed. Use `wenv config` subcommand instead.
+- Config moved from `~/.config/wenv/config.toml` to an OS-conditional fallback chain (see README "Configuration"). No automatic migration; existing files are silently shadowed if a higher-priority fallback exists.
+- TUI startup default: all groups and files start collapsed; press `9` to expand all or `0` to collapse all.
+
+### Added
+- Three-layer TUI tree: group → file → entry. Globs (`~/.zshrc.d/*`), directory paths, and variables that resolve to directories produce a group.
+- `wenv config` subcommand opens the active config in `$EDITOR`.
+- `WENV_CONFIG_DIR` env var (development override).
+- Release tarballs bundle `Resources/config.toml` next to the binary.
+- Sibling `cache.toml` for PowerShell `$PROFILE` resolution (lazy invalidation).
+- Variable-bearing paths display as `<resolved> (<original-pattern>)`.
+
+### Fixed
+- (None — feature release.)
+
 ## [Unreleased]
 
 ## [v0.16.0] - 2026-04-24
