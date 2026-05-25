@@ -7,21 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.17.0] - 2026-05-25
+
 ### Breaking changes
-- `-c, --config` flag removed. Use `wenv config` subcommand instead.
-- Config moved from `~/.config/wenv/config.toml` to an OS-conditional fallback chain (see README "Configuration"). No automatic migration; existing files are silently shadowed if a higher-priority fallback exists.
+- Config (UI + file lists) lives at a single fixed location `~/.config/wenv/config.toml` again, created from a template when missing. The multi-location fallback chain and the `WENV_CONFIG_DIR` env var are removed; use the new `-c/--config <PATH>` flag for an alternate location.
+- Snippets are split out of `config.toml` into a separate **mandatory bundled resource** `Resources/snippets.toml`. It is never auto-generated; if it cannot be found in the search chain the app prints the searched paths and exits non-zero. The embedded default snippets are removed.
 - TUI startup default: all groups and files start collapsed; press `9` to expand all or `0` to collapse all.
 
 ### Added
 - Three-layer TUI tree: group → file → entry. Globs (`~/.zshrc.d/*`), directory paths, and variables that resolve to directories produce a group.
 - `wenv config` subcommand opens the active config in `$EDITOR`.
-- `WENV_CONFIG_DIR` env var (development override).
-- Release tarballs bundle `Resources/config.toml` next to the binary.
+- `-c, --config <PATH>` global flag to use an alternate `config.toml` location.
+- Release tarballs bundle the whole `Resources/` directory (snippets) next to the binary.
 - Sibling `cache.toml` for PowerShell `$PROFILE` resolution (lazy invalidation).
 - Variable-bearing paths display as `<resolved> (<original-pattern>)`.
 
 ### Fixed
-- (None — feature release.)
+- Expanding a directory group no longer force-opens every file inside it. Toggling a group now reveals only its file headers (level 2); each file keeps its own expanded state, so startup and `0` (collapse all) leave all three levels collapsed.
 
 ## [v0.16.0] - 2026-04-24
 
