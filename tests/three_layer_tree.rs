@@ -59,6 +59,35 @@ fn top_level_file_and_group_interleave_in_config_order() {
 }
 
 #[test]
+fn expanded_group_with_collapsed_file_shows_only_file_header() {
+    // Regression: opening a group must reveal its file headers (level 2) only,
+    // not auto-expand each file's entries (level 3).
+    let dir = tempdir().unwrap();
+    let sub = dir.path().join("zshrc.d");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(sub.join("k.sh"), "alias a=1\nalias b=2\n").unwrap();
+    let cfg = cfg_with("zsh", vec![format!("{}/*", sub.display())]);
+    let mut prof = load_shell_profile(&cfg, ShellType::Zsh).unwrap();
+
+    // Expand the group only; the contained file stays collapsed (load default).
+    if let TreeNode::Dir(g) = &mut prof.tree[0] {
+        g.expanded = true;
+    } else {
+        panic!("expected Dir");
+    }
+    assert!(!prof.files[0].expanded, "file should remain collapsed");
+
+    let visible = prof.build_visible_list();
+    assert_eq!(visible.len(), 2, "only dir header + file header expected");
+    assert!(matches!(visible[0], ListItem::DirHeader(0)));
+    assert!(matches!(visible[1], ListItem::FileHeader(0)));
+    assert!(
+        !visible.iter().any(|it| matches!(it, ListItem::Entry(_, _))),
+        "no entries should be visible while the file is collapsed"
+    );
+}
+
+#[test]
 fn toggle_all_flips_dir_and_file() {
     let dir = tempdir().unwrap();
     let sub = dir.path().join("zshrc.d");

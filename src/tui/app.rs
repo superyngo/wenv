@@ -64,6 +64,7 @@ impl TuiApp {
         messages: &'static Messages,
         config: crate::model::Config,
         shell_key: String,
+        snippets: Vec<crate::model::Snippet>,
     ) -> Result<Self> {
         let visible_items = profile.build_visible_list();
         Ok(Self {
@@ -85,7 +86,7 @@ impl TuiApp {
             list_visible_height: 20,
             snippet_cursor: 0,
             snippet_scroll_offset: 0,
-            snippets: crate::config::load_snippets_for_shell(&config, &shell_key),
+            snippets,
             config,
             shell_key,
             pending_remove_fi: None,
@@ -261,13 +262,11 @@ impl TuiApp {
                                 if let crate::model::profile::TreeNode::Dir(ref mut g) =
                                     &mut self.profile.tree[*ti]
                                 {
+                                    // Toggle only the group. Contained files keep
+                                    // their own expanded state, so opening a group
+                                    // reveals just its file headers (level 2), not
+                                    // every entry inside them (level 3).
                                     g.expanded = !g.expanded;
-                                    // Mirror file expanded state to contained files
-                                    for &fi in &g.file_indices {
-                                        if let Some(f) = self.profile.files.get_mut(fi) {
-                                            f.expanded = g.expanded;
-                                        }
-                                    }
                                     self.rebuild_list();
                                 }
                             }
@@ -1237,12 +1236,9 @@ impl TuiApp {
                 if let Some(crate::model::profile::TreeNode::Dir(ref mut g)) =
                     self.profile.tree.get_mut(*ti)
                 {
+                    // Toggle only the group; contained files keep their own
+                    // expanded state (see ToggleExpand for rationale).
                     g.expanded = !g.expanded;
-                    for &fi in &g.file_indices {
-                        if let Some(f) = self.profile.files.get_mut(fi) {
-                            f.expanded = g.expanded;
-                        }
-                    }
                     self.rebuild_list();
                 }
             }
