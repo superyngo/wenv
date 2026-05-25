@@ -198,7 +198,7 @@ jobs:
           else
             cp "target/${{ matrix.target }}/release/${{ matrix.artifact_name }}" "$STAGE/"
           fi
-          cp Resources/config.toml "$STAGE/Resources/config.toml"
+          cp -r Resources/. "$STAGE/Resources/"
           echo "STAGE=$STAGE" >> "$GITHUB_ENV"
 
       - name: Create tarball (Linux and macOS)

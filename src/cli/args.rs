@@ -11,6 +11,10 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub shell: Option<ShellArg>,
 
+    /// Use an alternate config.toml location (default: ~/.config/wenv/config.toml)
+    #[arg(short, long, value_name = "PATH", global = true)]
+    pub config: Option<std::path::PathBuf>,
+
     /// Open source file in $EDITOR (same as "wenv .")
     #[arg(long)]
     pub source: bool,

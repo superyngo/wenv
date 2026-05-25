@@ -1,0 +1,75 @@
+# wenv snippet templates (mandatory bundled resource).
+# Shown in the TUI "new entry" (n) picker. Grouped by shell key.
+# This file ships alongside the binary and is never auto-generated.
+
+[[snippets.bash]]
+name = "blank"
+description = "Empty editor"
+
+[[snippets.bash]]
+name = "alias"
+description = "alias NAME='VALUE'"
+template = "alias NAME='VALUE'"
+
+[[snippets.bash]]
+name = "export"
+description = "export VAR='VALUE'"
+template = "export VAR='VALUE'"
+
+[[snippets.bash]]
+name = "function"
+description = "name() { ... }"
+template = "name() {\n  \n}"
+
+[[snippets.bash]]
+name = "source"
+description = "source FILE"
+template = "source "
+
+[[snippets.zsh]]
+name = "blank"
+description = "Empty editor"
+
+[[snippets.zsh]]
+name = "alias"
+description = "alias NAME='VALUE'"
+template = "alias NAME='VALUE'"
+
+[[snippets.zsh]]
+name = "export"
+description = "export VAR='VALUE'"
+template = "export VAR='VALUE'"
+
+[[snippets.zsh]]
+name = "function"
+description = "name() { ... }"
+template = "name() {\n  \n}"
+
+[[snippets.zsh]]
+name = "source"
+description = "source FILE"
+template = "source "
+
+[[snippets.powershell]]
+name = "blank"
+description = "Empty editor"
+
+[[snippets.powershell]]
+name = "alias"
+description = "Set-Alias NAME VALUE"
+template = "Set-Alias Name Value"
+
+[[snippets.powershell]]
+name = "function"
+description = "function Name { ... }"
+template = "function Name {\n  \n}"
+
+[[snippets.powershell]]
+name = "env-var"
+description = "$env:VAR = 'VALUE'"
+template = "$env:VAR = 'VALUE'"
+
+[[snippets.powershell]]
+name = "source"
+description = ". FILE"
+template = ". "

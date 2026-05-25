@@ -148,20 +148,31 @@ cargo test tui_logic_tests # TUI operations tests
 
 ## Configuration
 
-wenv searches for `config.toml` in an OS-conditional fallback chain and creates a default at the first writable location if none exist. On Linux/macOS the chain is:
+wenv keeps two distinct pieces of configuration:
 
-1. `$WENV_CONFIG_DIR/config.toml` (when set, for development)
-2. `<binary_dir>/Resources/config.toml` (bundled with release tarballs)
-3. `$HOME/.wenget/apps/wenv/Resources/config.toml`
-4. `$HOME/.local/bin/Resources/config.toml`
-5. `/opt/wenget/apps/wenv/Resources/config.toml`
-6. `/usr/local/bin/config/config.toml`
+### User config — `config.toml`
 
-Run `wenv config` to open the currently-resolved file in `$EDITOR`.
+UI settings and the per-shell file lists live in a single fixed location:
 
-If the resolved config sits on a read-only filesystem and you make changes in the TUI, wenv writes to the next writable fallback and prints a notice; subsequent runs find the new copy.
+```
+~/.config/wenv/config.toml
+```
 
-See `docs/adr/0001-config-resolution-strategy.md` for the rationale.
+A default is created from a template the first time it's missing. The path is the same whether you run via `cargo run` or the release binary. Use `-c, --config <PATH>` to point at an alternate file (read or created there). Run `wenv config` to open the resolved file in `$EDITOR`.
+
+### Snippets — `Resources/snippets.toml` (mandatory bundled resource)
+
+Snippet templates for the TUI "new entry" (`n`) picker ship **with the binary** and are required at runtime — wenv refuses to start if they cannot be found, and never auto-generates them. Search order:
+
+- **Development (`cargo run`)**: the in-repo `Resources/snippets.toml`.
+- **Release binary**, in order:
+  1. `<binary_dir>/Resources/snippets.toml` (primary — matches the release archive layout)
+  2. `$HOME/.wenget/apps/wenv/Resources/snippets.toml`
+  3. `$HOME/.local/bin/Resources/snippets.toml`
+  4. `/opt/wenget/apps/wenv/Resources/snippets.toml`
+  5. `/usr/local/bin/Resources/snippets.toml`
+
+  (Windows uses the equivalent `%USERPROFILE%`, `%LOCALAPPDATA%`, `%ProgramW6432%`, and `%ProgramFiles%` locations.)
 
 ## Release tarball layout
 
@@ -171,16 +182,10 @@ Each release tarball unpacks to:
 wenv-vX.Y.Z-<target>/
 ├── wenv (or wenv.exe)
 └── Resources/
-    └── config.toml
+    └── snippets.toml
 ```
 
-To run a development build against an isolated config, set `WENV_CONFIG_DIR`:
-
-```bash
-WENV_CONFIG_DIR=$(pwd)/Resources cargo run
-```
-
-This prepends the in-repo `Resources/config.toml` to the fallback chain so `cargo run` never touches your installed config.
+`config.toml` is **not** shipped — it is created in `~/.config/wenv/` on first run.
 
 ## License
 

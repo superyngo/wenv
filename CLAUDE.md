@@ -115,53 +115,45 @@ The Bash parser tracks control structure depth (`if`/`while`/`for`/`case`) to on
 
 ### Configuration System
 
-**Config File Locations:**
-- All platforms: `~/.config/wenv/config.toml` (unified location)
+Configuration is split across two files with different lifecycles:
 
-**Config Structure:**
+**1. User config — `config.toml` (UI + file lists)**
+- Single fixed location, all platforms: `~/.config/wenv/config.toml`
+- Same path for `cargo run` and the release binary (no multi-location search)
+- Auto-created from a template when missing
+- Override location with the `-c, --config <PATH>` global flag
+- Loaded by `Config::resolve_or_create(shell_key, config_override)` (`src/model/config.rs`)
+
+Structure:
 - `[ui]` - UI settings (language selection)
-- `[files.bash]` - Bash file paths list
-- `[files.zsh]` - Zsh file paths list  
-- `[files.powershell]` - PowerShell file paths list
+- `[files.<shell>]` - per-shell file path lists (`bash` / `zsh` / `powershell`)
 
-**Example Config:**
 ```toml
 [ui]
 language = "en"
 
 [files.bash]
-paths = [
-    "~/.bashrc",
-    "~/.bash_aliases", 
-    "~/.profile"
-]
+paths = ["~/.bashrc", "~/.bash_aliases", "~/.profile"]
 
 [files.zsh]
-paths = [
-    "~/.zshrc",
-    "~/.zsh_aliases"
-]
-
-[snippets.zsh]
-[[snippets.zsh]]
-name = "Empty"
-description = "Blank entry"
-
-[[snippets.zsh]]
-name = "alias"
-description = "Define an alias"
-template = "# Set alias name and value\nalias NAME='VALUE'"
-
-[template_paths]
-paths = [
-    "~/.config/wenv/snippets/extra.toml"
-]
+paths = ["~/.zshrc", "~/.zsh_aliases"]
 ```
 
-**Snippets System:**
-- `[snippets.<shell>]` — inline snippet templates, auto-populated on first run for active shell
-- `[template_paths]` — external TOML files containing `[[snippets.<shell>]]` arrays, merged with inline (inline takes priority on name collision)
-- Loaded by `config::load_snippets_for_shell()`, used by TUI 'n' key
+**2. Snippets — `Resources/snippets.toml` (mandatory bundled resource)**
+- Snippet templates for the TUI `n` key, shipped alongside the binary
+- **Required at runtime**: if not found anywhere in the search chain, the app prints the searched paths and exits non-zero. Never auto-generated; no embedded defaults.
+- Search chain (`Snippets::resolve()` in `src/model/config.rs`):
+  - Debug builds: in-repo `Resources/snippets.toml` (via `CARGO_MANIFEST_DIR`)
+  - `<exe_dir>/Resources/snippets.toml` (primary — matches release archive)
+  - platform install fallbacks (`~/.wenget/...`, `~/.local/bin/Resources`, `/opt/...`, `/usr/local/bin/Resources`; Windows `%USERPROFILE%`/`%LOCALAPPDATA%`/`%ProgramW6432%`/`%ProgramFiles%` equivalents)
+- Structure: `[[snippets.<shell>]]` arrays of `{ name, description, template? }`
+
+```toml
+[[snippets.zsh]]
+name = "alias"
+description = "alias NAME='VALUE'"
+template = "alias NAME='VALUE'"
+```
 
 ### TUI Key Bindings Reference
 
@@ -212,14 +204,14 @@ Cross-file operations supported:
 - **Undo**: Restores all files to previous state
 - **Search**: Filters entries across all expanded files
 - **Save**: Writes all dirty files atomically
-The `[cache]` section stores auto-detected PowerShell profile paths:
+A sibling `cache.toml` (written next to the resolved `config.toml`, i.e. `config.source_path.parent()/cache.toml`) stores auto-detected PowerShell profile paths:
 ```toml
-[cache]
 pwsh_profile = "/path/to/pwsh/profile.ps1"
 powershell_profile = "/path/to/powershell/profile.ps1"
 ```
+- Managed by `src/config/cache.rs` (`Cache::load_or_default` / `Cache::save`)
 - Auto-detected on first run when PowerShell shell type is used
-- Migration: Old `.path_cache.toml` files are automatically merged into `config.toml` and removed
+- Lazy invalidation: a cached path that no longer exists on disk is dropped on load
 - User-editable if manual override needed
 
 **i18n Language Files:**

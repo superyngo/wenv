@@ -14,7 +14,8 @@ pub struct Snippet {
     pub template: Option<String>,
 }
 
-/// Main configuration structure
+/// Main configuration structure (UI + file lists). Lives at a single user
+/// location (`~/.config/wenv/config.toml`) or wherever `-c/--config` points.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     #[serde(skip)]
@@ -24,6 +25,13 @@ pub struct Config {
     pub ui: UiConfig,
     #[serde(default)]
     pub files: HashMap<String, FilesConfig>,
+}
+
+/// Snippet templates for the "new entry" picker. This is a mandatory bundled
+/// resource (`Resources/snippets.toml`) shipped alongside the binary; it is
+/// never auto-generated, and the app refuses to run if it cannot be found.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Snippets {
     #[serde(default)]
     pub snippets: HashMap<String, Vec<Snippet>>,
 }
@@ -54,8 +62,8 @@ impl Default for UiConfig {
 }
 
 impl Config {
-    /// Get the wenv configuration directory path (legacy fallback used by i18n / cli.config).
-    /// TODO(Task 5): migrate callers to use `config.source_path.parent()` and remove.
+    /// The wenv configuration directory: `~/.config/wenv` on all platforms.
+    /// Also used by i18n to locate `i18n/{lang}.toml`.
     pub fn config_dir() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("~"))
@@ -63,104 +71,42 @@ impl Config {
             .join("wenv")
     }
 
-    /// Get the configuration file path (legacy fallback used by i18n / cli.config).
-    /// TODO(Task 5): remove once all callers migrate to `config.source_path`.
+    /// The default configuration file path: `~/.config/wenv/config.toml`.
     pub fn config_path() -> PathBuf {
         Self::config_dir().join("config.toml")
     }
 
-    /// Fallback search chain for config.toml.
-    pub fn fallback_paths() -> Vec<PathBuf> {
-        let exe_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|p| p.to_path_buf()));
-        let home = dirs::home_dir();
-        let mut v: Vec<PathBuf> = Vec::new();
+    /// Load the config from a single location, creating a default if missing.
+    ///
+    /// The location is `config_override` when `-c/--config` was given, otherwise
+    /// the fixed `config_path()`. There is no multi-location search: the chosen
+    /// path is authoritative for both reading and creation.
+    pub fn resolve_or_create(
+        shell_key: &str,
+        config_override: Option<PathBuf>,
+    ) -> anyhow::Result<Self> {
+        let path = config_override.unwrap_or_else(Self::config_path);
 
-        if let Ok(d) = std::env::var("WENV_CONFIG_DIR") {
-            if !d.trim().is_empty() {
-                v.push(PathBuf::from(&d).join("config.toml"));
-            }
+        if path.exists() {
+            let content = std::fs::read_to_string(&path)?;
+            let mut cfg: Config = toml::from_str(&content)?;
+            cfg.source_path = path;
+            return Ok(cfg);
         }
 
-        #[cfg(not(target_os = "windows"))]
-        {
-            if let Some(d) = &exe_dir {
-                v.push(d.join("Resources/config.toml"));
-            }
-            if let Some(h) = &home {
-                v.push(h.join(".wenget/apps/wenv/Resources/config.toml"));
-                v.push(h.join(".local/bin/Resources/config.toml"));
-            }
-            v.push(PathBuf::from("/opt/wenget/apps/wenv/Resources/config.toml"));
-            v.push(PathBuf::from("/usr/local/bin/config/config.toml"));
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
         }
-
-        #[cfg(target_os = "windows")]
-        {
-            let env = |k: &str| std::env::var(k).ok().map(PathBuf::from);
-            if let Some(d) = &exe_dir {
-                v.push(d.join("Resources").join("config.toml"));
-            }
-            if let Some(p) = env("USERPROFILE") {
-                v.push(p.join(".wenget/apps/wenv/Resources/config.toml"));
-            }
-            if let Some(p) = env("LOCALAPPDATA") {
-                v.push(p.join("Programs/wenv/Resources/config.toml"));
-            }
-            if let Some(p) = env("ProgramW6432") {
-                v.push(p.join("wenget/apps/wenv/Resources/config.toml"));
-            }
-            if let Some(p) = env("ProgramFiles") {
-                v.push(p.join("gpinstall/Resources/config.toml"));
-            }
+        let mut cfg = Config::default();
+        if let Some(paths) = crate::config::templates::default_paths(shell_key) {
+            cfg.files
+                .insert(shell_key.to_string(), crate::model::FilesConfig { paths });
         }
-
-        v
-    }
-
-    pub fn resolve_or_create(shell_key: &str) -> anyhow::Result<Self> {
-        // When WENV_CONFIG_DIR is set it is the exclusive location: read from it
-        // if the file exists, otherwise create there.  We do not fall through to
-        // other locations so that the env var truly acts as an override.
-        let wenv_dir = std::env::var("WENV_CONFIG_DIR")
-            .ok()
-            .filter(|d| !d.trim().is_empty());
-        let search_paths: Vec<PathBuf> = if let Some(ref d) = wenv_dir {
-            vec![PathBuf::from(d).join("config.toml")]
-        } else {
-            Self::fallback_paths()
-        };
-
-        // Phase 1: return the first existing readable config.
-        for p in &search_paths {
-            if p.exists() {
-                let content = std::fs::read_to_string(p)?;
-                let mut cfg: Config = toml::from_str(&content)?;
-                cfg.source_path = p.clone();
-                return Ok(cfg);
-            }
-        }
-
-        // Phase 2: create at the first writable location.
-        for p in &search_paths {
-            let Some(parent) = p.parent() else { continue };
-            if std::fs::create_dir_all(parent).is_err() {
-                continue;
-            }
-            let mut cfg = Config::default();
-            if let Some(paths) = crate::config::templates::default_paths(shell_key) {
-                cfg.files
-                    .insert(shell_key.to_string(), crate::model::FilesConfig { paths });
-            }
-            let serialized = toml::to_string_pretty(&cfg)?;
-            if std::fs::write(p, &serialized).is_ok() {
-                cfg.source_path = p.clone();
-                eprintln!("✓ Created default config at: {}", p.display());
-                return Ok(cfg);
-            }
-        }
-        anyhow::bail!("No writable config location among fallback paths")
+        cfg.source_path = path.clone();
+        let serialized = toml::to_string_pretty(&cfg)?;
+        std::fs::write(&path, &serialized)?;
+        eprintln!("✓ Created default config at: {}", path.display());
+        Ok(cfg)
     }
 
     pub fn save(&mut self) -> anyhow::Result<()> {
@@ -168,39 +114,89 @@ impl Config {
             std::fs::create_dir_all(parent)?;
         }
         let serialized = toml::to_string_pretty(self)?;
-        match std::fs::write(&self.source_path, &serialized) {
-            Ok(()) => Ok(()),
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
-                ) =>
-            {
-                for p in Self::fallback_paths() {
-                    if p == self.source_path {
-                        continue;
-                    }
-                    let Some(parent) = p.parent() else { continue };
-                    if std::fs::create_dir_all(parent).is_err() {
-                        continue;
-                    }
-                    if std::fs::write(&p, &serialized).is_ok() {
-                        eprintln!(
-                            "⚠ Config at {} is read-only; saved to {} instead.",
-                            self.source_path.display(),
-                            p.display()
-                        );
-                        self.source_path = p;
-                        return Ok(());
-                    }
-                }
-                Err(anyhow::anyhow!(
-                    "Config save failed: {} is read-only and no writable fallback is available",
-                    self.source_path.display()
-                ))
-            }
-            Err(e) => Err(e.into()),
+        std::fs::write(&self.source_path, &serialized)?;
+        Ok(())
+    }
+}
+
+impl Snippets {
+    /// Candidate locations for the bundled `snippets.toml`, in priority order.
+    /// Debug builds look in the in-repo `Resources/` first so `cargo run` works
+    /// without any install step. Release builds rely on the binary-relative
+    /// `Resources/` (matching the release archive layout) plus the documented
+    /// install locations.
+    fn search_paths() -> Vec<PathBuf> {
+        let mut v: Vec<PathBuf> = Vec::new();
+
+        #[cfg(debug_assertions)]
+        v.push(PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/Resources/snippets.toml"
+        )));
+
+        if let Some(dir) = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        {
+            v.push(dir.join("Resources").join("snippets.toml"));
         }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(h) = dirs::home_dir() {
+                v.push(h.join(".wenget/apps/wenv/Resources/snippets.toml"));
+                v.push(h.join(".local/bin/Resources/snippets.toml"));
+            }
+            v.push(PathBuf::from(
+                "/opt/wenget/apps/wenv/Resources/snippets.toml",
+            ));
+            v.push(PathBuf::from("/usr/local/bin/Resources/snippets.toml"));
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let env = |k: &str| std::env::var(k).ok().map(PathBuf::from);
+            if let Some(p) = env("USERPROFILE") {
+                v.push(p.join(".wenget/apps/wenv/Resources/snippets.toml"));
+            }
+            if let Some(p) = env("LOCALAPPDATA") {
+                v.push(p.join("Programs/wenv/Resources/snippets.toml"));
+            }
+            if let Some(p) = env("ProgramW6432") {
+                v.push(p.join("wenget/apps/wenv/Resources/snippets.toml"));
+            }
+            if let Some(p) = env("ProgramFiles") {
+                v.push(p.join("gpinstall/Resources/snippets.toml"));
+            }
+        }
+
+        v
+    }
+
+    /// Load the mandatory snippets resource. Returns an error listing every
+    /// searched location if none exist — the caller is expected to abort.
+    pub fn resolve() -> anyhow::Result<Self> {
+        let candidates = Self::search_paths();
+        for p in &candidates {
+            if p.exists() {
+                let content = std::fs::read_to_string(p)?;
+                return Ok(toml::from_str(&content)?);
+            }
+        }
+        let searched = candidates
+            .iter()
+            .map(|p| format!("  - {}", p.display()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        anyhow::bail!(
+            "Required snippets resource 'Resources/snippets.toml' not found. Searched:\n{}",
+            searched
+        )
+    }
+
+    /// Snippets configured for the given shell, or an empty list.
+    pub fn for_shell(&self, shell_key: &str) -> Vec<Snippet> {
+        self.snippets.get(shell_key).cloned().unwrap_or_default()
     }
 }
 

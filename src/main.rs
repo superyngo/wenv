@@ -88,8 +88,9 @@ fn main() -> Result<()> {
     // Determine shell type (runtime decision, no config dependency)
     let shell_type = get_shell_type(cli.shell.map(|s| s.into()), None);
 
-    // Load or create config
-    let mut config = wenv::model::Config::resolve_or_create(shell_type.config_key())?;
+    // Load or create config (single location, or -c/--config override)
+    let mut config =
+        wenv::model::Config::resolve_or_create(shell_type.config_key(), cli.config.clone())?;
 
     // Early exit: open resolved wenv config in $EDITOR
     if matches!(cli.subcommand, Some(SubCmd::Config)) {
@@ -106,34 +107,21 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Spec §4.6: warn if exe_dir-resolved config shadows a pre-existing
-    // ~/.config/wenv/config.toml.
-    if let Some(exe_dir) = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-    {
-        let exe_cfg = exe_dir.join("Resources").join("config.toml");
-        if config.source_path == exe_cfg {
-            if let Some(home) = dirs::home_dir() {
-                let legacy = home.join(".config").join("wenv").join("config.toml");
-                if legacy.exists() {
-                    eprintln!(
-                        "Note: {} exists but is shadowed by {}",
-                        legacy.display(),
-                        config.source_path.display()
-                    );
-                }
-            }
-        }
-    }
-
     let shell_key = shell_type.config_key();
 
     // Ensure file list exists for this shell
     if !config.files.contains_key(shell_key) {
         wenv::config::ensure_shell_files(&mut config, shell_key)?;
     }
-    wenv::config::ensure_shell_snippets(&mut config, shell_key)?;
+
+    // Snippets are a mandatory bundled resource; abort if it cannot be found.
+    let snippets = match wenv::model::Snippets::resolve() {
+        Ok(s) => s.for_shell(shell_key),
+        Err(e) => {
+            eprintln!("✗ {e}");
+            std::process::exit(1);
+        }
+    };
 
     let messages = i18n::init_messages(&config.ui.language);
 
@@ -146,5 +134,5 @@ fn main() -> Result<()> {
     // Load shell profile and launch TUI
     let mut profile = model::profile::load_shell_profile(&config, shell_type)?;
     startup_file_check(&mut profile, &mut config, shell_key)?;
-    TuiApp::new(profile, messages, config, shell_key.to_string())?.run()
+    TuiApp::new(profile, messages, config, shell_key.to_string(), snippets)?.run()
 }
