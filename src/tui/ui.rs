@@ -29,9 +29,34 @@ fn format_line_info(entry: &crate::model::Entry) -> String {
     }
 }
 
+/// Sanitise a string for single-line terminal display.
+///
+/// Escapes line breaks (`\r\n`, `\r`, `\n`) to a literal `\n` marker and drops
+/// any remaining control characters. Without this, a stray carriage return from
+/// a CRLF (Windows) config file moves the cursor to column 0 mid-row and corrupts
+/// the rendered list ("screen tearing").
+fn sanitize_inline(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                out.push_str("\\n");
+            }
+            '\n' => out.push_str("\\n"),
+            c if c.is_control() => {} // drop other control chars (e.g. \t, \0)
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Truncate and sanitise value for single-line display
 fn format_value_display(value: &str) -> String {
-    let v = value.replace('\n', "\\n");
+    let v = sanitize_inline(value);
     if v.chars().count() > 100 {
         format!("{}...", v.chars().take(97).collect::<String>())
     } else {
@@ -87,12 +112,11 @@ fn build_highlighted_spans<'a>(
 
 pub fn draw(f: &mut Frame, app: &mut TuiApp) {
     let has_search = app.search.is_some();
-    let has_text_input = app.text_input.is_some();
-    let constraints = if has_search || has_text_input {
+    let constraints = if has_search {
         vec![
             Constraint::Length(1), // title bar
             Constraint::Min(1),    // main list
-            Constraint::Length(1), // search/text input bar
+            Constraint::Length(1), // search bar
             Constraint::Length(1), // status bar
         ]
     } else {
@@ -114,9 +138,6 @@ pub fn draw(f: &mut Frame, app: &mut TuiApp) {
     if has_search {
         draw_search_bar(f, chunks[2], app);
         draw_status(f, chunks[3], app);
-    } else if has_text_input {
-        draw_text_input_bar(f, chunks[2], app);
-        draw_status(f, chunks[3], app);
     } else {
         draw_status(f, chunks[2], app);
     }
@@ -137,6 +158,9 @@ pub fn draw(f: &mut Frame, app: &mut TuiApp) {
         }
         AppMode::SelectingSnippet => {
             draw_snippet_popup(f, f.size(), app);
+        }
+        AppMode::TextInput => {
+            draw_text_input_popup(f, f.size(), app);
         }
         _ => {}
     }
@@ -287,7 +311,7 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     let is_readonly = !file.writable;
 
                     let prefix = if is_selected { format!("{}● ", entry_indent) } else { format!("{}  ", entry_indent) };
-                    let name_str = format!("{:<20}", entry.name);
+                    let name_str = format!("{:<20}", sanitize_inline(&entry.name));
                     let type_str = format!("{:<10}", entry.entry_type.to_string());
                     let line_str = format!("{:<10}", format_line_info(entry));
                     let value_str = format_value_display(&entry.value);
@@ -486,14 +510,33 @@ fn draw_search_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
     }
 }
 
-fn draw_text_input_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
+fn draw_text_input_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     if let Some(ref input) = app.text_input {
-        let text = format!("{}{}", input.prompt, input.value);
-        let style = Style::default().fg(Color::Cyan);
-        f.render_widget(Paragraph::new(text).style(style), area);
-        // Position cursor
-        let cursor_x = area.x + (input.prompt.len() + input.cursor_pos) as u16;
-        f.set_cursor(cursor_x, area.y);
+        let popup_width = (area.width.saturating_sub(8)).clamp(20, 80);
+        let popup_height = 3; // 1 input row + top/bottom border
+        let x = (area.width.saturating_sub(popup_width)) / 2;
+        let y = (area.height.saturating_sub(popup_height)) / 2;
+        let popup_area = Rect::new(x, y, popup_width, popup_height);
+
+        f.render_widget(Clear, popup_area);
+
+        let block = Block::default()
+            .title(format!(" {} ", input.prompt.trim_end_matches([':', ' '])))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan));
+
+        let inner = block.inner(popup_area);
+        f.render_widget(block, popup_area);
+
+        let text = Paragraph::new(input.value.as_str()).style(Style::default().fg(Color::White));
+        f.render_widget(text, inner);
+
+        // Position cursor within the input field
+        let cursor_x = inner.x + input.cursor_pos as u16;
+        f.set_cursor(
+            cursor_x.min(inner.x + inner.width.saturating_sub(1)),
+            inner.y,
+        );
     }
 }
 
@@ -534,8 +577,9 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
         Style::default().fg(Color::Yellow),
     )));
 
-    // Split value by \n and show each line
+    // Split value by \n and show each line (trim trailing \r from CRLF files)
     for line in entry.value.split('\n') {
+        let line = line.strip_suffix('\r').unwrap_or(line);
         lines.push(Line::from(Span::raw(format!("  {}", line))));
     }
 
@@ -721,4 +765,32 @@ fn draw_snippet_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
         paragraph = paragraph.scroll((scroll_offset, 0));
     }
     f.render_widget(paragraph, popup_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_strips_crlf_and_control_chars() {
+        // CRLF (Windows) collapses to a single \n marker — no stray \r reaches the terminal
+        assert_eq!(sanitize_inline("a\r\nb"), "a\\nb");
+        // Lone carriage return is escaped, not passed through
+        assert_eq!(sanitize_inline("new(\rvvvv"), "new(\\nvvvv");
+        // LF escaped
+        assert_eq!(sanitize_inline("a\nb"), "a\\nb");
+        // Other control chars (tab, NUL) are dropped
+        assert_eq!(sanitize_inline("a\tb\0c"), "abc");
+        // No \r ever survives in the output
+        assert!(!sanitize_inline("x\r\ny\rz").contains('\r'));
+    }
+
+    #[test]
+    fn format_value_display_sanitizes_and_truncates() {
+        assert_eq!(format_value_display("line1\r\nline2"), "line1\\nline2");
+        let long = "x".repeat(150);
+        let out = format_value_display(&long);
+        assert!(out.ends_with("..."));
+        assert_eq!(out.chars().count(), 100);
+    }
 }

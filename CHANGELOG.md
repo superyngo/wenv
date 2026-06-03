@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+- The `a` (add file path) action now opens a centered popup input window instead of an inline bottom bar.
+
+### Fixed
+- Adding a file path (`a`) now immediately shows the new file and its entries in the tree. Previously the file was added to `profile.files` but no matching tree node was created, so it stayed hidden until reload.
+- Removing a file path (`d`) no longer panics with an index-out-of-bounds in `build_visible_list`. The removal now rebuilds the profile via `reload_profile()`, keeping `profile.files` and `profile.tree` in sync (the old in-place `retain` left stale file indices in the tree) while preserving unsaved (dirty) changes.
+- Path-resolver warnings (e.g. `⚠ Skipping config path (unresolved variables)`) no longer corrupt the TUI display. They are suppressed while the alternate screen is active (`set_quiet`), so a stray warning written during reload can no longer scroll/duplicate the rendered list. Warnings still print normally for CLI/startup before the TUI opens.
+- Windows CRLF config files no longer cause screen tearing in the TUI list. Carriage returns and other control characters are now escaped/stripped when rendering the value and name columns and the detail popup, so a stray `\r` can no longer move the terminal cursor mid-row. The stored value keeps its raw line endings (files save unchanged).
+
 ## [v0.17.0] - 2026-05-25
 
 ### Breaking changes

@@ -1,5 +1,26 @@
 //! Resolve config path patterns to concrete file paths
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// When set, resolver warnings are suppressed instead of written to stderr.
+/// The TUI enables this while it owns the alternate screen so stray warning
+/// lines can't corrupt the rendered buffer (see `TuiApp::run`).
+static QUIET: AtomicBool = AtomicBool::new(false);
+
+/// Suppress (`true`) or restore (`false`) resolver stderr warnings.
+pub fn set_quiet(quiet: bool) {
+    QUIET.store(quiet, Ordering::Relaxed);
+}
+
+/// Emit a resolver warning to stderr unless quiet mode is active.
+macro_rules! resolver_warn {
+    ($($arg:tt)*) => {
+        if !QUIET.load(Ordering::Relaxed) {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
 pub fn expand_tilde(path: &str) -> String {
     if path.starts_with("~/") || path == "~" {
         if let Some(home) = dirs::home_dir() {
@@ -144,16 +165,17 @@ pub fn resolve_patterns(patterns: &[String]) -> Vec<ResolvedPattern> {
     for original in patterns {
         let expanded = expand_env_vars(&expand_tilde(original));
         if expanded.trim().is_empty() {
-            eprintln!(
+            resolver_warn!(
                 "⚠ Skipping config path (empty after expansion): {:?}",
                 original
             );
             continue;
         }
         if has_unresolved_vars(&expanded) {
-            eprintln!(
+            resolver_warn!(
                 "⚠ Skipping config path (unresolved variables): {:?} → {:?}",
-                original, expanded
+                original,
+                expanded
             );
             continue;
         }
@@ -170,7 +192,7 @@ pub fn resolve_patterns(patterns: &[String]) -> Vec<ResolvedPattern> {
                     }
                     let exists = entry.exists();
                     if let Some(prev) = seen.get(&entry) {
-                        eprintln!(
+                        resolver_warn!(
                             "⚠ Path {} already loaded from pattern {:?}; skipping duplicate from pattern {:?}",
                             entry.display(), prev, original
                         );
@@ -204,7 +226,7 @@ pub fn resolve_patterns(patterns: &[String]) -> Vec<ResolvedPattern> {
                             continue;
                         }
                         if let Some(prev) = seen.get(&ep) {
-                            eprintln!(
+                            resolver_warn!(
                                 "⚠ Path {} already loaded from pattern {:?}; skipping duplicate from pattern {:?}",
                                 ep.display(), prev, original
                             );
@@ -225,7 +247,7 @@ pub fn resolve_patterns(patterns: &[String]) -> Vec<ResolvedPattern> {
                 // File (existing or not)
                 let exists = path.exists();
                 if let Some(prev) = seen.get(&path) {
-                    eprintln!(
+                    resolver_warn!(
                         "⚠ Path {} already loaded from pattern {:?}; skipping duplicate from pattern {:?}",
                         path.display(), prev, original
                     );

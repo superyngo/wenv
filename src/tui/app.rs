@@ -107,7 +107,11 @@ impl TuiApp {
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
+        // Suppress resolver stderr warnings while the alternate screen is active;
+        // otherwise a stray warning line (e.g. on reload) corrupts the rendered list.
+        crate::config::path_resolver::set_quiet(true);
         let result = self.event_loop(&mut terminal);
+        crate::config::path_resolver::set_quiet(false);
 
         // Always restore terminal
         disable_raw_mode()?;
@@ -723,17 +727,13 @@ impl TuiApp {
                             let path = self.profile.files[fi].path.clone();
                             let shell_key = self.shell_key.clone();
 
-                            // Use helper to find matching pattern and all affected paths
-                            let match_result = crate::tui::operations::find_matching_config_pattern(
+                            // Find the matching config pattern to remove (if any).
+                            let raw_pattern = crate::tui::operations::find_matching_config_pattern(
                                 &self.config,
                                 &shell_key,
                                 &path,
-                            );
-
-                            let (raw_pattern, affected_paths) = match match_result {
-                                Some((pat, paths)) => (Some(pat), paths),
-                                None => (None, vec![path.clone()]),
-                            };
+                            )
+                            .map(|(pat, _paths)| pat);
 
                             if let Some(files_config) = self.config.files.get_mut(&shell_key) {
                                 // Remove the matching pattern from config
@@ -744,23 +744,16 @@ impl TuiApp {
                                 if let Err(e) = self.config.save() {
                                     self.message = Some(format!("Config save error: {}", e));
                                 } else {
-                                    // Remove ALL affected files from profile
+                                    // Rebuild the profile from the updated config. This keeps
+                                    // `profile.files` and `profile.tree` in sync (a manual
+                                    // retain would leave stale indices in the tree and panic
+                                    // in build_visible_list).
                                     let before = self.profile.files.len();
-                                    self.profile
-                                        .files
-                                        .retain(|f| !affected_paths.contains(&f.path));
-                                    let removed_count = before - self.profile.files.len();
-
-                                    // Recalculate file_index for remaining entries
-                                    for (new_fi, file) in self.profile.files.iter_mut().enumerate()
-                                    {
-                                        for entry in &mut file.entries {
-                                            entry.file_index = new_fi;
-                                        }
-                                    }
-
                                     self.selection.clear();
-                                    self.rebuild_list();
+                                    self.reload_profile()?;
+                                    let removed_count =
+                                        before.saturating_sub(self.profile.files.len());
+
                                     if removed_count > 1 {
                                         self.message = Some(format!(
                                             "Removed {} files from config",
@@ -1341,6 +1334,10 @@ impl TuiApp {
         file.expanded = true;
         file.writable = crate::utils::path::check_writable(&path);
         self.profile.files.push(file);
+        // Register the new file in the tree so it shows up in the visible list.
+        self.profile
+            .tree
+            .push(crate::model::profile::TreeNode::File(fi));
 
         self.rebuild_list();
         self.message = Some("File added to config".into());
