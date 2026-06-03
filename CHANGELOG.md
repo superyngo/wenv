@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.18.0] - 2026-06-03
+
 ### Changed
 - The `a` (add file path) action now opens a centered popup input window instead of an inline bottom bar.
 
