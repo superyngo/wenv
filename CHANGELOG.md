@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.18.2] - 2026-06-04
+
 ### Changed
 - The `a` (add path) action now accepts every format the config file supports — plain files, `~`, `$VAR`/`%VAR%` variables, glob patterns (`*`/`?`), and directories — instead of single concrete files only. Globs and directories load as a file group; a single non-existent file still offers the create prompt. The add flow now reuses the same pattern-resolution path as the initial config load (`append_resolved_pattern`), so both behave identically.
 
