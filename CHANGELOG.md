@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.18.1] - 2026-06-04
+
+### Fixed
+- Functions containing a `${#arr}` parameter-length expansion (or `$#`) no longer fail to parse. The `#` inside `${#...}` was misread as a comment start by the brace/paren counters, so the closing brace went uncounted and the function body never closed ("Unclosed function definition"), swallowing all following entries. `#` is now only treated as a comment at a word boundary (start of line or after whitespace).
+
 ## [v0.18.0] - 2026-06-03
 
 ### Changed

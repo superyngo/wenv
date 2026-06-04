@@ -685,6 +685,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_function_with_dollar_hash_length_expansion() {
+        // Regression: `${#arr}` (parameter-length) contains a '#' that is NOT a
+        // comment. The brace counter must still count its closing '}', otherwise
+        // the function body never closes ("Unclosed function definition").
+        let parser = BashParser::new();
+        let content = "edit() {\n    if (( ${#matches} )); then\n        echo hi\n    fi\n}";
+        let result = parser.parse(content);
+
+        let funcs: Vec<_> = result
+            .entries
+            .iter()
+            .filter(|e| e.entry_type == EntryType::Function)
+            .collect();
+
+        assert!(
+            result.warnings.is_empty(),
+            "unexpected warnings: {:?}",
+            result.warnings
+        );
+        assert_eq!(
+            funcs.len(),
+            1,
+            "expected exactly one function, got {:?}",
+            result.entries
+        );
+        assert_eq!(funcs[0].name, "edit");
+        assert_eq!(funcs[0].line_number, Some(1));
+        assert_eq!(funcs[0].end_line, Some(5));
+    }
+
+    #[test]
     fn test_parse_alias_single_quote() {
         let parser = BashParser::new();
         let content = "alias ll='ls -la'";

@@ -89,16 +89,21 @@ pub fn count_braces_outside_quotes(line: &str) -> (usize, usize) {
     let mut in_double_quote = false;
     let mut open_count = 0;
     let mut close_count = 0;
+    // A '#' only starts a comment at a word boundary (start of line or after
+    // whitespace). A '#' attached to a preceding token — e.g. `${#arr}` (length)
+    // or `$#` (arg count) — is parameter expansion, not a comment.
+    let mut prev_is_boundary = true;
 
     for c in line.chars() {
         match c {
-            '#' if !in_single_quote && !in_double_quote => break,
+            '#' if !in_single_quote && !in_double_quote && prev_is_boundary => break,
             '\'' if !in_double_quote => in_single_quote = !in_single_quote,
             '"' if !in_single_quote => in_double_quote = !in_double_quote,
             '{' if !in_single_quote && !in_double_quote => open_count += 1,
             '}' if !in_single_quote && !in_double_quote => close_count += 1,
             _ => {}
         }
+        prev_is_boundary = c.is_whitespace();
     }
 
     (open_count, close_count)
@@ -129,16 +134,20 @@ pub fn count_parens_outside_quotes(line: &str) -> (usize, usize) {
     let mut in_double_quote = false;
     let mut open_count = 0;
     let mut close_count = 0;
+    // See count_braces_outside_quotes: '#' is only a comment at a word boundary,
+    // not when attached to a preceding token (e.g. `${#arr}`, `$#`).
+    let mut prev_is_boundary = true;
 
     for c in line.chars() {
         match c {
-            '#' if !in_single_quote && !in_double_quote => break,
+            '#' if !in_single_quote && !in_double_quote && prev_is_boundary => break,
             '\'' if !in_double_quote => in_single_quote = !in_single_quote,
             '"' if !in_single_quote => in_double_quote = !in_double_quote,
             '(' if !in_single_quote && !in_double_quote => open_count += 1,
             ')' if !in_single_quote && !in_double_quote => close_count += 1,
             _ => {}
         }
+        prev_is_boundary = c.is_whitespace();
     }
 
     (open_count, close_count)
