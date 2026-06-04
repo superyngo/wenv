@@ -63,21 +63,25 @@ wenv config
 | Key | Action |
 |-----|--------|
 | `j`/`k`, `↑`/`↓` | Navigate entries |
-| `Space` | Toggle selection |
+| `Enter`/`Space` | Toggle expand/collapse file |
+| `s` | Toggle selection |
 | `Shift+↑`/`↓` | Extend selection range |
-| `Enter` | Edit entry with $EDITOR |
-| `a` | Add new entry with $EDITOR |
-| `d` | Delete selected entries |
+| `e` | Edit entry with $EDITOR |
+| `n` | New entry — snippet template menu, then $EDITOR |
+| `d` | Delete entries / Remove file from config |
 | `x` | Cut selected entries |
-| `p` | Paste clipboard entries |
-| `m` | Enter move mode |
-| `Tab` | Toggle file expanded/collapsed |
-| `Shift+Tab` | Toggle all files |
-| `u` | Undo last operation |
-| `/` | Search/filter entries |
+| `c` | Copy selected entries |
+| `v` | Paste clipboard entries |
+| `m` | Enter move mode (entry or file) |
+| `r` | Toggle remark (comment/uncomment) |
+| `a` | Add path to config — plain file, `~`, `$VAR`/`%VAR%`, glob (`*`/`?`), or directory |
+| `0` | Collapse all files |
+| `9` | Expand all files |
+| `z` | Undo last operation |
+| `y` | Redo last operation |
+| `/` | Open filter input (fuzzy match) |
 | `Esc` | Clear selection/exit modes |
-| `r` | Refresh from disk |
-| `s` | Save all changes |
+| `w` | Save all changes |
 | `?` | Show help |
 | `q` | Quit (confirms if unsaved) |
 

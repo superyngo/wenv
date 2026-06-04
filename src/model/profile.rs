@@ -300,19 +300,74 @@ pub fn load_shell_profile(config: &Config, shell_type: ShellType) -> anyhow::Res
     let mut seen_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
     for rp in resolved {
-        match rp {
-            ResolvedPattern::File {
-                path,
-                exists,
-                display,
-                ..
-            } => {
-                if seen_paths.contains(&path) {
+        append_resolved_pattern(rp, parser.as_ref(), &mut files, &mut tree, &mut seen_paths)?;
+    }
+
+    Ok(ShellProfile {
+        shell_type,
+        files,
+        tree,
+    })
+}
+
+/// Append a single resolved pattern into the running `files`/`tree`/`seen`
+/// collections, returning the indices of the files newly appended.
+///
+/// Shared by the initial profile load (`load_shell_profile`) and the TUI
+/// add-file flow so both classify File vs Dir patterns identically. Newly
+/// created files default to `expanded = false`; callers may override.
+pub(crate) fn append_resolved_pattern(
+    rp: ResolvedPattern,
+    parser: &dyn crate::parser::Parser,
+    files: &mut Vec<ProfileFile>,
+    tree: &mut Vec<TreeNode>,
+    seen: &mut std::collections::HashSet<PathBuf>,
+) -> anyhow::Result<Vec<usize>> {
+    let mut new_indices: Vec<usize> = Vec::new();
+    match rp {
+        ResolvedPattern::File {
+            path,
+            exists,
+            display,
+            ..
+        } => {
+            if seen.contains(&path) {
+                return Ok(new_indices); // dedup
+            }
+            seen.insert(path.clone());
+            let fi = files.len();
+            let mut pf = ProfileFile::new(path.clone(), exists, display);
+            if exists {
+                let content = std::fs::read_to_string(&path)?;
+                let result = parser.parse(&content);
+                for mut entry in result.entries {
+                    entry.file_index = fi;
+                    pf.entries.push(entry);
+                }
+                pf.content = content;
+            }
+            pf.expanded = false;
+            files.push(pf);
+            tree.push(TreeNode::File(fi));
+            new_indices.push(fi);
+        }
+        ResolvedPattern::Dir {
+            original,
+            display,
+            files: dir_files,
+        } => {
+            let mut indices: Vec<usize> = Vec::new();
+            for (path, exists) in dir_files {
+                if seen.contains(&path) {
                     continue; // dedup
                 }
-                seen_paths.insert(path.clone());
+                seen.insert(path.clone());
                 let fi = files.len();
-                let mut pf = ProfileFile::new(path.clone(), exists, display);
+                let mut pf = ProfileFile::new(
+                    path.clone(),
+                    exists,
+                    derive_file_display_in_group(&path, &original),
+                );
                 if exists {
                     let content = std::fs::read_to_string(&path)?;
                     let result = parser.parse(&content);
@@ -324,51 +379,16 @@ pub fn load_shell_profile(config: &Config, shell_type: ShellType) -> anyhow::Res
                 }
                 pf.expanded = false;
                 files.push(pf);
-                tree.push(TreeNode::File(fi));
+                indices.push(fi);
             }
-            ResolvedPattern::Dir {
-                original,
-                display,
-                files: dir_files,
-            } => {
-                let mut indices: Vec<usize> = Vec::new();
-                for (path, exists) in dir_files {
-                    if seen_paths.contains(&path) {
-                        continue; // dedup
-                    }
-                    seen_paths.insert(path.clone());
-                    let fi = files.len();
-                    let mut pf = ProfileFile::new(
-                        path.clone(),
-                        exists,
-                        derive_file_display_in_group(&path, &original),
-                    );
-                    if exists {
-                        let content = std::fs::read_to_string(&path)?;
-                        let result = parser.parse(&content);
-                        for mut entry in result.entries {
-                            entry.file_index = fi;
-                            pf.entries.push(entry);
-                        }
-                        pf.content = content;
-                    }
-                    pf.expanded = false;
-                    files.push(pf);
-                    indices.push(fi);
-                }
-                tree.push(TreeNode::Dir(DirGroup {
-                    source_pattern: original,
-                    display_label: display,
-                    file_indices: indices,
-                    expanded: false,
-                }));
-            }
+            new_indices.extend(&indices);
+            tree.push(TreeNode::Dir(DirGroup {
+                source_pattern: original,
+                display_label: display,
+                file_indices: indices,
+                expanded: false,
+            }));
         }
     }
-
-    Ok(ShellProfile {
-        shell_type,
-        files,
-        tree,
-    })
+    Ok(new_indices)
 }

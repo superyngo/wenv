@@ -798,7 +798,7 @@ impl TuiApp {
                             }
                             match std::fs::File::create(&path) {
                                 Ok(_) => {
-                                    self.add_file_to_config_and_profile(raw_path, path)?;
+                                    self.add_pattern_to_config_and_profile(raw_path)?;
                                 }
                                 Err(e) => {
                                     self.message = Some(format!("Failed to create: {}", e));
@@ -820,24 +820,34 @@ impl TuiApp {
                                         return Ok(EditorRequest::None);
                                     }
 
-                                    let expanded = crate::config::path_resolver::expand_env_vars(
-                                        &crate::config::path_resolver::expand_tilde(&raw_path),
-                                    );
-                                    let path = std::path::PathBuf::from(&expanded);
-
-                                    if self.profile.files.iter().any(|f| f.path == path) {
-                                        self.message = Some("Path already in config".into());
+                                    // Reject re-adding the exact same pattern string.
+                                    if self
+                                        .config
+                                        .files
+                                        .get(&self.shell_key)
+                                        .is_some_and(|fc| fc.paths.iter().any(|p| p == &raw_path))
+                                    {
+                                        self.message = Some("Pattern already in config".into());
                                         self.mode = AppMode::Normal;
                                         return Ok(EditorRequest::None);
                                     }
 
-                                    if !path.exists() {
+                                    let expanded = crate::config::path_resolver::expand_env_vars(
+                                        &crate::config::path_resolver::expand_tilde(&raw_path),
+                                    );
+                                    let path = std::path::PathBuf::from(&expanded);
+                                    // Glob patterns and directories resolve to a set of
+                                    // files; only a single concrete missing file offers
+                                    // the "create?" prompt.
+                                    let is_glob = expanded.contains('*') || expanded.contains('?');
+
+                                    if !is_glob && !path.exists() {
                                         self.pending_create_path = Some((raw_path, path));
                                         self.mode = AppMode::ConfirmCreateFile;
                                         self.message =
                                             Some("File doesn't exist. Create? (y/n)".into());
                                     } else {
-                                        self.add_file_to_config_and_profile(raw_path, path)?;
+                                        self.add_pattern_to_config_and_profile(raw_path)?;
                                         self.mode = AppMode::Normal;
                                     }
                                 }
@@ -1291,56 +1301,61 @@ impl TuiApp {
         }
     }
 
-    fn add_file_to_config_and_profile(
-        &mut self,
-        raw_path: String,
-        path: std::path::PathBuf,
-    ) -> anyhow::Result<()> {
+    /// Append a config pattern (plain file, glob, directory, or var-bearing
+    /// form) and load the file(s) it resolves to. Mirrors `load_shell_profile`
+    /// so the `a` key supports every format the config file accepts.
+    fn add_pattern_to_config_and_profile(&mut self, raw_path: String) -> anyhow::Result<()> {
         let shell_key = self.shell_key.clone();
         let files_config = self
             .config
             .files
             .entry(shell_key)
             .or_insert_with(|| crate::model::FilesConfig { paths: vec![] });
-        files_config.paths.push(raw_path);
+        files_config.paths.push(raw_path.clone());
         self.config.save()?;
 
-        let fi = self.profile.files.len();
-        let exists = path.exists();
-        let content = if exists {
-            std::fs::read_to_string(&path).unwrap_or_default()
-        } else {
-            String::new()
-        };
+        // Dedup new files against everything already loaded.
+        let mut seen: std::collections::HashSet<std::path::PathBuf> =
+            self.profile.files.iter().map(|f| f.path.clone()).collect();
 
         let parser = crate::parser::get_parser(self.profile.shell_type);
-        let parsed = parser.parse(&content);
-        let entries: Vec<_> = parsed
-            .entries
-            .into_iter()
-            .map(|mut e| {
-                e.file_index = fi;
-                e
-            })
-            .collect();
+        let resolved = crate::config::path_resolver::resolve_patterns(&[raw_path]);
 
-        let mut file = crate::model::profile::ProfileFile::new(
-            path.clone(),
-            exists,
-            crate::config::path_resolver::tilde_collapse(&path.to_string_lossy()),
-        );
-        file.entries = entries;
-        file.content = content;
-        file.expanded = true;
-        file.writable = crate::utils::path::check_writable(&path);
-        self.profile.files.push(file);
-        // Register the new file in the tree so it shows up in the visible list.
-        self.profile
-            .tree
-            .push(crate::model::profile::TreeNode::File(fi));
+        let mut new_indices: Vec<usize> = Vec::new();
+        for rp in resolved {
+            new_indices.extend(crate::model::profile::append_resolved_pattern(
+                rp,
+                parser.as_ref(),
+                &mut self.profile.files,
+                &mut self.profile.tree,
+                &mut seen,
+            )?);
+        }
+
+        // Expand the freshly added node(s) and compute writability the same way
+        // the initial load does (missing files are treated as read-only).
+        if let Some(last) = self.profile.tree.last_mut() {
+            match last {
+                crate::model::profile::TreeNode::File(_) => {}
+                crate::model::profile::TreeNode::Dir(g) => g.expanded = true,
+            }
+        }
+        for &fi in &new_indices {
+            let file = &mut self.profile.files[fi];
+            file.expanded = true;
+            file.writable = if file.exists {
+                crate::utils::path::check_writable(&file.path)
+            } else {
+                false
+            };
+        }
 
         self.rebuild_list();
-        self.message = Some("File added to config".into());
+        self.message = Some(match new_indices.len() {
+            0 => "Pattern added (0 files matched)".into(),
+            1 => "File added to config".into(),
+            n => format!("Pattern added ({} files)", n),
+        });
         Ok(())
     }
 
@@ -1979,5 +1994,104 @@ impl TuiApp {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod add_pattern_tests {
+    use super::*;
+    use crate::model::profile::{load_shell_profile, TreeNode};
+    use crate::model::{Config, FilesConfig, ShellType};
+
+    fn app_for(td: &tempfile::TempDir, paths: Vec<String>) -> TuiApp {
+        let mut config = Config {
+            source_path: td.path().join("config.toml"),
+            ..Config::default()
+        };
+        config.files.insert("zsh".into(), FilesConfig { paths });
+        let profile = load_shell_profile(&config, ShellType::Zsh).unwrap();
+        TuiApp::new(
+            profile,
+            crate::i18n::messages(),
+            config,
+            "zsh".into(),
+            vec![],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn add_glob_pattern_creates_dir_group() {
+        let td = tempfile::tempdir().unwrap();
+        let sub = td.path().join("zshrc.d");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a.sh"), "alias a=1\n").unwrap();
+        std::fs::write(sub.join("b.sh"), "alias b=2\n").unwrap();
+
+        let mut app = app_for(&td, vec![]);
+        app.add_pattern_to_config_and_profile(format!("{}/*.sh", sub.display()))
+            .unwrap();
+
+        assert_eq!(app.profile.files.len(), 2);
+        match app.profile.tree.last().unwrap() {
+            TreeNode::Dir(g) => {
+                assert_eq!(g.file_indices.len(), 2);
+                assert!(g.expanded, "new group should be expanded");
+            }
+            TreeNode::File(_) => panic!("expected Dir group, got File node"),
+        }
+        // Pattern persisted to config on disk.
+        let saved = std::fs::read_to_string(td.path().join("config.toml")).unwrap();
+        assert!(saved.contains("*.sh"));
+    }
+
+    #[test]
+    fn add_directory_path_expands_to_files() {
+        let td = tempfile::tempdir().unwrap();
+        let sub = td.path().join("conf.d");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("x.sh"), "alias x=1\n").unwrap();
+
+        let mut app = app_for(&td, vec![]);
+        app.add_pattern_to_config_and_profile(sub.to_string_lossy().to_string())
+            .unwrap();
+
+        assert_eq!(app.profile.files.len(), 1);
+        assert!(matches!(app.profile.tree.last().unwrap(), TreeNode::Dir(_)));
+    }
+
+    #[test]
+    fn add_plain_file_creates_file_node() {
+        let td = tempfile::tempdir().unwrap();
+        let f = td.path().join("solo.sh");
+        std::fs::write(&f, "alias s=1\n").unwrap();
+
+        let mut app = app_for(&td, vec![]);
+        app.add_pattern_to_config_and_profile(f.to_string_lossy().to_string())
+            .unwrap();
+
+        assert_eq!(app.profile.files.len(), 1);
+        assert!(matches!(
+            app.profile.tree.last().unwrap(),
+            TreeNode::File(0)
+        ));
+        assert!(app.profile.files[0].expanded);
+    }
+
+    #[test]
+    fn add_env_var_pattern_resolves() {
+        let td = tempfile::tempdir().unwrap();
+        let f = td.path().join("v.sh");
+        std::fs::write(&f, "alias v=1\n").unwrap();
+        // SAFETY: single-threaded test; unique var name avoids cross-test races.
+        unsafe { std::env::set_var("WENV_TEST_DIR", td.path()) };
+
+        let mut app = app_for(&td, vec![]);
+        app.add_pattern_to_config_and_profile("$WENV_TEST_DIR/v.sh".into())
+            .unwrap();
+
+        assert_eq!(app.profile.files.len(), 1);
+        assert_eq!(app.profile.files[0].path, f);
+        unsafe { std::env::remove_var("WENV_TEST_DIR") };
     }
 }

@@ -171,7 +171,7 @@ template = "alias NAME='VALUE'"
 | `v` | Paste clipboard entries |
 | `m` | Enter move mode (entry or file) |
 | `r` | Toggle remark (comment/uncomment) |
-| `a` | Add file path to config |
+| `a` | Add path to config — accepts any config format: plain file, `~`, `$VAR`/`%VAR%`, glob (`*`/`?`), or a directory. Globs/dirs load as a group; a single missing file offers to create it |
 | `0` | Collapse all files |
 | `9` | Expand all files |
 | `z` | Undo last operation |
