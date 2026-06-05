@@ -19,6 +19,12 @@ A cross-platform Terminal User Interface (TUI) for managing multiple shell confi
 
 ## Installation
 
+### With Wenget
+
+```bash
+wenget install wenv
+```
+
 ### From Cargo
 
 ```bash
