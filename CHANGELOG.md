@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.19.2] - 2026-06-08
+
+### Added
+- PowerShell parser now recognises **typed scriptblock assignments** such as `$var = [SomeType] { ... }` and `$var = [Some.Type] { param($m) }`. Previously only plain `$var = {` was detected; the typed form was parsed as raw code.
+
+### Fixed
+- `test_try_parse_source` expectation corrected (`file_stem` returns `aliases`, not `.\\aliases`).
+- `test_normalize_absolute_path` marked `#[cfg(unix)]` so it no longer fails on Windows builds.
+
 ## [v0.19.1] - 2026-06-08
 
 ### Added
