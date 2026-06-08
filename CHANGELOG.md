@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.19.1] - 2026-06-08
+
+### Added
+- 2026-06-08 — `Home` and `End` keys now work in copy/cut placement mode (`c`/`x`), jumping the green target box to the top or bottom of the list. Previously both keys were no-ops while placing.
+
 ## [v0.19.0] - 2026-06-08
 
 ### Changed
