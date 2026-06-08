@@ -106,6 +106,51 @@ fn toggle_all_flips_dir_and_file() {
 }
 
 #[test]
+fn filtered_list_hides_nonmatching_entries_in_matched_file() {
+    // Regression: a file inside a group is "matched" because one entry matches,
+    // but the other entries in the same file must still be hidden by the filter.
+    use std::collections::HashSet;
+
+    let dir = tempdir().unwrap();
+    let sub = dir.path().join("zshrc.d");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(
+        sub.join("k.sh"),
+        "alias keep='echo'\nalias drop='echo'\nalias keepalso='echo'\n",
+    )
+    .unwrap();
+    let cfg = cfg_with("zsh", vec![format!("{}/*", sub.display())]);
+    let mut prof = load_shell_profile(&cfg, ShellType::Zsh).unwrap();
+
+    // Filter expands the group and the matched file.
+    if let TreeNode::Dir(g) = &mut prof.tree[0] {
+        g.expanded = true;
+    } else {
+        panic!("expected Dir");
+    }
+    prof.files[0].expanded = true;
+
+    // Simulate a "keep" query: entries 0 and 2 match, entry 1 does not.
+    let matched_files: HashSet<usize> = HashSet::from([0]);
+    let matched_entries: HashSet<(usize, usize)> = HashSet::from([(0, 0), (0, 2)]);
+
+    let visible = prof.build_visible_list_filtered(&matched_files, &matched_entries);
+
+    let entries: Vec<_> = visible
+        .iter()
+        .filter_map(|it| match it {
+            ListItem::Entry(fi, ei) => Some((*fi, *ei)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        entries,
+        vec![(0, 0), (0, 2)],
+        "non-matching entry (0,1) must be hidden"
+    );
+}
+
+#[test]
 fn binary_file_filtered_from_group() {
     let dir = tempdir().unwrap();
     let sub = dir.path().join("d");

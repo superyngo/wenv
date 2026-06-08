@@ -1258,6 +1258,7 @@ impl TuiApp {
         if let Some(ref search) = self.search {
             if !search.query.is_empty() {
                 let matched_files = search.matched_file_indices();
+                let matched_entries = search.matched_entry_indices();
                 // Expand files that have matches, collapse others
                 for (i, file) in self.profile.files.iter_mut().enumerate() {
                     file.expanded = matched_files.contains(&i);
@@ -1268,7 +1269,9 @@ impl TuiApp {
                         g.expanded = g.file_indices.iter().any(|fi| matched_files.contains(fi));
                     }
                 }
-                self.visible_items = self.profile.build_visible_list_filtered(&matched_files);
+                self.visible_items = self
+                    .profile
+                    .build_visible_list_filtered(&matched_files, &matched_entries);
                 return;
             }
         }

@@ -132,6 +132,14 @@ impl SearchState {
         self.matches.iter().map(|m| m.file_index).collect()
     }
 
+    /// Return set of (file_index, entry_index) pairs that matched
+    pub fn matched_entry_indices(&self) -> std::collections::HashSet<(usize, usize)> {
+        self.matches
+            .iter()
+            .map(|m| (m.file_index, m.entry_index))
+            .collect()
+    }
+
     /// Get matched character indices for a given (file_index, entry_index).
     /// Returns indices split into (name_indices, value_indices) relative to
     /// the entry's name and value strings respectively.

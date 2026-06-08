@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+- 2026-06-08 — The filter (`/`) now hides non-matching entries that live inside a matched file. Previously, once any entry in a file matched the query, every entry in that file was shown — so non-matching entries in the same file/group still appeared. `build_visible_list_filtered` now filters at the entry level using the matched `(file, entry)` set, not just at the file level.
+
 ## [v0.18.2] - 2026-06-04
 
 ### Changed
