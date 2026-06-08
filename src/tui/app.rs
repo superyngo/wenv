@@ -16,7 +16,7 @@ use crate::tui::keys::{self, Action};
 use crate::tui::list;
 use crate::tui::search::SearchState;
 use crate::tui::selection::SelectionState;
-use crate::tui::state::{AppMode, ClipboardState, FileMovingState, MoveState};
+use crate::tui::state::{AppMode, FileMovingState, MoveState};
 
 enum EditorRequest {
     None,
@@ -37,7 +37,6 @@ pub struct TuiApp {
     pub message: Option<String>,
     pub messages: &'static Messages,
     pub selection: SelectionState,
-    pub clipboard: ClipboardState,
     pub undo_stack: VecDeque<crate::tui::state::UndoSnapshot>,
     pub redo_stack: Vec<crate::tui::state::UndoSnapshot>,
     pub move_state: Option<MoveState>,
@@ -79,7 +78,6 @@ impl TuiApp {
             message: None,
             messages,
             selection: SelectionState::new(),
-            clipboard: ClipboardState::new(),
             undo_stack: VecDeque::new(),
             redo_stack: Vec::new(),
             move_state: None,
@@ -192,6 +190,7 @@ impl TuiApp {
                     }
                 } else if self.mode == AppMode::Moving {
                     self.move_cursor_up();
+                    self.sync_move_target_cursor();
                 } else {
                     self.selection.commit_range();
                     self.cursor = list::navigate_up(&self.visible_items, self.cursor);
@@ -208,6 +207,7 @@ impl TuiApp {
                     }
                 } else if self.mode == AppMode::Moving {
                     self.move_cursor_down();
+                    self.sync_move_target_cursor();
                 } else {
                     self.selection.commit_range();
                     self.cursor = list::navigate_down(&self.visible_items, self.cursor);
@@ -226,6 +226,7 @@ impl TuiApp {
                         ms.insertion_cursor = target;
                     }
                     self.snap_move_cursor_to_non_blocked();
+                    self.sync_move_target_cursor();
                 } else {
                     self.selection.commit_range();
                     self.cursor = self.cursor.saturating_sub(half);
@@ -244,6 +245,7 @@ impl TuiApp {
                         ms.insertion_cursor = (ms.insertion_cursor + half).min(max_idx);
                     }
                     self.snap_move_cursor_to_non_blocked();
+                    self.sync_move_target_cursor();
                 } else {
                     self.selection.commit_range();
                     self.cursor = (self.cursor + half).min(max_idx);
@@ -509,48 +511,16 @@ impl TuiApp {
                 }
             }
             Action::Cut => {
-                if !self.is_current_file_writable() {
-                    self.message = Some("File is read-only".into());
-                    return Ok(EditorRequest::None);
-                }
-                let targets = self.get_operation_targets();
-                if !targets.is_empty() {
-                    let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                    crate::tui::operations::push_undo(
-                        &mut self.undo_stack,
-                        &mut self.redo_stack,
-                        snapshot,
-                    );
-                    let cut = crate::tui::operations::cut_entries(
-                        &mut self.profile,
-                        &self.visible_items,
-                        &targets,
-                    );
-                    let count = cut.len();
-                    self.clipboard.entries = cut;
-                    self.selection.clear();
-                    self.rebuild_list();
-                    self.message = Some(format!("Cut {} entries", count));
-                }
+                // Cut = placement with source removal on drop. Sources stay visible
+                // (blue) until the drop; nothing is removed yet.
+                self.begin_placement(true);
             }
             Action::Copy => {
-                let targets = self.get_operation_targets();
-                if !targets.is_empty() {
-                    let copied: Vec<crate::model::Entry> = targets
-                        .iter()
-                        .filter_map(|&idx| match self.visible_items.get(idx) {
-                            Some(ListItem::Entry(fi, ei)) => {
-                                Some(self.profile.files[*fi].entries[*ei].clone())
-                            }
-                            _ => None,
-                        })
-                        .collect();
-                    let count = copied.len();
-                    self.clipboard.entries = copied;
-                    self.message = Some(format!("Copied {} entries", count));
-                }
+                // Copy = placement that keeps sources on drop.
+                self.begin_placement(false);
             }
             Action::StartMove => {
+                // `m` now reorders files only; entries use c/x placement.
                 // DirHeader: move not supported on groups
                 if matches!(
                     self.visible_items.get(self.cursor),
@@ -613,72 +583,8 @@ impl TuiApp {
                     return Ok(EditorRequest::None);
                 }
 
-                if !self.is_current_file_writable() {
-                    self.message = Some("File is read-only".into());
-                    return Ok(EditorRequest::None);
-                }
-                let targets = self.get_operation_targets();
-                if !targets.is_empty() {
-                    let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                    crate::tui::operations::push_undo(
-                        &mut self.undo_stack,
-                        &mut self.redo_stack,
-                        snapshot,
-                    );
-
-                    let has_selection = !self.selection.is_empty();
-
-                    // If from multi-selection, jump cursor to first selected row
-                    if has_selection {
-                        let first = self.selection.sorted_indices()[0];
-                        self.cursor = first;
-                        self.clamp_scroll_offset();
-                    }
-
-                    let source_items: Vec<(usize, usize)> = targets
-                        .iter()
-                        .filter_map(|&idx| match self.visible_items.get(idx) {
-                            Some(ListItem::Entry(fi, ei)) => Some((*fi, *ei)),
-                            _ => None,
-                        })
-                        .collect();
-
-                    if !source_items.is_empty() {
-                        self.move_state = Some(MoveState {
-                            source_items,
-                            insertion_cursor: self.cursor,
-                            from_selection: has_selection,
-                        });
-                        self.previous_mode = Some(self.mode.clone());
-                        self.mode = AppMode::Moving;
-                        self.message =
-                            Some("Move mode: ↑↓ to position, Enter to drop, Esc to cancel".into());
-                    }
-                }
-            }
-            Action::Paste => {
-                if !self.is_current_file_writable() {
-                    self.message = Some("File is read-only".into());
-                    return Ok(EditorRequest::None);
-                }
-                if !self.clipboard.is_empty() {
-                    let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                    crate::tui::operations::push_undo(
-                        &mut self.undo_stack,
-                        &mut self.redo_stack,
-                        snapshot,
-                    );
-                    crate::tui::operations::paste_entries(
-                        &mut self.profile,
-                        &self.visible_items,
-                        self.cursor,
-                        &self.clipboard.entries,
-                    );
-                    self.rebuild_list();
-                    self.message = Some(format!("Pasted {} entries", self.clipboard.entries.len()));
-                } else {
-                    self.message = Some("Clipboard empty".into());
-                }
+                // On an entry: `m` no longer moves entries — point at c/x.
+                self.message = Some("Use c to copy or x to move entries".into());
             }
             Action::Undo => {
                 if let Some(snapshot) = self.undo_stack.pop_back() {
@@ -733,7 +639,7 @@ impl TuiApp {
                         self.execute_file_move();
                     }
                     AppMode::Moving => {
-                        self.execute_move();
+                        self.execute_drop();
                     }
                     AppMode::ConfirmDelete => {
                         let targets = self.get_operation_targets();
@@ -927,11 +833,9 @@ impl TuiApp {
                         self.cancel_file_move();
                     }
                     AppMode::Moving => {
+                        // Placement made no mutations (snapshot is taken at drop), so
+                        // cancelling just exits the mode — nothing to restore.
                         let from_sel = self.move_state.as_ref().is_some_and(|ms| ms.from_selection);
-                        // Pop the pre-emptive undo snapshot and restore from it
-                        if let Some(snapshot) = self.undo_stack.pop_back() {
-                            crate::tui::operations::restore_snapshot(&mut self.profile, snapshot);
-                        }
                         self.move_state = None;
                         let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
                         let in_filter =
@@ -948,11 +852,10 @@ impl TuiApp {
                         }
                         if from_sel {
                             // First Esc: keep selection, user can Esc again to clear
-                            self.message =
-                                Some("Move cancelled (Esc again to clear selection)".into());
+                            self.message = Some("Cancelled (Esc again to clear selection)".into());
                         } else {
                             self.selection.clear();
-                            self.message = Some("Move cancelled".into());
+                            self.message = Some("Cancelled".into());
                         }
                     }
                     AppMode::ConfirmDelete => {
@@ -1437,8 +1340,14 @@ impl TuiApp {
         }
     }
 
-    fn execute_move(&mut self) {
+    /// Drop the placement (c/x): clone sources and insert at the target. For a cut
+    /// (`ms.cut`), also remove the sources, so the net effect is a move; for a copy,
+    /// the sources are left in place. Single drop → return to the resting mode.
+    fn execute_drop(&mut self) {
         if let Some(ms) = self.move_state.take() {
+            // Snapshot for undo (placement itself made no changes until now).
+            let snapshot = crate::tui::operations::take_snapshot(&self.profile);
+            crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
             // Determine target file and position from insertion_cursor
             let (target_fi, target_pos) = match self.visible_items.get(ms.insertion_cursor) {
                 Some(ListItem::Entry(fi, ei)) => (*fi, ei + 1), // Insert after this entry
@@ -1464,7 +1373,7 @@ impl TuiApp {
                 }
             };
 
-            // Collect the entries to move (clone them before removing)
+            // Clone the source entries (for copy they stay; for cut they're removed below).
             let mut entries_to_move: Vec<crate::model::Entry> = Vec::new();
             for &(fi, ei) in &ms.source_items {
                 if fi < self.profile.files.len() && ei < self.profile.files[fi].entries.len() {
@@ -1472,30 +1381,37 @@ impl TuiApp {
                 }
             }
 
-            // Remove source entries (reverse order to preserve indices)
-            // Group by file, sort entry indices descending
+            // Group sources by file (indices descending) for removal / accounting.
             let mut by_file: std::collections::HashMap<usize, Vec<usize>> =
                 std::collections::HashMap::new();
             for &(fi, ei) in &ms.source_items {
                 by_file.entry(fi).or_default().push(ei);
             }
             let source_files: Vec<usize> = by_file.keys().cloned().collect();
-            for (&fi, indices) in &mut by_file {
-                indices.sort();
-                indices.dedup();
-                for &ei in indices.iter().rev() {
-                    if ei < self.profile.files[fi].entries.len() {
-                        self.profile.files[fi].entries.remove(ei);
+
+            // Cut removes the sources (reverse order preserves indices); copy keeps them.
+            if ms.cut {
+                for (&fi, indices) in &mut by_file {
+                    indices.sort();
+                    indices.dedup();
+                    for &ei in indices.iter().rev() {
+                        if ei < self.profile.files[fi].entries.len() {
+                            self.profile.files[fi].entries.remove(ei);
+                        }
                     }
+                    self.profile.files[fi].dirty = true;
                 }
-                self.profile.files[fi].dirty = true;
             }
 
-            // Adjust target_pos if removals in the same file shifted indices
-            let removed_before_target = by_file
-                .get(&target_fi)
-                .map(|indices| indices.iter().filter(|&&ei| ei < target_pos).count())
-                .unwrap_or(0);
+            // Adjust target_pos only when a cut removed sources before it in the same file.
+            let removed_before_target = if ms.cut {
+                by_file
+                    .get(&target_fi)
+                    .map(|indices| indices.iter().filter(|&&ei| ei < target_pos).count())
+                    .unwrap_or(0)
+            } else {
+                0
+            };
             let adjusted_pos = (target_pos - removed_before_target)
                 .min(self.profile.files[target_fi].entries.len());
 
@@ -1535,8 +1451,57 @@ impl TuiApp {
                 .insertion_cursor
                 .min(self.visible_items.len().saturating_sub(1));
             self.clamp_scroll_offset();
-            self.message = Some("Moved".into());
+            self.message = Some(if ms.cut { "Moved" } else { "Copied" }.into());
         }
+    }
+
+    /// Begin a copy/cut placement: record the selected/cursor entries as sources
+    /// (rendered blue), snap the target to a writable position, and enter Moving
+    /// mode. Nothing is mutated until the drop (`execute_drop`).
+    fn begin_placement(&mut self, cut: bool) {
+        // Cut removes from the source file, so it must be writable. Copy doesn't.
+        if cut && !self.is_current_file_writable() {
+            self.message = Some("File is read-only".into());
+            return;
+        }
+        let targets = self.get_operation_targets();
+        let source_items: Vec<(usize, usize)> = targets
+            .iter()
+            .filter_map(|&idx| match self.visible_items.get(idx) {
+                Some(ListItem::Entry(fi, ei)) => Some((*fi, *ei)),
+                _ => None,
+            })
+            .collect();
+        if source_items.is_empty() {
+            self.message = Some("Select an entry to copy/move".into());
+            return;
+        }
+        let has_selection = !self.selection.is_empty();
+        // Start the target at the cursor, snapped to a writable (non-blocked) row.
+        let mut target = self.cursor;
+        if Self::is_position_blocked(&self.visible_items, &self.profile.files, target) {
+            let max_idx = self.visible_items.len().saturating_sub(1);
+            while target < max_idx
+                && Self::is_position_blocked(&self.visible_items, &self.profile.files, target)
+            {
+                target += 1;
+            }
+        }
+        self.cursor = target;
+        self.clamp_scroll_offset();
+        self.move_state = Some(MoveState {
+            source_items,
+            insertion_cursor: target,
+            from_selection: has_selection,
+            cut,
+        });
+        self.previous_mode = Some(self.mode.clone());
+        self.mode = AppMode::Moving;
+        self.message = Some(if cut {
+            "Move: ↑↓ position · v/Enter drop · Esc cancel".into()
+        } else {
+            "Copy: ↑↓ position · v/Enter drop · Esc cancel".into()
+        });
     }
 
     /// Execute file move: reorder file in config and profile
@@ -1729,9 +1694,8 @@ impl TuiApp {
         let new_path_set: HashSet<std::path::PathBuf> =
             new_profile.files.iter().map(|f| f.path.clone()).collect();
         if old_path_set != new_path_set {
-            self.clipboard.entries.clear();
             self.undo_stack.clear();
-            self.message = Some("Clipboard and undo cleared (file set changed)".into());
+            self.message = Some("Undo cleared (file set changed)".into());
         }
 
         self.profile = new_profile;
@@ -1754,6 +1718,15 @@ impl TuiApp {
             None => return true,
         };
         fi < files.len() && (!files[fi].exists || !files[fi].writable)
+    }
+
+    /// Keep `self.cursor` on the placement target so the list scrolls to follow the
+    /// green box as it moves.
+    fn sync_move_target_cursor(&mut self) {
+        if let Some(ic) = self.move_state.as_ref().map(|ms| ms.insertion_cursor) {
+            self.cursor = ic;
+            self.clamp_scroll_offset();
+        }
     }
 
     /// Move cursor up in Moving mode, skipping blocked files
@@ -2431,5 +2404,138 @@ mod inline_edit_tests {
         assert_eq!(clamp_inline_scroll(5, 2, 10, 5), 2);
         // No blank gap past the end after the buffer shrinks.
         assert_eq!(clamp_inline_scroll(8, 3, 3, 5), 0);
+    }
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::*;
+    use crate::model::profile::load_shell_profile;
+    use crate::model::{Config, FilesConfig, ShellType};
+    use crate::tui::keys::{map_key, Action};
+    use crate::tui::state::AppMode;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    /// App over one zsh file with three entries, expanded, cursor on the first entry.
+    fn app3() -> (tempfile::TempDir, TuiApp) {
+        let td = tempfile::tempdir().unwrap();
+        let f = td.path().join("a.zsh");
+        std::fs::write(&f, "alias a='1'\nalias b='2'\nexport C=3\n").unwrap();
+        let mut config = Config {
+            source_path: td.path().join("config.toml"),
+            ..Config::default()
+        };
+        config.files.insert(
+            "zsh".into(),
+            FilesConfig {
+                paths: vec![f.to_string_lossy().to_string()],
+            },
+        );
+        let profile = load_shell_profile(&config, ShellType::Zsh).unwrap();
+        let mut app = TuiApp::new(
+            profile,
+            crate::i18n::messages(),
+            config,
+            "zsh".into(),
+            vec![],
+        )
+        .unwrap();
+        app.profile.files[0].expanded = true;
+        app.rebuild_list();
+        app.cursor = app
+            .visible_items
+            .iter()
+            .position(|it| matches!(it, ListItem::Entry(_, _)))
+            .unwrap();
+        (td, app)
+    }
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn copy_enters_placement_then_drops_clone_keeping_source() {
+        let (_td, mut app) = app3();
+        // cursor on entry 0 (alias a)
+        app.handle_action(Action::Copy).unwrap();
+        assert_eq!(app.mode, AppMode::Moving);
+        let ms = app.move_state.as_ref().unwrap();
+        assert!(!ms.cut);
+        assert_eq!(ms.source_items, vec![(0, 0)]);
+        // Drop after the last entry (visible index 3 = export C).
+        app.move_state.as_mut().unwrap().insertion_cursor = 3;
+        app.handle_action(Action::Confirm).unwrap();
+        assert_ne!(app.mode, AppMode::Moving);
+        // Source kept + clone appended → 4 entries; clone equals source value.
+        assert_eq!(app.profile.files[0].entries.len(), 4);
+        assert_eq!(app.profile.files[0].entries[0].value, "alias a='1'");
+        assert_eq!(app.profile.files[0].entries[3].value, "alias a='1'");
+        assert!(app.profile.files[0].dirty);
+    }
+
+    #[test]
+    fn cut_drops_and_removes_source() {
+        let (_td, mut app) = app3();
+        app.handle_action(Action::Cut).unwrap();
+        assert_eq!(app.mode, AppMode::Moving);
+        assert!(app.move_state.as_ref().unwrap().cut);
+        // Source still present during placement (not removed yet).
+        assert_eq!(app.profile.files[0].entries.len(), 3);
+        // Drop after the last entry.
+        app.move_state.as_mut().unwrap().insertion_cursor = 3;
+        app.handle_action(Action::Confirm).unwrap();
+        // Net move: a removed from front, reinserted at end → [b, C, a].
+        let vals: Vec<_> = app.profile.files[0]
+            .entries
+            .iter()
+            .map(|e| e.value.as_str())
+            .collect();
+        assert_eq!(vals, vec!["alias b='2'", "export C=3", "alias a='1'"]);
+    }
+
+    #[test]
+    fn cancel_placement_makes_no_change() {
+        let (_td, mut app) = app3();
+        app.handle_action(Action::Copy).unwrap();
+        app.handle_action(Action::Cancel).unwrap();
+        assert_ne!(app.mode, AppMode::Moving);
+        assert!(app.move_state.is_none());
+        assert_eq!(app.profile.files[0].entries.len(), 3);
+        assert!(!app.profile.files[0].dirty);
+    }
+
+    #[test]
+    fn m_on_entry_does_not_enter_moving() {
+        let (_td, mut app) = app3();
+        app.handle_action(Action::StartMove).unwrap();
+        assert_ne!(app.mode, AppMode::Moving);
+        assert!(app.move_state.is_none());
+    }
+
+    #[test]
+    fn keymap_swaps_and_placement_keys() {
+        // a = insert entry (Add), n = new file path (AddFile)
+        assert!(matches!(map_key(&AppMode::Normal, key('a')), Action::Add));
+        assert!(matches!(
+            map_key(&AppMode::Normal, key('n')),
+            Action::AddFile
+        ));
+        // c/x placement; v is no longer paste in normal mode.
+        assert!(matches!(map_key(&AppMode::Normal, key('c')), Action::Copy));
+        assert!(matches!(map_key(&AppMode::Normal, key('x')), Action::Cut));
+        assert!(matches!(map_key(&AppMode::Normal, key('v')), Action::Noop));
+        // In Moving mode, v and Enter both confirm the drop.
+        assert!(matches!(
+            map_key(&AppMode::Moving, key('v')),
+            Action::Confirm
+        ));
+        assert!(matches!(
+            map_key(
+                &AppMode::Moving,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+            ),
+            Action::Confirm
+        ));
     }
 }

@@ -74,14 +74,13 @@ wenv config
 | `Shift+↑`/`↓` | Extend selection range |
 | `e` | Edit entry — single-line entries edit inline; multi-line entries open $EDITOR |
 | `E` | Edit entry in $EDITOR (force external) |
-| `n` | New entry — snippet template menu, then $EDITOR |
+| `a` | Insert entry — snippet template menu, then $EDITOR |
+| `n` | New file path — add to config (plain file, `~`, `$VAR`/`%VAR%`, glob (`*`/`?`), or directory) |
 | `d` | Delete entries / Remove file from config |
-| `x` | Cut selected entries |
-| `c` | Copy selected entries |
-| `v` | Paste clipboard entries |
-| `m` | Enter move mode (entry or file) |
+| `c` | Copy — place sources (blue), navigate green target, `v`/`Enter` drops a clone |
+| `x` | Cut — place sources (blue), `v`/`Enter` drops and removes them (move) |
+| `m` | Move file (reorder) — on a file header; entries move via `x` |
 | `r` | Toggle remark (comment/uncomment) |
-| `a` | Add path to config — plain file, `~`, `$VAR`/`%VAR%`, glob (`*`/`?`), or directory |
 | `0` | Collapse all files |
 | `9` | Expand all files |
 | `z` | Undo last operation |
@@ -112,12 +111,14 @@ Supports:
 
 ## Multi-File Operations
 
-### Cross-File Cut/Paste
+### Cross-File Copy / Cut (placement)
 
-1. Select entries with `Space` 
-2. Cut with `x`
-3. Navigate to target file/position
-4. Paste with `p`
+1. Select entries with `s` (or just point the cursor at one)
+2. Press `c` (copy) or `x` (cut) — the sources are marked **blue** and you enter placement mode
+3. Navigate to the target file/position — the drop point shows as a **green** box
+4. Press `v` or `Enter` to drop (`Esc` to cancel)
+   - **copy** leaves the sources in place
+   - **cut** removes the sources (net move)
 
 Entries are automatically updated with the correct file_index.
 

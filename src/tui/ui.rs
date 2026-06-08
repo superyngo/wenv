@@ -322,6 +322,11 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                         .file_move_state
                         .as_ref()
                         .is_some_and(|fms| fms.insertion_cursor == i));
+            // During copy/cut placement, the source entries are marked blue.
+            let is_move_source = app.mode == AppMode::Moving
+                && matches!(item, ProfileListItem::Entry(fi, ei)
+                    if app.move_state.as_ref().is_some_and(|ms|
+                        ms.source_items.contains(&(*fi, *ei))));
 
             match item {
                 ProfileListItem::FileHeader(fi) => {
@@ -501,6 +506,13 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                         }
                     };
 
+                    // Source rows blue; target row green (green wins if they coincide).
+                    if is_move_source {
+                        style = style
+                            .bg(Color::Blue)
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD);
+                    }
                     if is_move_target {
                         style = style.bg(Color::Green).fg(Color::Black);
                     }
@@ -545,6 +557,16 @@ fn draw_status(f: &mut Frame, area: Rect, app: &TuiApp) {
         let len = e.buffer.chars().count();
         let pos = inline_position_hint(e.cursor, e.scroll, len, width);
         format!(" editing — Enter:save  Esc:cancel  ←/→/Home/End:move  Bksp/Del:erase  {pos}")
+    } else if app.mode == AppMode::Moving {
+        // Persistent placement hint (the per-keypress message gets cleared on nav).
+        let verb = if app.move_state.as_ref().is_some_and(|ms| ms.cut) {
+            "Move"
+        } else {
+            "Copy"
+        };
+        format!(" {verb}: ↑↓ position · v/Enter drop · Esc cancel")
+    } else if app.mode == AppMode::MovingFile {
+        " Move file: ↑↓ position · Enter drop · Esc cancel".to_string()
     } else if let Some(ref msg) = app.message {
         msg.clone()
     } else {
@@ -762,16 +784,15 @@ fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
         )),
         Line::from("  e           Edit (single-line entry inline; else $EDITOR)"),
         Line::from("  E           Edit entry in $EDITOR (force external)"),
-        Line::from("  n           New entry via $EDITOR"),
+        Line::from("  a           Insert entry (snippet menu, then $EDITOR)"),
+        Line::from("  n           New file path (add to config)"),
         Line::from("  d           Delete entry / Remove file"),
-        Line::from("  x           Cut selected entries"),
-        Line::from("  c           Copy selected entries"),
-        Line::from("  v           Paste entries"),
-        Line::from("  m           Move entry/file (drag to reposition)"),
+        Line::from("  c           Copy: place (blue source → green target), v/Enter drop"),
+        Line::from("  x           Cut: place then move on drop (v/Enter)"),
+        Line::from("  m           Move file (reorder, on a file header)"),
         Line::from("  z           Undo (multi-step)"),
         Line::from("  y           Redo"),
         Line::from("  r           Toggle remark"),
-        Line::from("  a           Add file path"),
         Line::from(""),
         Line::from(Span::styled(
             "Other",

@@ -166,14 +166,13 @@ template = "alias NAME='VALUE'"
 | `Shift+↑`/`↓` | Extend selection range |
 | `e` | Edit entry — single-line entries edit **inline** (in-place); multi-line (merged/combined) entries open `$EDITOR`. File headers open `$EDITOR` |
 | `E` | Edit entry in `$EDITOR` (force external, any entry) |
-| `n` | New entry — shows snippet template menu, then $EDITOR |
+| `a` | Insert entry — shows snippet template menu, then $EDITOR |
+| `n` | New file path — add to config (any config format: plain file, `~`, `$VAR`/`%VAR%`, glob (`*`/`?`), or a directory. Globs/dirs load as a group; a single missing file offers to create it) |
 | `d` | Delete entries / Remove file from config |
-| `x` | Cut selected entries |
-| `c` | Copy selected entries |
-| `v` | Paste clipboard entries |
-| `m` | Enter move mode (entry or file) |
+| `c` | Copy — enter placement: sources marked blue, navigate the green target box, `v`/`Enter` drops a clone (sources kept), `Esc` cancels |
+| `x` | Cut — enter placement: sources stay visible (blue) until drop; `v`/`Enter` drops and removes the sources (net move), `Esc` cancels |
+| `m` | Move file (reorder) — only on a file header; entry moving is done via `x` |
 | `r` | Toggle remark (comment/uncomment) |
-| `a` | Add path to config — accepts any config format: plain file, `~`, `$VAR`/`%VAR%`, glob (`*`/`?`), or a directory. Globs/dirs load as a group; a single missing file offers to create it |
 | `0` | Collapse all files |
 | `9` | Expand all files |
 | `z` | Undo last operation |
@@ -202,7 +201,7 @@ The TUI launches external editors for entry creation and editing:
 ### Multi-File Operations
 
 Cross-file operations supported:
-- **Cut/Paste**: Move entries between files
+- **Copy/Cut placement** (`c`/`x`): a shared placement flow (`AppMode::Moving` + `MoveState`). Sources are marked blue and stay in place until the drop; `↑↓` steers a green target box; `v`/`Enter` drops via `execute_drop`. Copy inserts clones (sources kept); cut also removes the sources (net move between files). No persistent clipboard — placement is self-contained and single-drop. `m` reorders files only.
 - **Undo**: Restores all files to previous state
 - **Search**: Filters entries across all expanded files
 - **Save**: Writes all dirty files atomically

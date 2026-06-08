@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+- 2026-06-08 — Reworked copy/cut into a shared move-style **placement** flow and remapped keys. `c` (copy) and `x` (cut) now mark the source entries **blue** and enter a placement mode where `↑↓` steers a **green** target box; `v` or `Enter` drops, `Esc` cancels. Copy inserts clones (sources kept); cut drops then removes the sources (net move). Sources stay visible until the drop — only the post-drop behavior differs. The standalone clipboard/`v`-paste-anywhere flow is removed (paste happens inside placement); the entry-level `m` move mode is removed (`m` now reorders **files** only). Key swap: **`a`** = insert entry (snippet menu + $EDITOR, was `n`), **`n`** = new file path (add to config, was `a`). The list now scrolls to follow the green target.
+
 ### Added
 - 2026-06-08 — Inline editor for single-line entries. Pressing `e` on an entry whose raw value occupies a single line now edits it **in-place** (block cursor, `←/→/Home/End` + `Backspace/Del`, horizontal overflow scrolling, and a status-bar position hint showing the caret column and overflow window `col {caret}/{len}  ⟨start–end⟩`) instead of launching `$EDITOR`. Multi-line entries (merged comments / combined values) still open `$EDITOR`. New `E` key forces the external editor for any entry. Commit re-parses through the same path as the external editor, so name/type are re-derived and behavior is identical apart from being inline. Editor mechanics ported from the sibling `confy` project.
 
