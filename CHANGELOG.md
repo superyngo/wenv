@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Unreleased
 
 ### Changed
+- 2026-06-08 — While in copy/cut placement, pressing `c` or `x` now switches the pending operation between copy and move without leaving the mode (the status bar shows `Copy:`/`Move:`). Switching to move is rejected when a source file is read-only.
 - 2026-06-08 — Reworked copy/cut into a shared move-style **placement** flow and remapped keys. `c` (copy) and `x` (cut) now mark the source entries **blue** and enter a placement mode where `↑↓` steers a **green** target box; `v` or `Enter` drops, `Esc` cancels. Copy inserts clones (sources kept); cut drops then removes the sources (net move). Sources stay visible until the drop — only the post-drop behavior differs. The standalone clipboard/`v`-paste-anywhere flow is removed (paste happens inside placement); the entry-level `m` move mode is removed (`m` now reorders **files** only). Key swap: **`a`** = insert entry (snippet menu + $EDITOR, was `n`), **`n`** = new file path (add to config, was `a`). The list now scrolls to follow the green target.
 
 ### Added

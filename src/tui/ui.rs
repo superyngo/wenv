@@ -564,7 +564,7 @@ fn draw_status(f: &mut Frame, area: Rect, app: &TuiApp) {
         } else {
             "Copy"
         };
-        format!(" {verb}: ↑↓ position · v/Enter drop · Esc cancel")
+        format!(" {verb}: ↑↓ position · v/Enter drop · c/x copy/move · Esc cancel")
     } else if app.mode == AppMode::MovingFile {
         " Move file: ↑↓ position · Enter drop · Esc cancel".to_string()
     } else if let Some(ref msg) = app.message {
@@ -789,6 +789,7 @@ fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
         Line::from("  d           Delete entry / Remove file"),
         Line::from("  c           Copy: place (blue source → green target), v/Enter drop"),
         Line::from("  x           Cut: place then move on drop (v/Enter)"),
+        Line::from("              (while placing: c/x switch copy↔move)"),
         Line::from("  m           Move file (reorder, on a file header)"),
         Line::from("  z           Undo (multi-step)"),
         Line::from("  y           Redo"),

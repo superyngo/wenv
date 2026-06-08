@@ -62,7 +62,7 @@ pub enum Action {
 pub fn map_key(mode: &AppMode, key: KeyEvent) -> Action {
     match mode {
         AppMode::Normal => map_normal_key(key),
-        AppMode::Moving => map_moving_key(key),
+        AppMode::Moving => map_placing_key(key),
         AppMode::MovingFile => map_moving_key(key),
         AppMode::FilterInput => map_filter_input_key(key),
         AppMode::FilterActive => map_filter_active_key(key),
@@ -129,6 +129,16 @@ fn map_moving_key(key: KeyEvent) -> Action {
         KeyCode::Enter | KeyCode::Char('v') => Action::Confirm,
         KeyCode::Esc => Action::Cancel,
         _ => Action::Noop,
+    }
+}
+
+/// Entry copy/cut placement: like `map_moving_key`, but `c`/`x` switch the
+/// pending operation between copy and cut without leaving placement.
+fn map_placing_key(key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Char('c') => Action::Copy,
+        KeyCode::Char('x') => Action::Cut,
+        _ => map_moving_key(key),
     }
 }
 

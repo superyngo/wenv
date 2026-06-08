@@ -511,13 +511,23 @@ impl TuiApp {
                 }
             }
             Action::Cut => {
-                // Cut = placement with source removal on drop. Sources stay visible
-                // (blue) until the drop; nothing is removed yet.
-                self.begin_placement(true);
+                if self.mode == AppMode::Moving {
+                    // Already placing: switch to cut (requires writable sources).
+                    self.set_placement_cut(true);
+                } else {
+                    // Cut = placement with source removal on drop. Sources stay
+                    // visible (blue) until the drop; nothing is removed yet.
+                    self.begin_placement(true);
+                }
             }
             Action::Copy => {
-                // Copy = placement that keeps sources on drop.
-                self.begin_placement(false);
+                if self.mode == AppMode::Moving {
+                    // Already placing: switch to copy.
+                    self.set_placement_cut(false);
+                } else {
+                    // Copy = placement that keeps sources on drop.
+                    self.begin_placement(false);
+                }
             }
             Action::StartMove => {
                 // `m` now reorders files only; entries use c/x placement.
@@ -1502,6 +1512,24 @@ impl TuiApp {
         } else {
             "Copy: ↑↓ position · v/Enter drop · Esc cancel".into()
         });
+    }
+
+    /// Switch the active placement between copy (`cut=false`) and cut (`cut=true`)
+    /// without leaving Moving mode. Switching to cut requires all source files to be
+    /// writable; otherwise the placement stays copy. The status bar reflects the mode.
+    fn set_placement_cut(&mut self, cut: bool) {
+        let blocked = cut
+            && self.move_state.as_ref().is_some_and(|ms| {
+                ms.source_items
+                    .iter()
+                    .any(|&(fi, _)| !self.profile.files[fi].writable)
+            });
+        if blocked {
+            return; // keep copy; the unchanged "Copy:" hint signals it can't cut
+        }
+        if let Some(ms) = self.move_state.as_mut() {
+            ms.cut = cut;
+        }
     }
 
     /// Execute file move: reorder file in config and profile
@@ -2503,6 +2531,40 @@ mod placement_tests {
         assert!(app.move_state.is_none());
         assert_eq!(app.profile.files[0].entries.len(), 3);
         assert!(!app.profile.files[0].dirty);
+    }
+
+    #[test]
+    fn c_x_toggle_placement_mode_while_placing() {
+        let (_td, mut app) = app3();
+        app.handle_action(Action::Copy).unwrap();
+        assert!(!app.move_state.as_ref().unwrap().cut, "starts as copy");
+        // x switches to cut (move) without leaving placement.
+        app.handle_action(Action::Cut).unwrap();
+        assert_eq!(app.mode, AppMode::Moving);
+        assert!(app.move_state.as_ref().unwrap().cut);
+        // c switches back to copy.
+        app.handle_action(Action::Copy).unwrap();
+        assert_eq!(app.mode, AppMode::Moving);
+        assert!(!app.move_state.as_ref().unwrap().cut);
+    }
+
+    #[test]
+    fn toggle_to_cut_blocked_when_source_read_only() {
+        let (_td, mut app) = app3();
+        app.handle_action(Action::Copy).unwrap(); // copy allows read-only sources
+        app.profile.files[0].writable = false;
+        app.handle_action(Action::Cut).unwrap(); // attempt switch to cut
+        assert!(
+            !app.move_state.as_ref().unwrap().cut,
+            "cut blocked: source is read-only, stays copy"
+        );
+    }
+
+    #[test]
+    fn placing_keymap_maps_c_and_x() {
+        use crate::tui::keys::map_key;
+        assert!(matches!(map_key(&AppMode::Moving, key('c')), Action::Copy));
+        assert!(matches!(map_key(&AppMode::Moving, key('x')), Action::Cut));
     }
 
     #[test]

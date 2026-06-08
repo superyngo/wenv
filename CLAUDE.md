@@ -169,8 +169,8 @@ template = "alias NAME='VALUE'"
 | `a` | Insert entry — shows snippet template menu, then $EDITOR |
 | `n` | New file path — add to config (any config format: plain file, `~`, `$VAR`/`%VAR%`, glob (`*`/`?`), or a directory. Globs/dirs load as a group; a single missing file offers to create it) |
 | `d` | Delete entries / Remove file from config |
-| `c` | Copy — enter placement: sources marked blue, navigate the green target box, `v`/`Enter` drops a clone (sources kept), `Esc` cancels |
-| `x` | Cut — enter placement: sources stay visible (blue) until drop; `v`/`Enter` drops and removes the sources (net move), `Esc` cancels |
+| `c` | Copy — enter placement: sources marked blue, navigate the green target box, `v`/`Enter` drops a clone (sources kept), `Esc` cancels. While placing, `c`/`x` switch copy↔move |
+| `x` | Cut — enter placement: sources stay visible (blue) until drop; `v`/`Enter` drops and removes the sources (net move), `Esc` cancels. While placing, `c`/`x` switch copy↔move |
 | `m` | Move file (reorder) — only on a file header; entry moving is done via `x` |
 | `r` | Toggle remark (comment/uncomment) |
 | `0` | Collapse all files |
@@ -201,7 +201,7 @@ The TUI launches external editors for entry creation and editing:
 ### Multi-File Operations
 
 Cross-file operations supported:
-- **Copy/Cut placement** (`c`/`x`): a shared placement flow (`AppMode::Moving` + `MoveState`). Sources are marked blue and stay in place until the drop; `↑↓` steers a green target box; `v`/`Enter` drops via `execute_drop`. Copy inserts clones (sources kept); cut also removes the sources (net move between files). No persistent clipboard — placement is self-contained and single-drop. `m` reorders files only.
+- **Copy/Cut placement** (`c`/`x`): a shared placement flow (`AppMode::Moving` + `MoveState`). Sources are marked blue and stay in place until the drop; `↑↓` steers a green target box; `v`/`Enter` drops via `execute_drop`. Copy inserts clones (sources kept); cut also removes the sources (net move between files). While placing, `c`/`x` toggle the `MoveState.cut` flag (`set_placement_cut`) to switch copy↔move without leaving the mode — the status bar shows `Copy:`/`Move:`; switching to cut is rejected if any source file is read-only. No persistent clipboard — placement is self-contained and single-drop. `m` reorders files only.
 - **Undo**: Restores all files to previous state
 - **Search**: Filters entries across all expanded files
 - **Save**: Writes all dirty files atomically

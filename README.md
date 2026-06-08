@@ -116,7 +116,8 @@ Supports:
 1. Select entries with `s` (or just point the cursor at one)
 2. Press `c` (copy) or `x` (cut) — the sources are marked **blue** and you enter placement mode
 3. Navigate to the target file/position — the drop point shows as a **green** box
-4. Press `v` or `Enter` to drop (`Esc` to cancel)
+4. While placing, press `c`/`x` to switch between copy and move (the status bar shows the current mode)
+5. Press `v` or `Enter` to drop (`Esc` to cancel)
    - **copy** leaves the sources in place
    - **cut** removes the sources (net move)
 
