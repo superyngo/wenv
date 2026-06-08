@@ -126,6 +126,8 @@ fn map_moving_key(key: KeyEvent) -> Action {
         KeyCode::Down | KeyCode::Char('j') => Action::NavigateDown,
         KeyCode::PageUp => Action::PageUp,
         KeyCode::PageDown => Action::PageDown,
+        KeyCode::Home => Action::Home,
+        KeyCode::End => Action::End,
         KeyCode::Enter | KeyCode::Char('v') => Action::Confirm,
         KeyCode::Esc => Action::Cancel,
         _ => Action::Noop,

@@ -253,14 +253,31 @@ impl TuiApp {
                 }
             }
             Action::Home => {
-                self.selection.commit_range();
-                self.cursor = list::navigate_home();
-                self.clamp_scroll_offset();
+                if self.mode == AppMode::Moving {
+                    if let Some(ref mut ms) = self.move_state {
+                        ms.insertion_cursor = 0;
+                    }
+                    self.snap_move_cursor_to_non_blocked();
+                    self.sync_move_target_cursor();
+                } else {
+                    self.selection.commit_range();
+                    self.cursor = list::navigate_home();
+                    self.clamp_scroll_offset();
+                }
             }
             Action::End => {
-                self.selection.commit_range();
-                self.cursor = list::navigate_end(&self.visible_items);
-                self.clamp_scroll_offset();
+                if self.mode == AppMode::Moving {
+                    let max_idx = self.visible_items.len().saturating_sub(1);
+                    if let Some(ref mut ms) = self.move_state {
+                        ms.insertion_cursor = max_idx;
+                    }
+                    self.snap_move_cursor_to_non_blocked();
+                    self.sync_move_target_cursor();
+                } else {
+                    self.selection.commit_range();
+                    self.cursor = list::navigate_end(&self.visible_items);
+                    self.clamp_scroll_offset();
+                }
             }
             Action::ToggleExpand => {
                 if let Some(item) = self.visible_items.get(self.cursor) {
