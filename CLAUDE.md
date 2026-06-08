@@ -61,7 +61,7 @@ Interactive terminal interface with these modules:
 - **`selection.rs`** - Multi-selection with visual indicators
 - **`state.rs`** - Application modes and clipboard/undo state
 - **`editor.rs`** - External $EDITOR integration
-- **Inline editor** (`AppMode::InlineEdit` + `InlineEditState` in `state.rs`) - In-place single-field editor for single-line entries. Edits the entry's whole raw `value` line; commit re-parses through the same path as the external editor (`apply_edited_value` → `replace_entry_with_parsed`), so name/type are re-derived. Block cursor, `←/→/Home/End` + `Backspace/Del`, horizontal overflow scrolling (`clamp_inline_scroll`) with an `⟨start–end/len⟩` position hint. Multi-line (`value.contains('\n')`) entries fall back to `$EDITOR`
+- **Inline editor** (`AppMode::InlineEdit` + `InlineEditState` in `state.rs`) - In-place single-field editor for single-line entries. Edits the entry's whole raw `value` line; commit re-parses through the same path as the external editor (`apply_edited_value` → `replace_entry_with_parsed`), so name/type are re-derived. Block cursor, `←/→/Home/End` + `Backspace/Del`, horizontal overflow scrolling (`clamp_inline_scroll`) with a status-bar position hint `col {caret}/{len}  ⟨start–end⟩` (caret column always; visible window only on overflow). Multi-line (`value.contains('\n')`) entries fall back to `$EDITOR`
 - **`search.rs`** - Fuzzy filter state and matching
 
 ### Trait-Based Parsing/Formatting

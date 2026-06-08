@@ -120,15 +120,18 @@ fn inline_field_spans(
     spans
 }
 
-/// Compact `⟨start–end/len⟩` (1-based visible char range over total) position hint
-/// for an overflowing inline edit. `None` when the whole buffer fits.
-fn inline_overflow_hint(scroll: usize, len: usize, width: usize) -> Option<String> {
+/// Position hint for the inline editor, shown in the status bar:
+/// `col {caret}/{len}` (1-based caret column over total chars) always, plus the
+/// 1-based visible char window `⟨start–end⟩` when the value overflows the column.
+fn inline_position_hint(cursor: usize, scroll: usize, len: usize, width: usize) -> String {
+    let col = cursor.min(len) + 1; // 1-based caret column (len+1 when at the end)
     if len < width {
-        return None;
+        format!("col {col}/{len}")
+    } else {
+        let start = scroll.min(len);
+        let end = (start + width.max(1)).min(len);
+        format!("col {col}/{len}  ⟨{}–{}⟩", start + 1, end)
     }
-    let start = scroll.min(len);
-    let end = (start + width.max(1)).min(len);
-    Some(format!("⟨{}–{}/{}⟩", start + 1, end, len))
 }
 
 /// Build spans for a string with highlighted character positions.
@@ -540,10 +543,8 @@ fn draw_status(f: &mut Frame, area: Rect, app: &TuiApp) {
     {
         let width = inline_value_width(area.width, app);
         let len = e.buffer.chars().count();
-        let hint = inline_overflow_hint(e.scroll, len, width)
-            .map(|h| format!("  {h}"))
-            .unwrap_or_default();
-        format!(" editing — Enter:save  Esc:cancel  ←/→/Home/End:move  Bksp/Del:erase{hint}")
+        let pos = inline_position_hint(e.cursor, e.scroll, len, width);
+        format!(" editing — Enter:save  Esc:cancel  ←/→/Home/End:move  Bksp/Del:erase  {pos}")
     } else if let Some(ref msg) = app.message {
         msg.clone()
     } else {
@@ -902,5 +903,15 @@ mod tests {
         let out = format_value_display(&long);
         assert!(out.ends_with("..."));
         assert_eq!(out.chars().count(), 100);
+    }
+
+    #[test]
+    fn position_hint_shows_caret_col_and_overflow_window() {
+        // Fits within the column: caret column over total, no window.
+        assert_eq!(inline_position_hint(3, 0, 10, 20), "col 4/10");
+        // Caret at the very end reads as len+1 over len.
+        assert_eq!(inline_position_hint(10, 0, 10, 20), "col 11/10");
+        // Overflow: caret column plus the 1-based visible char window.
+        assert_eq!(inline_position_hint(9, 5, 30, 10), "col 10/30  ⟨6–15⟩");
     }
 }
