@@ -64,6 +64,73 @@ fn format_value_display(value: &str) -> String {
     }
 }
 
+/// Column offset (in cells) from the start of an entry row to the VALUE column:
+/// prefix `"  "` (2) + NAME(20) + ` ` + TYPE(10) + ` ` + LINE(10) + ` ` = 45, plus
+/// 4 when the entry sits inside a group (the extra indent).
+fn value_col_start(indented: bool) -> usize {
+    45 + if indented { 4 } else { 0 }
+}
+
+/// True when file `fi` lives inside a Dir group (rendered with extra indent).
+fn entry_indented(app: &TuiApp, fi: usize) -> bool {
+    app.profile.tree.iter().any(
+        |n| matches!(n, crate::model::profile::TreeNode::Dir(g) if g.file_indices.contains(&fi)),
+    )
+}
+
+/// Width (in cells) of the VALUE column available to the inline editor for the
+/// entry currently being edited. Used by the event loop to clamp the viewport.
+pub fn inline_value_width(area_width: u16, app: &TuiApp) -> usize {
+    let indented = app
+        .inline_edit
+        .as_ref()
+        .is_some_and(|e| entry_indented(app, e.fi));
+    (area_width as usize).saturating_sub(value_col_start(indented))
+}
+
+/// Reverse-highlighted window of `buffer` starting at `scroll`, `width` columns
+/// wide, with the char at `cursor` block-highlighted (a trailing space when the
+/// cursor is past the end). No glyph is inserted, so characters never shift.
+/// (Ported from confy.)
+fn inline_field_spans(
+    buffer: &str,
+    cursor: usize,
+    scroll: usize,
+    width: usize,
+) -> Vec<Span<'static>> {
+    let chars: Vec<char> = buffer.chars().collect();
+    let len = chars.len();
+    let cur = cursor.min(len);
+    let w = width.max(1);
+    let start = scroll.min(len);
+    let end = (start + w).min(len);
+    let rev = Style::default().add_modifier(Modifier::REVERSED);
+    let mut spans: Vec<Span> = Vec::with_capacity(end - start + 1);
+    for (j, ch) in chars[start..end].iter().enumerate() {
+        let s = ch.to_string();
+        if start + j == cur {
+            spans.push(Span::styled(s, rev));
+        } else {
+            spans.push(Span::raw(s));
+        }
+    }
+    if cur == len && cur >= start && cur < start + w {
+        spans.push(Span::styled(" ", rev));
+    }
+    spans
+}
+
+/// Compact `⟨start–end/len⟩` (1-based visible char range over total) position hint
+/// for an overflowing inline edit. `None` when the whole buffer fits.
+fn inline_overflow_hint(scroll: usize, len: usize, width: usize) -> Option<String> {
+    if len < width {
+        return None;
+    }
+    let start = scroll.min(len);
+    let end = (start + width.max(1)).min(len);
+    Some(format!("⟨{}–{}/{}⟩", start + 1, end, len))
+}
+
 /// Build spans for a string with highlighted character positions.
 /// Characters at `highlight_indices` get `hl_style`, others get `normal_style`.
 fn build_highlighted_spans<'a>(
@@ -320,8 +387,33 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     // In filter mode, all visible entries are matches — apply keyword highlight.
                     let filter_active = app.search.as_ref().is_some_and(|s| !s.query.is_empty());
 
+                    // Inline editor: this row's VALUE column becomes a live buffer.
+                    let inline = if app.mode == AppMode::InlineEdit {
+                        app.inline_edit
+                            .as_ref()
+                            .filter(|e| e.fi == *fi && e.ei == *ei)
+                    } else {
+                        None
+                    };
+
                     // Build line with per-character highlighting when filter is active
-                    let line = if is_readonly {
+                    let line = if let Some(e) = inline {
+                        let width = (area.width as usize).saturating_sub(value_col_start(in_group));
+                        let mut spans = vec![
+                            Span::raw(prefix.to_string()),
+                            Span::styled(name_str, Style::default().fg(Color::White)),
+                            Span::raw(" "),
+                            Span::styled(
+                                type_str,
+                                Style::default().fg(tc).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::raw(" "),
+                            Span::styled(line_str, Style::default().fg(Color::Gray)),
+                            Span::raw(" "),
+                        ];
+                        spans.extend(inline_field_spans(&e.buffer, e.cursor, e.scroll, width));
+                        Line::from(spans)
+                    } else if is_readonly {
                         let grey = if is_cursor {
                             Style::default().fg(Color::Gray)
                         } else {
@@ -389,15 +481,21 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     };
 
                     // Row background: use normal cursor/selection styling in all modes.
-                    let mut style = match (is_cursor, is_selected) {
-                        (true, _) => Style::default()
-                            .bg(Color::Blue)
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                        (false, true) => Style::default()
-                            .bg(Color::DarkGray)
-                            .add_modifier(Modifier::BOLD),
-                        (false, false) => Style::default(),
+                    // While inline-editing this row, drop the cursor background so the
+                    // reverse-video block cursor in the VALUE column stays legible.
+                    let mut style = if inline.is_some() {
+                        Style::default()
+                    } else {
+                        match (is_cursor, is_selected) {
+                            (true, _) => Style::default()
+                                .bg(Color::Blue)
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                            (false, true) => Style::default()
+                                .bg(Color::DarkGray)
+                                .add_modifier(Modifier::BOLD),
+                            (false, false) => Style::default(),
+                        }
                     };
 
                     if is_move_target {
@@ -435,7 +533,18 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
 }
 
 fn draw_status(f: &mut Frame, area: Rect, app: &TuiApp) {
-    let status = if let Some(ref msg) = app.message {
+    let status = if let Some(e) = app
+        .inline_edit
+        .as_ref()
+        .filter(|_| app.mode == AppMode::InlineEdit)
+    {
+        let width = inline_value_width(area.width, app);
+        let len = e.buffer.chars().count();
+        let hint = inline_overflow_hint(e.scroll, len, width)
+            .map(|h| format!("  {h}"))
+            .unwrap_or_default();
+        format!(" editing — Enter:save  Esc:cancel  ←/→/Home/End:move  Bksp/Del:erase{hint}")
+    } else if let Some(ref msg) = app.message {
         msg.clone()
     } else {
         let total = app.profile.total_entries();
@@ -650,7 +759,8 @@ fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("  e           Edit (file or entry in $EDITOR)"),
+        Line::from("  e           Edit (single-line entry inline; else $EDITOR)"),
+        Line::from("  E           Edit entry in $EDITOR (force external)"),
         Line::from("  n           New entry via $EDITOR"),
         Line::from("  d           Delete entry / Remove file"),
         Line::from("  x           Cut selected entries"),

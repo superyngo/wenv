@@ -18,6 +18,20 @@ pub enum AppMode {
     ConfirmCreateFile,
     MovingFile,
     SelectingSnippet,
+    /// Editing a single-line entry's raw value in-place (no external editor).
+    InlineEdit,
+}
+
+/// In-flight inline editor state. `buffer` is the entry's full raw value line
+/// (separator format, never contains `\n`); `cursor` is the char index within it;
+/// `scroll` is the horizontal viewport offset (first visible char) kept in sync
+/// with the cursor so long values scroll within the VALUE column.
+pub struct InlineEditState {
+    pub fi: usize,
+    pub ei: usize,
+    pub buffer: String,
+    pub cursor: usize,
+    pub scroll: usize,
 }
 
 pub struct ClipboardState {

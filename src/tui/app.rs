@@ -56,6 +56,7 @@ pub struct TuiApp {
     pub snippet_cursor: usize,
     pub snippet_scroll_offset: usize,
     pub snippets: Vec<crate::model::Snippet>,
+    pub inline_edit: Option<crate::tui::state::InlineEditState>,
 }
 
 impl TuiApp {
@@ -97,6 +98,7 @@ impl TuiApp {
             expanded_snapshot: None,
             detail_scroll_offset: 0,
             detail_page_size: 10,
+            inline_edit: None,
         })
     }
 
@@ -123,6 +125,12 @@ impl TuiApp {
 
     fn event_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
         while !self.should_quit {
+            // Keep the inline editor's horizontal viewport in sync with the cursor
+            // at the current terminal width before drawing.
+            if self.mode == AppMode::InlineEdit {
+                let w = crate::tui::ui::inline_value_width(terminal.size()?.width, self);
+                self.inline_clamp_scroll(w);
+            }
             terminal.draw(|f| {
                 // Update list_visible_height before drawing (area height minus title, status, search bar, header+separator)
                 let total_height = f.size().height as usize;
@@ -334,6 +342,29 @@ impl TuiApp {
                         ListItem::FileHeader(fi) => return Ok(EditorRequest::EditFile(*fi)),
                         ListItem::DirHeader(_) => return Ok(EditorRequest::None),
                         ListItem::Entry(fi, ei) => {
+                            let (fi, ei) = (*fi, *ei);
+                            if !self.profile.files[fi].writable {
+                                self.message = Some("File is read-only".into());
+                                return Ok(EditorRequest::None);
+                            }
+                            // Single-line entries edit in-place; multi-line (merged
+                            // comments / combined) fall back to the external editor.
+                            if self.profile.files[fi].entries[ei].value.contains('\n') {
+                                return Ok(EditorRequest::EditEntry(fi, ei));
+                            }
+                            self.begin_inline_edit(fi, ei);
+                            return Ok(EditorRequest::None);
+                        }
+                    }
+                }
+            }
+            Action::EditExternal => {
+                // Force the external editor regardless of single/multi-line.
+                if let Some(item) = self.visible_items.get(self.cursor) {
+                    match item {
+                        ListItem::FileHeader(fi) => return Ok(EditorRequest::EditFile(*fi)),
+                        ListItem::DirHeader(_) => return Ok(EditorRequest::None),
+                        ListItem::Entry(fi, ei) => {
                             if !self.profile.files[*fi].writable {
                                 self.message = Some("File is read-only".into());
                                 return Ok(EditorRequest::None);
@@ -343,6 +374,13 @@ impl TuiApp {
                     }
                 }
             }
+            Action::InlineInput(c) => self.inline_input_char(c),
+            Action::InlineBackspace => self.inline_backspace(),
+            Action::InlineDelete => self.inline_delete(),
+            Action::InlineLeft => self.inline_cursor_left(),
+            Action::InlineRight => self.inline_cursor_right(),
+            Action::InlineHome => self.inline_cursor_home(),
+            Action::InlineEnd => self.inline_cursor_end(),
             Action::Add => {
                 if !self.is_current_file_writable() {
                     self.message = Some("File is read-only".into());
@@ -684,6 +722,9 @@ impl TuiApp {
             },
             Action::Confirm => {
                 match &self.mode {
+                    AppMode::InlineEdit => {
+                        self.inline_commit();
+                    }
                     AppMode::FilterInput => {
                         // Commit: enter browsing mode with the active filter
                         self.mode = AppMode::FilterActive;
@@ -958,6 +999,7 @@ impl TuiApp {
                             AppMode::Normal
                         };
                     }
+                    AppMode::InlineEdit => self.inline_cancel(),
                 }
             }
             Action::Quit => {
@@ -1873,48 +1915,7 @@ impl TuiApp {
                     .strip_suffix('\n')
                     .map(str::to_string)
                     .unwrap_or(new_content);
-                if new_content != value {
-                    let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                    crate::tui::operations::push_undo(
-                        &mut self.undo_stack,
-                        &mut self.redo_stack,
-                        snapshot,
-                    );
-                    let parser = crate::parser::get_parser(self.profile.shell_type);
-                    let parsed = parser.parse(&new_content);
-                    let new_entries: Vec<_> = parsed
-                        .entries
-                        .into_iter()
-                        .map(|mut e| {
-                            e.file_index = fi;
-                            e
-                        })
-                        .collect();
-
-                    if new_entries.is_empty() {
-                        // Empty edit = delete entry
-                        self.profile.files[fi].entries.remove(ei);
-                        self.profile.files[fi].dirty = true;
-                        self.profile.files[fi].recalculate_line_numbers();
-                        self.rebuild_list();
-                        self.message = Some("Entry deleted (empty content)".into());
-                    } else {
-                        let count = crate::tui::operations::replace_entry_with_parsed(
-                            &mut self.profile.files[fi],
-                            ei,
-                            new_entries,
-                            fi,
-                        );
-                        self.rebuild_list();
-                        self.message = Some(if count == 1 {
-                            "Entry updated".into()
-                        } else {
-                            format!("Entry replaced with {} entries", count)
-                        });
-                    }
-                } else {
-                    self.message = Some("No changes".into());
-                }
+                self.apply_edited_value(fi, ei, &value, &new_content);
             }
             Ok(None) => {
                 self.message = Some("No changes".into());
@@ -1924,6 +1925,183 @@ impl TuiApp {
             }
         }
         Ok(())
+    }
+
+    /// Apply an edited entry value (from the external editor or the inline editor):
+    /// push an undo snapshot, re-parse, and replace the entry. Empty content deletes
+    /// the entry. No-op (with a "No changes" message) when `new_content == old_value`.
+    fn apply_edited_value(&mut self, fi: usize, ei: usize, old_value: &str, new_content: &str) {
+        if new_content == old_value {
+            self.message = Some("No changes".into());
+            return;
+        }
+        let snapshot = crate::tui::operations::take_snapshot(&self.profile);
+        crate::tui::operations::push_undo(&mut self.undo_stack, &mut self.redo_stack, snapshot);
+        let parser = crate::parser::get_parser(self.profile.shell_type);
+        let parsed = parser.parse(new_content);
+        let new_entries: Vec<_> = parsed
+            .entries
+            .into_iter()
+            .map(|mut e| {
+                e.file_index = fi;
+                e
+            })
+            .collect();
+
+        if new_entries.is_empty() {
+            // Empty edit = delete entry
+            self.profile.files[fi].entries.remove(ei);
+            self.profile.files[fi].dirty = true;
+            self.profile.files[fi].recalculate_line_numbers();
+            self.rebuild_list();
+            self.message = Some("Entry deleted (empty content)".into());
+        } else {
+            let count = crate::tui::operations::replace_entry_with_parsed(
+                &mut self.profile.files[fi],
+                ei,
+                new_entries,
+                fi,
+            );
+            self.rebuild_list();
+            self.message = Some(if count == 1 {
+                "Entry updated".into()
+            } else {
+                format!("Entry replaced with {} entries", count)
+            });
+        }
+    }
+
+    // --- Inline editor (single-line entries) -------------------------------
+
+    /// Enter inline-edit mode for a single-line entry, seeding the buffer with its
+    /// raw value and placing the cursor at the end.
+    fn begin_inline_edit(&mut self, fi: usize, ei: usize) {
+        let buffer = self.profile.files[fi].entries[ei].value.clone();
+        let cursor = buffer.chars().count();
+        self.inline_edit = Some(crate::tui::state::InlineEditState {
+            fi,
+            ei,
+            buffer,
+            cursor,
+            scroll: 0,
+        });
+        self.mode = AppMode::InlineEdit;
+        self.message = None;
+    }
+
+    /// Keep the inline editor's horizontal viewport in sync with the cursor for a
+    /// `width`-wide VALUE column. Called from the event loop before each draw.
+    pub fn inline_clamp_scroll(&mut self, width: usize) {
+        if let Some(ref mut e) = self.inline_edit {
+            let len = e.buffer.chars().count();
+            e.scroll = clamp_inline_scroll(e.scroll, e.cursor.min(len), len, width);
+        }
+    }
+
+    fn inline_input_char(&mut self, c: char) {
+        if let Some(ref mut e) = self.inline_edit {
+            let byte = e
+                .buffer
+                .char_indices()
+                .nth(e.cursor)
+                .map(|(b, _)| b)
+                .unwrap_or(e.buffer.len());
+            e.buffer.insert(byte, c);
+            e.cursor += 1;
+            self.message = None;
+        }
+    }
+
+    fn inline_backspace(&mut self) {
+        if let Some(ref mut e) = self.inline_edit {
+            if e.cursor > 0 {
+                let prev = e
+                    .buffer
+                    .char_indices()
+                    .nth(e.cursor - 1)
+                    .map(|(b, _)| b)
+                    .unwrap_or(0);
+                e.buffer.remove(prev);
+                e.cursor -= 1;
+                self.message = None;
+            }
+        }
+    }
+
+    fn inline_delete(&mut self) {
+        if let Some(ref mut e) = self.inline_edit {
+            let len = e.buffer.chars().count();
+            if e.cursor < len {
+                let at = e
+                    .buffer
+                    .char_indices()
+                    .nth(e.cursor)
+                    .map(|(b, _)| b)
+                    .unwrap_or(e.buffer.len());
+                e.buffer.remove(at);
+                self.message = None;
+            }
+        }
+    }
+
+    fn inline_cursor_left(&mut self) {
+        if let Some(ref mut e) = self.inline_edit {
+            e.cursor = e.cursor.saturating_sub(1);
+        }
+    }
+
+    fn inline_cursor_right(&mut self) {
+        if let Some(ref mut e) = self.inline_edit {
+            let len = e.buffer.chars().count();
+            if e.cursor < len {
+                e.cursor += 1;
+            }
+        }
+    }
+
+    fn inline_cursor_home(&mut self) {
+        if let Some(ref mut e) = self.inline_edit {
+            e.cursor = 0;
+        }
+    }
+
+    fn inline_cursor_end(&mut self) {
+        if let Some(ref mut e) = self.inline_edit {
+            e.cursor = e.buffer.chars().count();
+        }
+    }
+
+    fn inline_cancel(&mut self) {
+        self.inline_edit = None;
+        self.mode = if self.is_filtering() {
+            AppMode::FilterActive
+        } else {
+            AppMode::Normal
+        };
+        self.message = None;
+    }
+
+    /// Commit the inline edit: re-parse and replace via the shared apply path, then
+    /// return to the resting mode. Refreshes the filter when one is active.
+    fn inline_commit(&mut self) {
+        let Some(e) = self.inline_edit.take() else {
+            return;
+        };
+        let old_value = self.profile.files[e.fi].entries[e.ei].value.clone();
+        self.apply_edited_value(e.fi, e.ei, &old_value, &e.buffer);
+        self.mode = if self.is_filtering() {
+            AppMode::FilterActive
+        } else {
+            AppMode::Normal
+        };
+        if self.is_filtering() {
+            self.update_filter();
+        }
+    }
+
+    /// True when a filter query is active.
+    fn is_filtering(&self) -> bool {
+        self.search.as_ref().is_some_and(|s| !s.query.is_empty())
     }
 
     /// Add a new entry: open empty (or template) temp file in $EDITOR, parse result, insert
@@ -1998,6 +2176,21 @@ impl TuiApp {
         }
         Ok(())
     }
+}
+
+/// Slide a `width`-wide horizontal viewport so the cursor stays visible, scrolling
+/// by the minimum needed. The virtual length includes the trailing cursor slot, so
+/// no blank gap is left past the end after the buffer shrinks. (Ported from confy.)
+fn clamp_inline_scroll(scroll: usize, cursor: usize, len: usize, width: usize) -> usize {
+    let w = width.max(1);
+    let cur = cursor.min(len);
+    let mut s = scroll;
+    if cur < s {
+        s = cur;
+    } else if cur >= s + w {
+        s = cur + 1 - w;
+    }
+    s.min((len + 1).saturating_sub(w))
 }
 
 #[cfg(test)]
@@ -2096,5 +2289,147 @@ mod add_pattern_tests {
         assert_eq!(app.profile.files.len(), 1);
         assert_eq!(app.profile.files[0].path, f);
         unsafe { std::env::remove_var("WENV_TEST_DIR") };
+    }
+}
+
+#[cfg(test)]
+mod inline_edit_tests {
+    use super::*;
+    use crate::model::profile::load_shell_profile;
+    use crate::model::{Config, FilesConfig, ShellType};
+    use crate::tui::keys::Action;
+    use crate::tui::state::AppMode;
+
+    /// Build an app over one zsh file with `content`, file expanded, cursor on the
+    /// first entry.
+    fn app_with(content: &str) -> (tempfile::TempDir, TuiApp) {
+        let td = tempfile::tempdir().unwrap();
+        let f = td.path().join("a.zsh");
+        std::fs::write(&f, content).unwrap();
+        let mut config = Config {
+            source_path: td.path().join("config.toml"),
+            ..Config::default()
+        };
+        config.files.insert(
+            "zsh".into(),
+            FilesConfig {
+                paths: vec![f.to_string_lossy().to_string()],
+            },
+        );
+        let profile = load_shell_profile(&config, ShellType::Zsh).unwrap();
+        let mut app = TuiApp::new(
+            profile,
+            crate::i18n::messages(),
+            config,
+            "zsh".into(),
+            vec![],
+        )
+        .unwrap();
+        app.profile.files[0].expanded = true;
+        app.rebuild_list();
+        // cursor 0 is the FileHeader; move to the first entry.
+        app.cursor = app
+            .visible_items
+            .iter()
+            .position(|it| matches!(it, ListItem::Entry(_, _)))
+            .unwrap();
+        (td, app)
+    }
+
+    #[test]
+    fn edit_single_line_enters_inline_mode() {
+        let (_td, mut app) = app_with("alias ll='ls -la'\n");
+        let req = app.handle_action(Action::Edit).unwrap();
+        assert!(matches!(req, EditorRequest::None));
+        assert_eq!(app.mode, AppMode::InlineEdit);
+        let e = app.inline_edit.as_ref().unwrap();
+        assert_eq!(e.buffer, "alias ll='ls -la'");
+        assert_eq!(e.cursor, e.buffer.chars().count(), "cursor seeded at end");
+    }
+
+    #[test]
+    fn edit_multiline_entry_routes_external() {
+        // A leading comment merges into the alias entry, making value multi-line.
+        let (_td, mut app) = app_with("# note\nalias ll='ls -la'\n");
+        let req = app.handle_action(Action::Edit).unwrap();
+        assert!(matches!(req, EditorRequest::EditEntry(0, 0)));
+        assert_ne!(app.mode, AppMode::InlineEdit);
+    }
+
+    #[test]
+    fn edit_external_forces_external_for_single_line() {
+        let (_td, mut app) = app_with("alias ll='ls -la'\n");
+        let req = app.handle_action(Action::EditExternal).unwrap();
+        assert!(matches!(req, EditorRequest::EditEntry(0, 0)));
+        assert_ne!(app.mode, AppMode::InlineEdit);
+    }
+
+    #[test]
+    fn buffer_edit_ops_are_utf8_safe() {
+        let (_td, mut app) = app_with("alias café='x'\n");
+        app.handle_action(Action::Edit).unwrap();
+        // Cursor at end; move home, then right past the multibyte 'é' region.
+        app.inline_cursor_home();
+        assert_eq!(app.inline_edit.as_ref().unwrap().cursor, 0);
+        for _ in 0..9 {
+            app.inline_cursor_right();
+        } // after "alias caf"
+        app.inline_input_char('X');
+        app.inline_cursor_end();
+        app.inline_backspace(); // remove trailing '
+        let buf = &app.inline_edit.as_ref().unwrap().buffer;
+        assert!(buf.starts_with("alias cafX"), "got {buf}");
+    }
+
+    #[test]
+    fn commit_reparses_and_updates_entry() {
+        let (_td, mut app) = app_with("alias ll='ls -la'\n");
+        app.handle_action(Action::Edit).unwrap();
+        // Replace the whole buffer with a new value.
+        app.inline_edit.as_mut().unwrap().buffer = "alias ll='ls -lah'".into();
+        app.inline_commit();
+        assert_ne!(app.mode, AppMode::InlineEdit);
+        assert_eq!(app.profile.files[0].entries[0].value, "alias ll='ls -lah'");
+        assert!(app.profile.files[0].dirty);
+    }
+
+    #[test]
+    fn empty_commit_clears_value_like_external_editor() {
+        // Parity with the external editor: re-parsing an empty buffer yields a
+        // single empty Code entry (the parser never returns zero entries), so the
+        // alias is replaced, not the row kept. File is marked dirty.
+        let (_td, mut app) = app_with("alias ll='ls -la'\n");
+        app.handle_action(Action::Edit).unwrap();
+        app.inline_edit.as_mut().unwrap().buffer = String::new();
+        app.inline_commit();
+        assert_eq!(app.profile.files[0].entries.len(), 1);
+        assert_eq!(app.profile.files[0].entries[0].value, "");
+        assert!(app.profile.files[0].dirty);
+    }
+
+    #[test]
+    fn cancel_discards_changes() {
+        let (_td, mut app) = app_with("alias ll='ls -la'\n");
+        app.handle_action(Action::Edit).unwrap();
+        app.inline_edit.as_mut().unwrap().buffer = "garbage".into();
+        app.inline_cancel();
+        assert_ne!(app.mode, AppMode::InlineEdit);
+        assert!(app.inline_edit.is_none());
+        assert_eq!(app.profile.files[0].entries[0].value, "alias ll='ls -la'");
+        assert!(
+            !app.profile.files[0].dirty,
+            "cancel must not dirty the file"
+        );
+    }
+
+    #[test]
+    fn clamp_scroll_keeps_cursor_in_viewport() {
+        // width 5: cursor at 0 -> scroll 0; cursor at 9 in len 10 -> scroll 5.
+        assert_eq!(clamp_inline_scroll(0, 0, 10, 5), 0);
+        assert_eq!(clamp_inline_scroll(0, 9, 10, 5), 5);
+        // Cursor scrolled left below the window pulls the viewport back.
+        assert_eq!(clamp_inline_scroll(5, 2, 10, 5), 2);
+        // No blank gap past the end after the buffer shrinks.
+        assert_eq!(clamp_inline_scroll(8, 3, 3, 5), 0);
     }
 }

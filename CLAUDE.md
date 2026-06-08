@@ -61,6 +61,7 @@ Interactive terminal interface with these modules:
 - **`selection.rs`** - Multi-selection with visual indicators
 - **`state.rs`** - Application modes and clipboard/undo state
 - **`editor.rs`** - External $EDITOR integration
+- **Inline editor** (`AppMode::InlineEdit` + `InlineEditState` in `state.rs`) - In-place single-field editor for single-line entries. Edits the entry's whole raw `value` line; commit re-parses through the same path as the external editor (`apply_edited_value` → `replace_entry_with_parsed`), so name/type are re-derived. Block cursor, `←/→/Home/End` + `Backspace/Del`, horizontal overflow scrolling (`clamp_inline_scroll`) with an `⟨start–end/len⟩` position hint. Multi-line (`value.contains('\n')`) entries fall back to `$EDITOR`
 - **`search.rs`** - Fuzzy filter state and matching
 
 ### Trait-Based Parsing/Formatting
@@ -163,7 +164,8 @@ template = "alias NAME='VALUE'"
 | `Enter`/`Space` | Toggle expand/collapse file |
 | `s` | Toggle selection |
 | `Shift+↑`/`↓` | Extend selection range |
-| `e` | Edit entry with $EDITOR |
+| `e` | Edit entry — single-line entries edit **inline** (in-place); multi-line (merged/combined) entries open `$EDITOR`. File headers open `$EDITOR` |
+| `E` | Edit entry in `$EDITOR` (force external, any entry) |
 | `n` | New entry — shows snippet template menu, then $EDITOR |
 | `d` | Delete entries / Remove file from config |
 | `x` | Cut selected entries |

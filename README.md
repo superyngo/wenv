@@ -72,7 +72,8 @@ wenv config
 | `Enter`/`Space` | Toggle expand/collapse file |
 | `s` | Toggle selection |
 | `Shift+↑`/`↓` | Extend selection range |
-| `e` | Edit entry with $EDITOR |
+| `e` | Edit entry — single-line entries edit inline; multi-line entries open $EDITOR |
+| `E` | Edit entry in $EDITOR (force external) |
 | `n` | New entry — snippet template menu, then $EDITOR |
 | `d` | Delete entries / Remove file from config |
 | `x` | Cut selected entries |

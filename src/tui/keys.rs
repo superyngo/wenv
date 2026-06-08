@@ -14,6 +14,14 @@ pub enum Action {
     CollapseAll,
     ExpandAll,
     Edit,
+    EditExternal,
+    InlineInput(char),
+    InlineBackspace,
+    InlineDelete,
+    InlineLeft,
+    InlineRight,
+    InlineHome,
+    InlineEnd,
     Add,
     Delete,
     ToggleSelect,
@@ -62,6 +70,7 @@ pub fn map_key(mode: &AppMode, key: KeyEvent) -> Action {
         AppMode::ShowingDetail => map_detail_key(key),
         AppMode::TextInput => map_text_input_key(key),
         AppMode::SelectingSnippet => map_snippet_key(key),
+        AppMode::InlineEdit => map_inline_edit_key(key),
         _ => map_popup_key(key),
     }
 }
@@ -92,6 +101,7 @@ fn map_normal_key(key: KeyEvent) -> Action {
         KeyCode::Char('0') => Action::CollapseAll,
         KeyCode::Char('9') => Action::ExpandAll,
         KeyCode::Char('e') => Action::Edit,
+        KeyCode::Char('E') => Action::EditExternal,
         KeyCode::Char('n') => Action::Add,
         KeyCode::Char('d') => Action::Delete,
         KeyCode::Char('s') => Action::ToggleSelect,
@@ -165,6 +175,21 @@ fn map_text_input_key(key: KeyEvent) -> Action {
         KeyCode::Left => Action::TextInputLeft,
         KeyCode::Right => Action::TextInputRight,
         KeyCode::Char(c) => Action::TextInputChar(c),
+        _ => Action::Noop,
+    }
+}
+
+fn map_inline_edit_key(key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => Action::Cancel,
+        KeyCode::Enter => Action::Confirm,
+        KeyCode::Backspace => Action::InlineBackspace,
+        KeyCode::Delete => Action::InlineDelete,
+        KeyCode::Left => Action::InlineLeft,
+        KeyCode::Right => Action::InlineRight,
+        KeyCode::Home => Action::InlineHome,
+        KeyCode::End => Action::InlineEnd,
+        KeyCode::Char(c) => Action::InlineInput(c),
         _ => Action::Noop,
     }
 }
