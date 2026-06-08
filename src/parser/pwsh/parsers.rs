@@ -289,7 +289,8 @@ mod tests {
         match try_parse_source(r#". .\aliases.ps1"#, 15) {
             ParseEvent::Complete(entry) => {
                 assert_eq!(entry.entry_type, EntryType::Source);
-                assert_eq!(entry.name, ".\\aliases");
+                // file_stem strips directory prefix and extension, leaving just the stem
+                assert_eq!(entry.name, "aliases");
             }
             _ => panic!("Expected Complete"),
         }
@@ -333,6 +334,17 @@ mod tests {
         assert_eq!(
             detect_scriptblock_start("$block = {"),
             Some("$block".into())
+        );
+    }
+
+    #[test]
+    fn test_detect_scriptblock_typed_assign() {
+        // Typed scriptblock: `$var = [Type] { param($m)` — open brace > close brace
+        assert_eq!(
+            detect_scriptblock_start(
+                "$script:__COREUTILS_ARG_EVAL__ = [System.Text.RegularExpressions.MatchEvaluator] { param($m)"
+            ),
+            Some("$script:__COREUTILS_ARG_EVAL__".into())
         );
     }
 

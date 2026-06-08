@@ -115,6 +115,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_normalize_absolute_path() {
         let path = normalize_path("/etc/passwd");
         assert_eq!(path, PathBuf::from("/etc/passwd"));

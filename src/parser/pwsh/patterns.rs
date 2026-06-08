@@ -106,9 +106,15 @@ lazy_static! {
         r#"(\w[\w-]*)\s*\{$"#
     ).unwrap();
 
-    /// Matches assignment to a scriptblock.
+    /// Matches assignment to a scriptblock, including typed scriptblocks.
+    ///
+    /// Examples:
+    /// - `$block = {`
+    /// - `$script:MyBlock = {`
+    /// - `$var = [SomeType] {`
+    /// - `$var = [Some.Type] { param($m)`
     pub static ref SCRIPTBLOCK_ASSIGN_RE: Regex = Regex::new(
-        r#"(\$\w[\w:]*)\s*=\s*\{$"#
+        r#"(\$\w[\w:]*)\s*=\s*(?:\[[^\]]+\]\s*)?\{"#
     ).unwrap();
 
     // =========================================================================
@@ -235,6 +241,21 @@ mod tests {
             .captures("$script:MyBlock = {")
             .unwrap();
         assert_eq!(&caps[1], "$script:MyBlock");
+    }
+
+    #[test]
+    fn test_scriptblock_assign_re_typed() {
+        // Typed scriptblock: `$var = [Type] {`
+        let caps = SCRIPTBLOCK_ASSIGN_RE
+            .captures("$script:__COREUTILS_ARG_EVAL__ = [System.Text.RegularExpressions.MatchEvaluator] {")
+            .unwrap();
+        assert_eq!(&caps[1], "$script:__COREUTILS_ARG_EVAL__");
+
+        // Typed scriptblock with content after `{`
+        let caps = SCRIPTBLOCK_ASSIGN_RE
+            .captures("$script:__COREUTILS_ARG_EVAL__ = [System.Text.RegularExpressions.MatchEvaluator] { param($m)")
+            .unwrap();
+        assert_eq!(&caps[1], "$script:__COREUTILS_ARG_EVAL__");
     }
 
     #[test]
