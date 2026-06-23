@@ -7,12 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.20.0] - 2026-06-23
+
 ### Added
 - 2026-06-23 — `Delete` key now works as an alias for `d` (delete entries / remove file / remove group) in normal and filter-active modes.
 - 2026-06-23 — Pressing `a` on a directory-group header now prompts for a new file name, creates the file in the group's directory, and opens it in `$EDITOR`. If the group is a glob, a name that won't match the pattern is still created but flagged (it won't rejoin the group on reload). File headers (grouped or not) keep the add-entry flow.
 
 ### Changed
 - 2026-06-23 — Pressing `d`/`Delete` on a file **inside a directory group** now moves the actual file to the system trash (with a `y/n` confirm) instead of attempting a config removal — a grouped file isn't its own config entry. Standalone file headers still remove the pattern from config (file untouched).
+
+### Fixed
+- 2026-06-23 — PowerShell source entries now derive their display name from both `/` and `\` path separators, so Windows-style paths like `.\aliases.ps1` resolve to `aliases` on any host (previously mis-stemmed to `.\aliases` on Unix).
 
 ## [v0.19.2] - 2026-06-08
 
