@@ -74,9 +74,9 @@ wenv config
 | `Shift+↑`/`↓` | Extend selection range |
 | `e` | Edit entry — single-line entries edit inline; multi-line entries open $EDITOR |
 | `E` | Edit entry in $EDITOR (force external) |
-| `a` | Insert entry — snippet template menu, then $EDITOR |
+| `a` | Insert entry — snippet template menu, then $EDITOR. On a **directory-group header**: prompt for a new file name → create the file in the group's directory → open it in $EDITOR |
 | `n` | New file path — add to config (plain file, `~`, `$VAR`/`%VAR%`, glob (`*`/`?`), or directory) |
-| `d` | Delete entries / Remove file from config |
+| `d` / `Delete` | Delete entries / Remove file from config / Remove group. On a file **inside a directory group**: move the real file to the system trash (confirmed) |
 | `c` | Copy — place sources (blue), navigate green target, `v`/`Enter` drops a clone |
 | `x` | Cut — place sources (blue), `v`/`Enter` drops and removes them (move) |
 | `m` | Move file (reorder) — on a file header; entries move via `x` |

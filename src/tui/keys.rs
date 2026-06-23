@@ -102,7 +102,7 @@ fn map_normal_key(key: KeyEvent) -> Action {
         KeyCode::Char('e') => Action::Edit,
         KeyCode::Char('E') => Action::EditExternal,
         KeyCode::Char('a') => Action::Add,
-        KeyCode::Char('d') => Action::Delete,
+        KeyCode::Char('d') | KeyCode::Delete => Action::Delete,
         KeyCode::Char('s') => Action::ToggleSelect,
         KeyCode::Char('x') => Action::Cut,
         KeyCode::Char('c') => Action::Copy,

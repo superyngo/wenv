@@ -166,9 +166,9 @@ template = "alias NAME='VALUE'"
 | `Shift+↑`/`↓` | Extend selection range |
 | `e` | Edit entry — single-line entries edit **inline** (in-place); multi-line (merged/combined) entries open `$EDITOR`. File headers open `$EDITOR` |
 | `E` | Edit entry in `$EDITOR` (force external, any entry) |
-| `a` | Insert entry — shows snippet template menu, then $EDITOR |
+| `a` | Insert entry — shows snippet template menu, then $EDITOR. On a **directory-group header** (`ListItem::DirHeader`): opens a filename prompt (`InputPurpose::NewFileInDir`) → creates the file in the group's base directory → returns `EditorRequest::EditFile` to open `$EDITOR`. File headers (grouped or not) keep the add-entry flow |
 | `n` | New file path — add to config (any config format: plain file, `~`, `$VAR`/`%VAR%`, glob (`*`/`?`), or a directory. Globs/dirs load as a group; a single missing file offers to create it) |
-| `d` | Delete entries / Remove file from config |
+| `d` / `Delete` | Delete entries / Remove file from config / Remove group. On a file header **inside a directory group**: moves the real file to the system trash (`trash` crate) via `AppMode::ConfirmDeleteFile`, then reloads. Standalone file headers remove the config pattern (file untouched) |
 | `c` | Copy — enter placement: sources marked blue, navigate the green target box, `v`/`Enter` drops a clone (sources kept), `Esc` cancels. While placing, `c`/`x` switch copy↔move |
 | `x` | Cut — enter placement: sources stay visible (blue) until drop; `v`/`Enter` drops and removes the sources (net move), `Esc` cancels. While placing, `c`/`x` switch copy↔move |
 | `m` | Move file (reorder) — only on a file header; entry moving is done via `x` |
