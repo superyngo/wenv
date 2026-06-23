@@ -136,12 +136,17 @@ pub fn try_parse_source(line: &str, line_num: usize) -> ParseEvent {
     if let Some(caps) = SOURCE_RE.captures(line) {
         let (path_clean, _inline_comment) = extract_comment(&caps[1], '#');
         let path = strip_quotes(&path_clean);
-        // Extract filename (without extension) as name for TUI identification
-        let name = std::path::Path::new(&path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(&path)
-            .to_string();
+        // Extract filename (without extension) as name for TUI identification.
+        // PowerShell paths may use `\` (Windows) or `/`; handle both separators
+        // regardless of host OS, since `Path::file_stem` only respects the host's.
+        let name = {
+            let filename = path.rsplit(['/', '\\']).next().unwrap_or(&path);
+            filename
+                .rsplit_once('.')
+                .map(|(stem, _)| stem)
+                .unwrap_or(filename)
+                .to_string()
+        };
         return ParseEvent::Complete(
             Entry::new(EntryType::Source, name, line.to_string()).with_line_number(line_num),
         );
