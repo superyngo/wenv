@@ -48,6 +48,7 @@ pub struct TuiApp {
     pub pending_remove_group_pattern: Option<String>,
     pub text_input: Option<crate::tui::state::TextInputState>,
     pub pending_create_path: Option<(String, std::path::PathBuf)>,
+    pub pending_delete_file_fi: Option<usize>,
     pub file_move_state: Option<FileMovingState>,
     pub expanded_snapshot: Option<crate::tui::state::ExpandedSnapshot>,
     pub detail_scroll_offset: u16,
@@ -92,6 +93,7 @@ impl TuiApp {
             pending_remove_group_pattern: None,
             text_input: None,
             pending_create_path: None,
+            pending_delete_file_fi: None,
             file_move_state: None,
             expanded_snapshot: None,
             detail_scroll_offset: 0,
@@ -401,6 +403,26 @@ impl TuiApp {
             Action::InlineHome => self.inline_cursor_home(),
             Action::InlineEnd => self.inline_cursor_end(),
             Action::Add => {
+                // On a directory group header, `a` creates a new file in the group's
+                // directory (prompt name → create → open $EDITOR) rather than adding
+                // an entry. File headers (grouped or not) keep the add-entry flow.
+                if let Some(ListItem::DirHeader(ti)) = self.visible_items.get(self.cursor) {
+                    if let Some(crate::model::profile::TreeNode::Dir(g)) =
+                        self.profile.tree.get(*ti)
+                    {
+                        let pattern = g.source_pattern.clone();
+                        let dir = self.group_base_dir(g);
+                        self.text_input = Some(crate::tui::state::TextInputState {
+                            prompt: format!("New file name in {}", dir.display()),
+                            value: String::new(),
+                            cursor_pos: 0,
+                            purpose: crate::tui::state::InputPurpose::NewFileInDir { dir, pattern },
+                        });
+                        self.mode = AppMode::TextInput;
+                        self.message = None;
+                    }
+                    return Ok(EditorRequest::None);
+                }
                 if !self.is_current_file_writable() {
                     self.message = Some("File is read-only".into());
                     return Ok(EditorRequest::None);
@@ -470,6 +492,22 @@ impl TuiApp {
                     }
                 } else if let Some(ListItem::FileHeader(fi)) = self.visible_items.get(self.cursor) {
                     let fi = *fi;
+                    // A file inside a directory group isn't its own config entry, so
+                    // "remove from config" doesn't apply — delete the real file instead
+                    // (moved to trash, recoverable). Standalone file headers keep the
+                    // config-removal behavior below.
+                    if self.group_index_of_file(fi).is_some() {
+                        let name = self.profile.files[fi]
+                            .path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| self.profile.files[fi].path.display().to_string());
+                        self.pending_delete_file_fi = Some(fi);
+                        self.previous_mode = Some(self.mode.clone());
+                        self.mode = AppMode::ConfirmDeleteFile;
+                        self.message = Some(format!("Move file '{}' to trash? (y/n)", name));
+                        return Ok(EditorRequest::None);
+                    }
                     let resolved_path = &self.profile.files[fi].path;
 
                     let (raw_pattern, affected_files) =
@@ -781,6 +819,24 @@ impl TuiApp {
                         }
                         self.mode = AppMode::Normal;
                     }
+                    AppMode::ConfirmDeleteFile => {
+                        if let Some(fi) = self.pending_delete_file_fi.take() {
+                            let path = self.profile.files[fi].path.clone();
+                            match trash::delete(&path) {
+                                Ok(()) => {
+                                    self.selection.clear();
+                                    self.reload_profile()?;
+                                    self.message =
+                                        Some(format!("Moved to trash: {}", path.display()));
+                                }
+                                Err(e) => {
+                                    self.message = Some(format!("Failed to move to trash: {}", e));
+                                }
+                            }
+                        }
+                        self.mode = AppMode::Normal;
+                        self.previous_mode = None;
+                    }
                     AppMode::ShowingDetail | AppMode::ShowingHelp => {
                         self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
                     }
@@ -824,6 +880,60 @@ impl TuiApp {
                                         self.add_pattern_to_config_and_profile(raw_path)?;
                                         self.mode = AppMode::Normal;
                                     }
+                                }
+                                crate::tui::state::InputPurpose::NewFileInDir { dir, pattern } => {
+                                    self.mode = AppMode::Normal;
+                                    let name = input.value.trim();
+                                    if name.is_empty() {
+                                        return Ok(EditorRequest::None);
+                                    }
+                                    let path = dir.join(name);
+                                    if path.exists() {
+                                        self.message = Some("File already exists".into());
+                                        return Ok(EditorRequest::None);
+                                    }
+                                    if let Some(parent) = path.parent() {
+                                        if let Err(e) = std::fs::create_dir_all(parent) {
+                                            self.message =
+                                                Some(format!("Failed to create directory: {}", e));
+                                            return Ok(EditorRequest::None);
+                                        }
+                                    }
+                                    if let Err(e) = std::fs::File::create(&path) {
+                                        self.message =
+                                            Some(format!("Failed to create file: {}", e));
+                                        return Ok(EditorRequest::None);
+                                    }
+                                    // Warn if the new name won't match the group's glob
+                                    // pattern (it will be created but won't rejoin the
+                                    // group on the next reload).
+                                    let warn_unmatched = {
+                                        let expanded =
+                                            crate::config::path_resolver::expand_env_vars(
+                                                &crate::config::path_resolver::expand_tilde(
+                                                    &pattern,
+                                                ),
+                                            );
+                                        (expanded.contains('*') || expanded.contains('?'))
+                                            && glob::Pattern::new(&expanded)
+                                                .map(|p| !p.matches_path(&path))
+                                                .unwrap_or(false)
+                                    };
+                                    self.selection.clear();
+                                    self.reload_profile()?;
+                                    let new_fi =
+                                        self.profile.files.iter().position(|f| f.path == path);
+                                    if let Some(fi) = new_fi {
+                                        self.profile.files[fi].expanded = true;
+                                        if warn_unmatched {
+                                            self.message = Some(
+                                                "Created (won't rejoin group on reload — name doesn't match pattern)"
+                                                    .into(),
+                                            );
+                                        }
+                                        return Ok(EditorRequest::EditFile(fi));
+                                    }
+                                    self.message = Some(format!("Created: {}", path.display()));
                                 }
                             }
                         }
@@ -911,10 +1021,12 @@ impl TuiApp {
                     }
                     AppMode::ConfirmRemoveFile
                     | AppMode::ConfirmRemoveGroup
-                    | AppMode::ConfirmCreateFile => {
+                    | AppMode::ConfirmCreateFile
+                    | AppMode::ConfirmDeleteFile => {
                         self.pending_remove_fi = None;
                         self.pending_remove_group_pattern = None;
                         self.pending_create_path = None;
+                        self.pending_delete_file_fi = None;
                         self.mode = AppMode::Normal;
                         self.message = Some("Cancelled".into());
                     }
@@ -1267,6 +1379,35 @@ impl TuiApp {
     }
 
     /// Get the file index for the current cursor position
+    /// Returns the tree index of the `Dir` group containing file `fi`, if any.
+    fn group_index_of_file(&self, fi: usize) -> Option<usize> {
+        self.profile.tree.iter().position(|n| {
+            matches!(n, crate::model::profile::TreeNode::Dir(g) if g.file_indices.contains(&fi))
+        })
+    }
+
+    /// Base directory a new file should be created in for a directory group.
+    /// Prefers an existing member's parent; falls back to resolving the group's
+    /// source pattern (directory as-is, or the parent of a glob pattern).
+    fn group_base_dir(&self, g: &crate::model::profile::DirGroup) -> std::path::PathBuf {
+        if let Some(&fi) = g.file_indices.first() {
+            if let Some(parent) = self.profile.files[fi].path.parent() {
+                return parent.to_path_buf();
+            }
+        }
+        let expanded = crate::config::path_resolver::expand_env_vars(
+            &crate::config::path_resolver::expand_tilde(&g.source_pattern),
+        );
+        let p = std::path::PathBuf::from(&expanded);
+        if p.is_dir() {
+            p
+        } else {
+            p.parent()
+                .map(|x| x.to_path_buf())
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+        }
+    }
+
     fn current_file_index(&self) -> usize {
         match self.visible_items.get(self.cursor) {
             Some(ListItem::FileHeader(fi)) => *fi,
@@ -2616,5 +2757,148 @@ mod placement_tests {
             ),
             Action::Confirm
         ));
+        // Delete key is an alias for `d` in normal mode.
+        assert!(matches!(
+            map_key(
+                &AppMode::Normal,
+                KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)
+            ),
+            Action::Delete
+        ));
+        assert!(matches!(
+            map_key(&AppMode::Normal, key('d')),
+            Action::Delete
+        ));
+    }
+
+    /// App over a directory group (`<dir>/*.sh`) with two bash files, group and
+    /// files expanded.
+    fn app_group() -> (tempfile::TempDir, TuiApp) {
+        let td = tempfile::tempdir().unwrap();
+        let dir = td.path().join("grp");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("one.sh"), "alias a='1'\n").unwrap();
+        std::fs::write(dir.join("two.sh"), "alias b='2'\n").unwrap();
+        let pattern = format!("{}/*.sh", dir.display());
+        let mut config = Config {
+            source_path: td.path().join("config.toml"),
+            ..Config::default()
+        };
+        config.files.insert(
+            "bash".into(),
+            FilesConfig {
+                paths: vec![pattern],
+            },
+        );
+        let profile = load_shell_profile(&config, ShellType::Bash).unwrap();
+        let mut app = TuiApp::new(
+            profile,
+            crate::i18n::messages(),
+            config,
+            "bash".into(),
+            vec![],
+        )
+        .unwrap();
+        for n in &mut app.profile.tree {
+            if let crate::model::profile::TreeNode::Dir(g) = n {
+                g.expanded = true;
+            }
+        }
+        for f in &mut app.profile.files {
+            f.expanded = true;
+        }
+        app.rebuild_list();
+        (td, app)
+    }
+
+    #[test]
+    fn delete_on_grouped_file_enters_trash_confirm() {
+        let (_td, mut app) = app_group();
+        app.cursor = app
+            .visible_items
+            .iter()
+            .position(|it| matches!(it, ListItem::FileHeader(_)))
+            .unwrap();
+        let fi = match app.visible_items[app.cursor] {
+            ListItem::FileHeader(fi) => fi,
+            _ => unreachable!(),
+        };
+        app.handle_action(Action::Delete).unwrap();
+        assert_eq!(app.mode, AppMode::ConfirmDeleteFile);
+        assert_eq!(app.pending_delete_file_fi, Some(fi));
+    }
+
+    #[test]
+    fn delete_on_standalone_file_uses_config_removal() {
+        // app3 is a single plain-file config (not a group): `d` removes from config.
+        let (_td, mut app) = app3();
+        app.cursor = app
+            .visible_items
+            .iter()
+            .position(|it| matches!(it, ListItem::FileHeader(_)))
+            .unwrap();
+        app.handle_action(Action::Delete).unwrap();
+        assert_eq!(app.mode, AppMode::ConfirmRemoveFile);
+        assert!(app.pending_delete_file_fi.is_none());
+    }
+
+    #[test]
+    fn add_on_dir_header_opens_new_file_prompt() {
+        let (_td, mut app) = app_group();
+        app.cursor = app
+            .visible_items
+            .iter()
+            .position(|it| matches!(it, ListItem::DirHeader(_)))
+            .unwrap();
+        app.handle_action(Action::Add).unwrap();
+        assert_eq!(app.mode, AppMode::TextInput);
+        match &app.text_input.as_ref().unwrap().purpose {
+            crate::tui::state::InputPurpose::NewFileInDir { dir, .. } => {
+                assert!(dir.ends_with("grp"));
+            }
+            _ => panic!("expected NewFileInDir purpose"),
+        }
+    }
+
+    #[test]
+    fn new_file_in_dir_creates_file_and_requests_edit() {
+        let (_td, mut app) = app_group();
+        app.cursor = app
+            .visible_items
+            .iter()
+            .position(|it| matches!(it, ListItem::DirHeader(_)))
+            .unwrap();
+        app.handle_action(Action::Add).unwrap();
+        for c in "three.sh".chars() {
+            app.handle_action(Action::TextInputChar(c)).unwrap();
+        }
+        let req = app.handle_action(Action::Confirm).unwrap();
+        let path = match req {
+            EditorRequest::EditFile(fi) => app.profile.files[fi].path.clone(),
+            _ => panic!("expected EditFile request"),
+        };
+        assert!(path.exists(), "new file should be created on disk");
+        assert!(path.ends_with("three.sh"));
+        // It matches the group's glob, so it rejoined the group on reload.
+        assert!(app.profile.files.iter().any(|f| f.path == path));
+    }
+
+    #[test]
+    fn new_file_in_dir_rejects_existing_name() {
+        let (_td, mut app) = app_group();
+        app.cursor = app
+            .visible_items
+            .iter()
+            .position(|it| matches!(it, ListItem::DirHeader(_)))
+            .unwrap();
+        app.handle_action(Action::Add).unwrap();
+        for c in "one.sh".chars() {
+            app.handle_action(Action::TextInputChar(c)).unwrap();
+        }
+        let before = app.profile.files.len();
+        let req = app.handle_action(Action::Confirm).unwrap();
+        assert!(matches!(req, EditorRequest::None));
+        assert_eq!(app.profile.files.len(), before);
+        assert_eq!(app.message.as_deref(), Some("File already exists"));
     }
 }

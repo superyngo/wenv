@@ -16,6 +16,8 @@ pub enum AppMode {
     ConfirmRemoveFile,
     ConfirmRemoveGroup,
     ConfirmCreateFile,
+    /// Confirm moving a real on-disk file (a group member) to the trash.
+    ConfirmDeleteFile,
     MovingFile,
     SelectingSnippet,
     /// Editing a single-line entry's raw value in-place (no external editor).
@@ -48,6 +50,13 @@ pub struct MoveState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputPurpose {
     AddFilePath,
+    /// Create a new file inside a directory group. `dir` is the base directory
+    /// the file is created in; `pattern` is the group's source pattern (used to
+    /// warn when the chosen name won't rejoin the group on reload).
+    NewFileInDir {
+        dir: std::path::PathBuf,
+        pattern: String,
+    },
 }
 
 pub struct TextInputState {

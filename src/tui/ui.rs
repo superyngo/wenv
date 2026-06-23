@@ -217,7 +217,8 @@ pub fn draw(f: &mut Frame, app: &mut TuiApp) {
         AppMode::ConfirmDelete
         | AppMode::ConfirmQuit
         | AppMode::ConfirmRemoveFile
-        | AppMode::ConfirmCreateFile => {
+        | AppMode::ConfirmCreateFile
+        | AppMode::ConfirmDeleteFile => {
             draw_confirm_popup(f, f.size(), app);
         }
         AppMode::ShowingDetail => {
@@ -605,7 +606,7 @@ fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     f.render_widget(Clear, popup_area);
 
     let title = match &app.mode {
-        AppMode::ConfirmDelete => " Confirm Delete ",
+        AppMode::ConfirmDelete | AppMode::ConfirmDeleteFile => " Confirm Delete ",
         AppMode::ConfirmQuit => " Unsaved Changes ",
         _ => " Confirm ",
     };
