@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- 2026-07-18 — Text inputs now honor the baseline editing contract: the file-path prompt gains `Home`/`End`/`Del` and the filter input gains full caret editing (`←/→/Home/End/Backspace/Del`) with a visible block caret; both are multibyte-safe (char-indexed, previously byte-indexed — non-ASCII input could panic).
+- 2026-07-18 — Help popup is scrollable (`↑↓`/`PgUp`/`PgDn`/`Home`/`End`) and includes an About section (description, version, author, license, repository — single-sourced from `Cargo.toml`).
+- 2026-07-18 — `NO_COLOR` is honored: the TUI degrades to monochrome, mapping colored focus/selection backgrounds to reverse-video so the cursor stays findable.
+- 2026-07-18 — File-path prompt scrolls horizontally when the value overflows the field (caret stays visible).
+- 2026-07-18 — Help/About popup now includes a Privacy statement (wenv is fully offline — no network, no telemetry).
+
+### Fixed
+- 2026-07-18 — Off-by-one in the list viewport height (chrome undercounted the column header + separator as one row): with the cursor at the bottom, the first `↑` scrolled the viewport while the cursor stayed put. Regression-tested against a render buffer.
+- 2026-07-18 — Popup sizing no longer underflows on very small terminals (`saturating_sub`), and popup widths are computed from display width (CJK-safe) instead of byte length.
+
 ## [v0.20.0] - 2026-06-23
 
 ### Added

@@ -44,8 +44,16 @@ pub enum Action {
     SearchBackspace,
     TextInputChar(char),
     TextInputBackspace,
+    TextInputDelete,
     TextInputLeft,
     TextInputRight,
+    TextInputHome,
+    TextInputEnd,
+    SearchDelete,
+    SearchLeft,
+    SearchRight,
+    SearchHome,
+    SearchEnd,
     DetailScrollUp,
     DetailScrollDown,
     DetailPageUp,
@@ -70,6 +78,7 @@ pub fn map_key(mode: &AppMode, key: KeyEvent) -> Action {
         AppMode::TextInput => map_text_input_key(key),
         AppMode::SelectingSnippet => map_snippet_key(key),
         AppMode::InlineEdit => map_inline_edit_key(key),
+        AppMode::ShowingHelp => map_help_key(key),
         _ => map_popup_key(key),
     }
 }
@@ -145,11 +154,17 @@ fn map_placing_key(key: KeyEvent) -> Action {
 }
 
 fn map_filter_input_key(key: KeyEvent) -> Action {
-    // During filter input, only typing, backspace, enter to confirm, and esc to cancel.
+    // Filter input is a text field: typing plus the baseline editing contract
+    // (←/→/Home/End/Backspace/Del), Enter to confirm, Esc to cancel.
     match key.code {
         KeyCode::Esc => Action::Cancel,
         KeyCode::Enter => Action::Confirm,
         KeyCode::Backspace => Action::SearchBackspace,
+        KeyCode::Delete => Action::SearchDelete,
+        KeyCode::Left => Action::SearchLeft,
+        KeyCode::Right => Action::SearchRight,
+        KeyCode::Home => Action::SearchHome,
+        KeyCode::End => Action::SearchEnd,
         KeyCode::Char(c) => Action::SearchInput(c),
         _ => Action::Noop,
     }
@@ -182,8 +197,11 @@ fn map_text_input_key(key: KeyEvent) -> Action {
         KeyCode::Esc => Action::Cancel,
         KeyCode::Enter => Action::Confirm,
         KeyCode::Backspace => Action::TextInputBackspace,
+        KeyCode::Delete => Action::TextInputDelete,
         KeyCode::Left => Action::TextInputLeft,
         KeyCode::Right => Action::TextInputRight,
+        KeyCode::Home => Action::TextInputHome,
+        KeyCode::End => Action::TextInputEnd,
         KeyCode::Char(c) => Action::TextInputChar(c),
         _ => Action::Noop,
     }
@@ -210,6 +228,21 @@ fn map_snippet_key(key: KeyEvent) -> Action {
         KeyCode::Down | KeyCode::Char('j') => Action::SnippetDown,
         KeyCode::Enter => Action::SnippetSelect,
         KeyCode::Esc => Action::SnippetCancel,
+        _ => Action::Noop,
+    }
+}
+
+/// Help popup: scrollable read-only surface. Shares the detail popup's scroll
+/// actions (only one of the two popups is ever open at a time).
+fn map_help_key(key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => Action::Cancel,
+        KeyCode::Up | KeyCode::Char('k') => Action::DetailScrollUp,
+        KeyCode::Down | KeyCode::Char('j') => Action::DetailScrollDown,
+        KeyCode::PageUp => Action::DetailPageUp,
+        KeyCode::PageDown => Action::DetailPageDown,
+        KeyCode::Home => Action::DetailHome,
+        KeyCode::End => Action::DetailEnd,
         _ => Action::Noop,
     }
 }

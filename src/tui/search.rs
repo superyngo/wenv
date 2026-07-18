@@ -13,6 +13,8 @@ pub struct SearchMatch {
 
 pub struct SearchState {
     pub query: String,
+    /// Char index of the editing caret within `query` (multibyte-safe).
+    pub cursor: usize,
     matcher: SkimMatcherV2,
     pub matches: Vec<SearchMatch>,
     pub selected: usize, // index into position_order for navigation
@@ -30,11 +32,21 @@ impl SearchState {
     pub fn new() -> Self {
         Self {
             query: String::new(),
+            cursor: 0,
             matcher: SkimMatcherV2::default(),
             matches: Vec::new(),
             selected: 0,
             position_order: Vec::new(),
         }
+    }
+
+    /// Byte offset of char index `i` in `query` (query.len() when past the end).
+    fn byte_at(&self, i: usize) -> usize {
+        self.query
+            .char_indices()
+            .nth(i)
+            .map(|(b, _)| b)
+            .unwrap_or(self.query.len())
     }
 
     pub fn update_matches(&mut self, profile: &ShellProfile) {
@@ -69,11 +81,43 @@ impl SearchState {
     }
 
     pub fn input_char(&mut self, c: char) {
-        self.query.push(c);
+        let byte = self.byte_at(self.cursor);
+        self.query.insert(byte, c);
+        self.cursor += 1;
     }
 
     pub fn backspace(&mut self) {
-        self.query.pop();
+        if self.cursor > 0 {
+            let prev = self.byte_at(self.cursor - 1);
+            self.query.remove(prev);
+            self.cursor -= 1;
+        }
+    }
+
+    /// Forward-delete the char under the caret.
+    pub fn delete(&mut self) {
+        if self.cursor < self.query.chars().count() {
+            let at = self.byte_at(self.cursor);
+            self.query.remove(at);
+        }
+    }
+
+    pub fn cursor_left(&mut self) {
+        self.cursor = self.cursor.saturating_sub(1);
+    }
+
+    pub fn cursor_right(&mut self) {
+        if self.cursor < self.query.chars().count() {
+            self.cursor += 1;
+        }
+    }
+
+    pub fn cursor_home(&mut self) {
+        self.cursor = 0;
+    }
+
+    pub fn cursor_end(&mut self) {
+        self.cursor = self.query.chars().count();
     }
 
     /// Move to next match in file-position order (wraps around)

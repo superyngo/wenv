@@ -134,7 +134,12 @@ impl TuiApp {
             terminal.draw(|f| {
                 // Update list_visible_height before drawing (area height minus title, status, search bar, header+separator)
                 let total_height = f.size().height as usize;
-                let chrome = if self.search.is_some() { 4 } else { 3 }; // title + status + search? + header/separator
+                // title(1) + status(1) + search?(1) + column header(1) + separator(1).
+                // Must match the real rendered rows exactly: if this undercounts,
+                // ratatui silently shifts the list offset to keep the selection
+                // visible and it desyncs from `self.scroll_offset` (cursor sticks
+                // at the bottom row while the viewport scrolls on the first ↑).
+                let chrome = if self.search.is_some() { 5 } else { 4 };
                 self.list_visible_height = total_height.saturating_sub(chrome);
                 self.clamp_scroll_offset();
                 crate::tui::ui::draw(f, self);
@@ -1064,6 +1069,9 @@ impl TuiApp {
             Action::Search => {
                 if self.mode == AppMode::FilterActive {
                     // Re-open input to edit the existing filter query
+                    if let Some(ref mut search) = self.search {
+                        search.cursor_end();
+                    }
                     self.mode = AppMode::FilterInput;
                 } else {
                     // Capture expanded state before filter
@@ -1096,8 +1104,36 @@ impl TuiApp {
                 }
                 self.update_filter();
             }
+            Action::SearchDelete => {
+                if let Some(ref mut search) = self.search {
+                    search.delete();
+                }
+                self.update_filter();
+            }
+            Action::SearchLeft => {
+                if let Some(ref mut search) = self.search {
+                    search.cursor_left();
+                }
+            }
+            Action::SearchRight => {
+                if let Some(ref mut search) = self.search {
+                    search.cursor_right();
+                }
+            }
+            Action::SearchHome => {
+                if let Some(ref mut search) = self.search {
+                    search.cursor_home();
+                }
+            }
+            Action::SearchEnd => {
+                if let Some(ref mut search) = self.search {
+                    search.cursor_end();
+                }
+            }
             Action::Help => {
                 self.mode = AppMode::ShowingHelp;
+                // The help popup shares the detail popup's scroll state.
+                self.detail_scroll_offset = 0;
             }
             Action::Remark => {
                 let in_detail = self.mode == AppMode::ShowingDetail;
@@ -1272,32 +1308,66 @@ impl TuiApp {
                 self.mode = AppMode::TextInput;
                 self.message = None;
             }
+            // `cursor_pos` is a char index (multibyte-safe), like the inline editor.
             Action::TextInputChar(c) => {
                 if let Some(ref mut input) = self.text_input {
-                    input.value.insert(input.cursor_pos, c);
+                    let byte = input
+                        .value
+                        .char_indices()
+                        .nth(input.cursor_pos)
+                        .map(|(b, _)| b)
+                        .unwrap_or(input.value.len());
+                    input.value.insert(byte, c);
                     input.cursor_pos += 1;
                 }
             }
             Action::TextInputBackspace => {
                 if let Some(ref mut input) = self.text_input {
                     if input.cursor_pos > 0 {
+                        let prev = input
+                            .value
+                            .char_indices()
+                            .nth(input.cursor_pos - 1)
+                            .map(|(b, _)| b)
+                            .unwrap_or(0);
+                        input.value.remove(prev);
                         input.cursor_pos -= 1;
-                        input.value.remove(input.cursor_pos);
+                    }
+                }
+            }
+            Action::TextInputDelete => {
+                if let Some(ref mut input) = self.text_input {
+                    if input.cursor_pos < input.value.chars().count() {
+                        let at = input
+                            .value
+                            .char_indices()
+                            .nth(input.cursor_pos)
+                            .map(|(b, _)| b)
+                            .unwrap_or(input.value.len());
+                        input.value.remove(at);
                     }
                 }
             }
             Action::TextInputLeft => {
                 if let Some(ref mut input) = self.text_input {
-                    if input.cursor_pos > 0 {
-                        input.cursor_pos -= 1;
-                    }
+                    input.cursor_pos = input.cursor_pos.saturating_sub(1);
                 }
             }
             Action::TextInputRight => {
                 if let Some(ref mut input) = self.text_input {
-                    if input.cursor_pos < input.value.len() {
+                    if input.cursor_pos < input.value.chars().count() {
                         input.cursor_pos += 1;
                     }
+                }
+            }
+            Action::TextInputHome => {
+                if let Some(ref mut input) = self.text_input {
+                    input.cursor_pos = 0;
+                }
+            }
+            Action::TextInputEnd => {
+                if let Some(ref mut input) = self.text_input {
+                    input.cursor_pos = input.value.chars().count();
                 }
             }
             _ => {
@@ -2900,5 +2970,41 @@ mod placement_tests {
         assert!(matches!(req, EditorRequest::None));
         assert_eq!(app.profile.files.len(), before);
         assert_eq!(app.message.as_deref(), Some("File already exists"));
+    }
+
+    /// Regression: the chrome row count in the event loop must match the rows
+    /// the renderer actually occupies. If it undercounts, ratatui silently
+    /// bumps the list offset to keep the selection visible and desyncs from
+    /// `scroll_offset` (symptom: at the bottom, the first ↑ scrolls the
+    /// viewport while the cursor stays put).
+    #[test]
+    fn viewport_height_matches_rendered_chrome() {
+        use ratatui::backend::TestBackend;
+        let (_td, mut app) = app_group();
+        // Visible list: DirHeader, one.sh header, entry a, two.sh header, entry b.
+        assert_eq!(app.visible_items.len(), 5);
+        let mut terminal = ratatui::Terminal::new(TestBackend::new(80, 7)).unwrap();
+        app.cursor = 4; // last item (entry b)
+        terminal
+            .draw(|f| {
+                // Mirror the event_loop sizing exactly.
+                let total_height = f.size().height as usize;
+                let chrome = if app.search.is_some() { 5 } else { 4 };
+                app.list_visible_height = total_height.saturating_sub(chrome);
+                app.clamp_scroll_offset();
+                crate::tui::ui::draw(f, &mut app);
+            })
+            .unwrap();
+        // 7 rows - 4 chrome = 3 visible rows; cursor 4 → scroll 2.
+        assert_eq!(app.list_visible_height, 3);
+        assert_eq!(app.scroll_offset, 2);
+        let buf = terminal.backend().buffer();
+        let row = |y: u16| -> String { (0..80).map(|x| buf.get(x, y).symbol()).collect() };
+        // First list row (below title + column header + separator) must show the
+        // item at scroll_offset — entry a. If ratatui had shifted the offset,
+        // this row would show the next item instead.
+        assert!(row(3).contains("alias a='1'"), "row 3 was: {}", row(3));
+        // Last list row (just above the status bar) shows the cursor item.
+        assert!(row(5).contains("alias b='2'"), "row 5 was: {}", row(5));
     }
 }

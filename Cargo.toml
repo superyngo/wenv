@@ -32,6 +32,7 @@ terminal_size = "0.3"
 # TUI framework
 ratatui = { version = "0.26", features = ["unstable-rendered-line-info"] }
 crossterm = "0.27"
+unicode-width = "0.1"
 
 # Error handling
 anyhow = "1"

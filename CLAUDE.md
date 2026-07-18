@@ -176,12 +176,12 @@ template = "alias NAME='VALUE'"
 | `0` | Collapse all files |
 | `9` | Expand all files |
 | `z` | Undo last operation |
-| `/` | Open filter input (fuzzy-match; non-matching entries hidden) |
+| `/` | Open filter input (fuzzy-match; non-matching entries hidden). Full caret editing: `←/→/Home/End/Backspace/Del` |
 | `Enter` (in filter) | Commit filter — enter FilterActive mode for normal operations |
 | `Esc` (in filter) | Clear filter and restore full list |
 | `Esc` | Clear selection/exit modes |
 | `w` | Save all changes |
-| `?` | Show help |
+| `?` | Show help — scrollable popup (`↑↓`/`PgUp`/`PgDn`/`Home`/`End`) with an About section sourced from `Cargo.toml` |
 | `q` | Quit (confirms if unsaved) |
 
 ### Shell Type Detection

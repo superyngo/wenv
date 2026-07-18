@@ -6,6 +6,28 @@ use crate::tui::app::TuiApp;
 use crate::tui::state::AppMode;
 use ratatui::prelude::*;
 use ratatui::widgets::*;
+use unicode_width::UnicodeWidthStr;
+
+/// True when the NO_COLOR convention (https://no-color.org) is in effect.
+fn no_color() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()))
+}
+
+/// Degrade the rendered frame to monochrome under NO_COLOR. Colored
+/// backgrounds carry focus/selection/status semantics, so they map to
+/// REVERSED — the focus cursor must stay findable without color.
+fn strip_colors(buf: &mut Buffer) {
+    for cell in &mut buf.content {
+        if cell.bg != Color::Reset {
+            // Toggle, not insert: a caret that is already REVERSED on a colored
+            // bar must stay distinguishable when the bar itself becomes reversed.
+            cell.modifier.toggle(Modifier::REVERSED);
+        }
+        cell.fg = Color::Reset;
+        cell.bg = Color::Reset;
+    }
+}
 
 /// Map entry type to its display color (replicating pre-redesign scheme)
 fn type_color(et: &EntryType) -> Color {
@@ -234,6 +256,10 @@ pub fn draw(f: &mut Frame, app: &mut TuiApp) {
             draw_text_input_popup(f, f.size(), app);
         }
         _ => {}
+    }
+
+    if no_color() {
+        strip_colors(f.buffer_mut());
     }
 }
 
@@ -595,10 +621,11 @@ fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     let msg = app.message.as_deref().unwrap_or("Confirm? (y/n)");
 
     let lines: Vec<&str> = msg.split('\n').collect();
-    let max_line_width = lines.iter().map(|l| l.len()).max().unwrap_or(20);
+    // Display width (cells), not byte length — CJK text is double-width.
+    let max_line_width = lines.iter().map(|l| l.width()).max().unwrap_or(20);
 
-    let popup_width = ((max_line_width as u16) + 4).min(area.width - 4);
-    let popup_height = ((lines.len() as u16) + 2).min(area.height - 2);
+    let popup_width = ((max_line_width as u16) + 4).min(area.width.saturating_sub(4));
+    let popup_height = ((lines.len() as u16) + 2).min(area.height.saturating_sub(2));
     let x = (area.width.saturating_sub(popup_width)) / 2;
     let y = (area.height.saturating_sub(popup_height)) / 2;
     let popup_area = Rect::new(x, y, popup_width, popup_height);
@@ -627,10 +654,26 @@ fn draw_search_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
     if let Some(ref search) = app.search {
         let match_count = search.matches.len();
         if app.mode == AppMode::FilterInput {
-            // Show typing cursor indicator and match count
-            let text = format!(" / {}█  [{} matches]", search.query, match_count);
+            // Editable field: block caret at the caret position (not always at
+            // the end), with the query window scrolled to keep it visible.
+            let prefix = " / ";
+            let suffix = format!("  [{} matches]", match_count);
+            let field_width = (area.width as usize)
+                .saturating_sub(prefix.width() + suffix.width())
+                .max(1);
+            let len = search.query.chars().count();
+            let cursor = search.cursor.min(len);
+            let scroll = (cursor + 1).saturating_sub(field_width);
+            let mut spans = vec![Span::raw(prefix)];
+            spans.extend(inline_field_spans(
+                &search.query,
+                cursor,
+                scroll,
+                field_width,
+            ));
+            spans.push(Span::raw(suffix));
             let style = Style::default().bg(Color::Black).fg(Color::Yellow);
-            f.render_widget(Paragraph::new(text).style(style), area);
+            f.render_widget(Paragraph::new(Line::from(spans)).style(style), area);
         } else {
             // FilterActive: show filter badge with Esc hint
             let text = format!(
@@ -645,8 +688,8 @@ fn draw_search_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
 
 fn draw_text_input_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     if let Some(ref input) = app.text_input {
-        let popup_width = (area.width.saturating_sub(8)).clamp(20, 80);
-        let popup_height = 3; // 1 input row + top/bottom border
+        let popup_width = (area.width.saturating_sub(8)).clamp(20, 80).min(area.width);
+        let popup_height = 3u16.min(area.height); // 1 input row + top/bottom border
         let x = (area.width.saturating_sub(popup_width)) / 2;
         let y = (area.height.saturating_sub(popup_height)) / 2;
         let popup_area = Rect::new(x, y, popup_width, popup_height);
@@ -661,11 +704,19 @@ fn draw_text_input_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
         let inner = block.inner(popup_area);
         f.render_widget(block, popup_area);
 
-        let text = Paragraph::new(input.value.as_str()).style(Style::default().fg(Color::White));
+        // Horizontal scroll (derived, not stored): keep the caret visible when
+        // the value overflows the field. `cursor_pos` is a char index.
+        let width = inner.width as usize;
+        let chars: Vec<char> = input.value.chars().collect();
+        let cursor = input.cursor_pos.min(chars.len());
+        let scroll = (cursor + 1).saturating_sub(width.max(1));
+        let visible: String = chars[scroll.min(chars.len())..].iter().collect();
+        let text = Paragraph::new(visible).style(Style::default().fg(Color::White));
         f.render_widget(text, inner);
 
-        // Position cursor within the input field
-        let cursor_x = inner.x + input.cursor_pos as u16;
+        // Caret cell offset in display cells (CJK chars are double-width).
+        let pre: String = chars[scroll.min(chars.len())..cursor].iter().collect();
+        let cursor_x = inner.x + pre.width() as u16;
         f.set_cursor(
             cursor_x.min(inner.x + inner.width.saturating_sub(1)),
             inner.y,
@@ -754,7 +805,7 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
     f.render_widget(paragraph, popup_area);
 }
 
-fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
+fn draw_help_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
     let lines = vec![
         Line::from(Span::styled(
             "Navigation",
@@ -806,23 +857,69 @@ fn draw_help_popup(f: &mut Frame, area: Rect, _app: &TuiApp) {
         Line::from("  w/Ctrl+s    Save all changes"),
         Line::from("  q           Quit"),
         Line::from("  ?           Show this help"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "About",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        // Single-sourced from Cargo.toml at build time.
+        Line::from(format!(
+            "  wenv v{} — {}",
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_DESCRIPTION")
+        )),
+        Line::from(format!("  Author: {}", env!("CARGO_PKG_AUTHORS"))),
+        Line::from(format!("  License: {}", env!("CARGO_PKG_LICENSE"))),
+        Line::from(format!("  {}", env!("CARGO_PKG_REPOSITORY"))),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Privacy",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  wenv is fully offline \u{2014} no network, no telemetry."),
     ];
 
-    let popup_height = (lines.len() as u16 + 2).min(area.height - 2);
-    let popup_width = 50u16.min(area.width - 4);
+    // Size to content, max 80% of the screen; scroll when it doesn't fit
+    // (mirrors the detail popup; they share scroll state and page size).
+    let max_width = (area.width * 4 / 5).clamp(1, area.width);
+    let max_height = (area.height * 4 / 5).clamp(3, area.height);
+    let popup_width = 62u16.min(max_width);
+    let inner_width = popup_width.saturating_sub(2).max(1);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let visual_line_count = paragraph.line_count(inner_width);
+
+    let needs_scroll = visual_line_count + 2 > max_height as usize;
+    let inner_height = if needs_scroll {
+        max_height - 2
+    } else {
+        visual_line_count as u16
+    };
+    let popup_height = inner_height + 2;
+
+    let max_scroll = (visual_line_count as u16).saturating_sub(inner_height);
+    app.detail_scroll_offset = app.detail_scroll_offset.min(max_scroll);
+    app.detail_page_size = inner_height.saturating_sub(1).max(1);
+
     let x = (area.width.saturating_sub(popup_width)) / 2;
     let y = (area.height.saturating_sub(popup_height)) / 2;
-    let popup_area = Rect::new(x, y, popup_width, popup_height);
+    let popup_area = area.intersection(Rect::new(x, y, popup_width, popup_height));
 
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(" Help (Esc to close) ")
+        .title(" Help / About (↑↓ PgUp/PgDn scroll · Esc close) ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let text = Paragraph::new(lines).block(block);
-    f.render_widget(text, popup_area);
+    let mut paragraph = paragraph.block(block);
+    if needs_scroll {
+        paragraph = paragraph.scroll((app.detail_scroll_offset, 0));
+    }
+    f.render_widget(paragraph, popup_area);
 }
 
 fn draw_snippet_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
@@ -834,7 +931,7 @@ fn draw_snippet_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     let hint_line = " \u{2191}\u{2193} navigate  Enter select  Esc";
     let mut lines: Vec<Line> = Vec::new();
 
-    let name_width = snippets.iter().map(|s| s.name.len()).max().unwrap_or(0);
+    let name_width = snippets.iter().map(|s| s.name.width()).max().unwrap_or(0);
 
     for (i, snippet) in snippets.iter().enumerate() {
         let is_selected = i == app.snippet_cursor;
@@ -867,10 +964,10 @@ fn draw_snippet_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     // Calculate popup size
     let max_line_width = snippets
         .iter()
-        .map(|s| name_width + 3 + s.description.len())
+        .map(|s| name_width + 3 + s.description.width())
         .max()
         .unwrap_or(20)
-        .max(hint_line.len());
+        .max(hint_line.width());
     let content_lines = lines.len() as u16;
     let popup_width = ((max_line_width as u16) + 4)
         .min((area.width * 4) / 5)

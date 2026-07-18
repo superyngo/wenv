@@ -85,11 +85,13 @@ wenv config
 | `9` | Expand all files |
 | `z` | Undo last operation |
 | `y` | Redo last operation |
-| `/` | Open filter input (fuzzy match) |
+| `/` | Open filter input (fuzzy match; caret editing with `←/→/Home/End/Backspace/Del`) |
 | `Esc` | Clear selection/exit modes |
 | `w` | Save all changes |
-| `?` | Show help |
+| `?` | Show help / About (scrollable: `↑↓`/`PgUp`/`PgDn`/`Home`/`End`) |
 | `q` | Quit (confirms if unsaved) |
+
+Set the `NO_COLOR` environment variable to run the TUI in monochrome (focus and selection degrade to reverse-video).
 
 ## Shell Support
 
@@ -125,7 +127,7 @@ Entries are automatically updated with the correct file_index.
 
 ### Undo System
 
-- Press `u` to undo any operation
+- Press `z` to undo any operation (`y` to redo)
 - Restores all files to their previous state
 - Handles multi-file operations atomically
 
