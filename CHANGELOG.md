@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.21.0] - 2026-07-18
+
 ### Added
 - 2026-07-18 — Text inputs now honor the baseline editing contract: the file-path prompt gains `Home`/`End`/`Del` and the filter input gains full caret editing (`←/→/Home/End/Backspace/Del`) with a visible block caret; both are multibyte-safe (char-indexed, previously byte-indexed — non-ASCII input could panic).
 - 2026-07-18 — Help popup is scrollable (`↑↓`/`PgUp`/`PgDn`/`Home`/`End`) and includes an About section (description, version, author, license, repository — single-sourced from `Cargo.toml`).
