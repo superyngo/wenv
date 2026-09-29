@@ -5,34 +5,42 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::Backend, backend::CrosstermBackend, Terminal};
 
 use std::io;
 
 use crate::tui::app::TuiApp;
 
 impl TuiApp {
-    pub(super) fn suspend_tui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+    pub(super) fn suspend_tui<B>(terminal: &mut Terminal<B>) -> Result<()>
+    where
+        B: Backend,
+        B::Error: Send + Sync + 'static,
+    {
         disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+        execute!(io::stdout(), LeaveAlternateScreen)?;
         terminal.show_cursor()?;
         Ok(())
     }
 
-    pub(super) fn resume_tui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+    pub(super) fn resume_tui<B>(terminal: &mut Terminal<B>) -> Result<()>
+    where
+        B: Backend,
+        B::Error: Send + Sync + 'static,
+    {
         enable_raw_mode()?;
-        execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+        execute!(io::stdout(), EnterAlternateScreen)?;
         terminal.hide_cursor()?;
         terminal.clear()?;
         Ok(())
     }
 
     /// Edit a file: suspend TUI, open in $EDITOR, re-parse, resume
-    pub(super) fn run_edit_file(
-        &mut self,
-        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-        fi: usize,
-    ) -> Result<()> {
+    pub(super) fn run_edit_file<B>(&mut self, terminal: &mut Terminal<B>, fi: usize) -> Result<()>
+    where
+        B: Backend,
+        B::Error: Send + Sync + 'static,
+    {
         let path = self.profile.files[fi].path.clone();
         if !self.profile.files[fi].exists {
             self.message = Some(self.messages.fmt("msg_file_not_exist", &[&path.display()]));

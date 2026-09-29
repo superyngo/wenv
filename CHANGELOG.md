@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.22.0] - 2026-09-29
 
+- test(ci): `edit_file_refuses_when_dirty` no longer builds a `CrosstermBackend<Stdout>` terminal (crossterm's `size()` fails on CI's non-TTY stdout); `run_edit_file`/`suspend_tui`/`resume_tui` are now generic over `ratatui::backend::Backend` and the test uses `TestBackend`.
+
 - fix(parser): unclosed function/block at EOF is kept as a `Code` entry instead of being dropped (saving no longer deletes those lines); `strip_quotes` no longer panics on a lone quote (`export FOO="`, `source '`, `$env:X = "`); alias/export/source entries keep their original indentation; PowerShell no longer uses `.lines()` (audit C1, C2, H1).
 - fix(io): rc files keep their encoding on save — UTF-8/UTF-16 BOM, CRLF and missing final newline are replayed (new `utils::text::TextFormat`); non-UTF-8 files are shown read-only with a named warning instead of aborting startup (audit H2, H4, L1, L2).
 - fix(io): rc files and `config.toml` are written via temp file + rename, follow symlinks, keep permissions and leave a `<name>.bak` (new `utils::fs::atomic_write`) (audit C4).
