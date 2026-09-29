@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(io): rc files and `config.toml` are written via temp file + rename, follow symlinks, keep permissions and leave a `<name>.bak` (new `utils::fs::atomic_write`) (audit C4).
 - fix(tui): panic hook restores raw mode / alternate screen before the panic message prints (audit C3).
 - fix(cli): `$EDITOR` values with arguments (`code --wait`) work; non-TTY runs of `wenv .` and the missing-file prompt no longer fail with raw I/O errors (audit M3, M4).
+- fix(tui): file move reorders `config.toml` by pattern (not by resolved-file index) and rebuilds the tree; moves inside a glob/dir group are refused with a message (audit H5).
+- fix(tui): cancelling delete no longer clears redo or evicts undo (snapshot pushed on confirm); reload clears both stacks when the file set changes; editing a file externally with unsaved changes is refused (audit H3, H6).
 - test: byte-exact round-trip table tests for both shells (`tests/roundtrip_tests.rs`) (audit T3).
 
 - docs: reorganize documentation into `docs/{reference,adr,spec,plan,debug,audit}` with folder indexes; `CONTEXT.md` is now the entry index and the glossary moved to `docs/reference/glossary.md`. Specs/plans moved out of `docs/superpowers/` and `.opencode/plans/`, given `Status:` lines, and spec filenames paired with plans. Stale `ENTRY_MODEL`/`PARSE_FORMAT_FLOW` docs archived as superseded specs; new English `ARCHITECTURE`, `ENTRY_MODEL`, `KEYMAP` references (keymap now lists `y` redo). `CLAUDE.md` slimmed to a pointer to `AGENTS.md`. Added ADR 0002 recording the v0.17 reversal of ADR 0001's config fallback chain, and `docs/plan/BACKLOG.md`.

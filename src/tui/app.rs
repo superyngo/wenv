@@ -39,6 +39,8 @@ pub struct TuiApp {
     pub selection: SelectionState,
     pub undo_stack: VecDeque<crate::tui::state::UndoSnapshot>,
     pub redo_stack: Vec<crate::tui::state::UndoSnapshot>,
+    /// Snapshot taken when delete is requested; pushed to `undo_stack` only on confirm.
+    pub pending_undo: Option<crate::tui::state::UndoSnapshot>,
     pub move_state: Option<MoveState>,
     pub search: Option<SearchState>,
     pub list_visible_height: usize,
@@ -81,6 +83,7 @@ impl TuiApp {
             selection: SelectionState::new(),
             undo_stack: VecDeque::new(),
             redo_stack: Vec::new(),
+            pending_undo: None,
             move_state: None,
             search: None,
             list_visible_height: 20,
@@ -565,12 +568,8 @@ impl TuiApp {
                     }
                     let targets = self.get_operation_targets();
                     if !targets.is_empty() {
-                        let snapshot = crate::tui::operations::take_snapshot(&self.profile);
-                        crate::tui::operations::push_undo(
-                            &mut self.undo_stack,
-                            &mut self.redo_stack,
-                            snapshot,
-                        );
+                        self.pending_undo =
+                            Some(crate::tui::operations::take_snapshot(&self.profile));
                         self.previous_mode = Some(self.mode.clone());
                         self.mode = AppMode::ConfirmDelete;
                         let count = targets.len();
@@ -721,6 +720,13 @@ impl TuiApp {
                     }
                     AppMode::ConfirmDelete => {
                         let targets = self.get_operation_targets();
+                        if let Some(snapshot) = self.pending_undo.take() {
+                            crate::tui::operations::push_undo(
+                                &mut self.undo_stack,
+                                &mut self.redo_stack,
+                                snapshot,
+                            );
+                        }
                         crate::tui::operations::delete_entries(
                             &mut self.profile,
                             &self.visible_items,
@@ -1009,7 +1015,7 @@ impl TuiApp {
                         }
                     }
                     AppMode::ConfirmDelete => {
-                        self.undo_stack.pop_back(); // Discard pre-emptive snapshot
+                        self.pending_undo = None;
                         self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
                         self.message = Some("Cancelled".into());
                     }
@@ -1795,60 +1801,125 @@ impl TuiApp {
                 return;
             }
 
-            // Reorder profile.files
-            let file = self.profile.files.remove(fms.original_fi);
-            self.profile.files.insert(target_fi, file);
-
-            // Fix file_index on all entries
-            for (fi, f) in self.profile.files.iter_mut().enumerate() {
-                for entry in &mut f.entries {
-                    entry.file_index = fi;
-                }
-            }
-
-            // Reorder config paths
+            // Map both files to their config patterns; the config order is the only
+            // source of truth (dirs/globs expand to several files).
             let shell_key = self.shell_key.clone();
+            let src_path = self.profile.files[fms.original_fi].path.clone();
+            let tgt_path = self.profile.files[target_fi].path.clone();
+            let src_pat = crate::tui::operations::find_matching_config_pattern(
+                &self.config,
+                &shell_key,
+                &src_path,
+            );
+            let tgt_pat = crate::tui::operations::find_matching_config_pattern(
+                &self.config,
+                &shell_key,
+                &tgt_path,
+            );
+            let abort_msg = match (&src_pat, &tgt_pat) {
+                (Some((sp, _)), Some((tp, _))) if sp == tp => {
+                    Some("Files inside a group follow the group's order")
+                }
+                (Some(_), Some(_)) => None,
+                _ => Some("File is not in the config; cannot reorder"),
+            };
+            if let Some(msg) = abort_msg {
+                self.restore_expanded(&fms.saved_expanded);
+                self.exit_file_move_mode();
+                self.message = Some(msg.into());
+                return;
+            }
+            let (sp, tp) = (src_pat.unwrap().0, tgt_pat.unwrap().0);
             if let Some(files_config) = self.config.files.get_mut(&shell_key) {
-                if fms.original_fi < files_config.paths.len()
-                    && target_fi < files_config.paths.len()
-                {
-                    let path = files_config.paths.remove(fms.original_fi);
-                    files_config.paths.insert(target_fi, path);
+                let paths = &mut files_config.paths;
+                if let (Some(from), Some(to)) = (
+                    paths.iter().position(|p| *p == sp),
+                    paths.iter().position(|p| *p == tp),
+                ) {
+                    let item = paths.remove(from);
+                    let tp_now = paths.iter().position(|p| *p == tp).unwrap_or(to);
+                    // Moving down lands after the target pattern, moving up before it
+                    paths.insert(if from < to { tp_now + 1 } else { tp_now }, item);
                 }
             }
-            let _ = self.config.save();
-
-            // Restore expanded states mapped to new positions
-            let mut new_expanded = crate::tui::state::ExpandedSnapshot {
-                files: fms.saved_expanded.files.clone(),
-                dirs: fms.saved_expanded.dirs.clone(),
-            };
-            let removed = new_expanded.files.remove(fms.original_fi);
-            new_expanded.files.insert(target_fi, removed);
-            self.restore_expanded(&new_expanded);
-
-            let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
-            let in_filter = matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive);
-            self.mode = if in_filter {
-                AppMode::FilterActive
-            } else {
-                AppMode::Normal
-            };
-            if in_filter {
-                self.update_filter();
-            } else {
-                self.rebuild_list();
+            if let Err(e) = self.config.save() {
+                self.message = Some(format!("Failed to save config: {}", e));
             }
+            // Expanded states were saved by index; carry them across the reload by identity
+            let file_exp: Vec<(std::path::PathBuf, bool)> = self
+                .profile
+                .files
+                .iter()
+                .enumerate()
+                .map(|(i, f)| {
+                    (
+                        f.path.clone(),
+                        fms.saved_expanded
+                            .files
+                            .get(i)
+                            .copied()
+                            .unwrap_or(f.expanded),
+                    )
+                })
+                .collect();
+            let dir_patterns: Vec<String> = self
+                .profile
+                .tree
+                .iter()
+                .filter_map(|n| match n {
+                    crate::model::profile::TreeNode::Dir(g) => Some(g.source_pattern.clone()),
+                    _ => None,
+                })
+                .collect();
+            self.exit_file_move_mode();
+            if let Err(e) = self.reload_profile() {
+                self.message = Some(format!("Reload failed: {}", e));
+                return;
+            }
+            for f in &mut self.profile.files {
+                if let Some((_, e)) = file_exp.iter().find(|(p, _)| *p == f.path) {
+                    f.expanded = *e;
+                }
+            }
+            for n in &mut self.profile.tree {
+                if let crate::model::profile::TreeNode::Dir(g) = n {
+                    if let Some(pos) = dir_patterns.iter().position(|p| *p == g.source_pattern) {
+                        if let Some(&v) = fms.saved_expanded.dirs.get(pos) {
+                            g.expanded = v;
+                        }
+                    }
+                }
+            }
+            self.rebuild_list();
 
             // Place cursor on the moved file's new header
             let cursor_pos = self
                 .visible_items
                 .iter()
-                .position(|item| matches!(item, ListItem::FileHeader(fi) if *fi == target_fi))
+                .position(|item| {
+                    matches!(item, ListItem::FileHeader(fi)
+                        if self.profile.files[*fi].path == src_path)
+                })
                 .unwrap_or(0);
             self.cursor = cursor_pos;
             self.clamp_scroll_offset();
             self.message = Some("File moved".into());
+        }
+    }
+
+    /// Leave file-move mode, returning to the filter or normal mode.
+    fn exit_file_move_mode(&mut self) {
+        let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
+        let in_filter = matches!(return_mode, AppMode::FilterInput | AppMode::FilterActive);
+        self.mode = if in_filter {
+            AppMode::FilterActive
+        } else {
+            AppMode::Normal
+        };
+        if in_filter {
+            self.update_filter();
+        } else {
+            self.rebuild_list();
         }
     }
 
@@ -1959,6 +2030,7 @@ impl TuiApp {
             new_profile.files.iter().map(|f| f.path.clone()).collect();
         if old_path_set != new_path_set {
             self.undo_stack.clear();
+            self.redo_stack.clear();
             self.message = Some("Undo cleared (file set changed)".into());
         }
 
@@ -2093,6 +2165,11 @@ impl TuiApp {
         let path = self.profile.files[fi].path.clone();
         if !self.profile.files[fi].exists {
             self.message = Some(format!("File does not exist: {}", path.display()));
+            return Ok(());
+        }
+        if self.profile.files[fi].dirty {
+            self.message =
+                Some("Unsaved changes: save (w) before editing the file externally".into());
             return Ok(());
         }
 
@@ -2443,6 +2520,103 @@ mod add_pattern_tests {
             vec![],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn delete_cancel_keeps_redo_and_confirm_pushes_undo() {
+        let td = tempfile::tempdir().unwrap();
+        let f = td.path().join("x.zsh");
+        std::fs::write(&f, "alias x=1\n").unwrap();
+        let mut app = app_for(&td, vec![f.display().to_string()]);
+        app.profile.toggle_all(true);
+        app.rebuild_list();
+        app.cursor = app
+            .visible_items
+            .iter()
+            .position(|it| matches!(it, ListItem::Entry(..)))
+            .unwrap();
+        app.redo_stack
+            .push(crate::tui::operations::take_snapshot(&app.profile));
+
+        app.handle_action(Action::Delete).unwrap();
+        assert_eq!(app.mode, AppMode::ConfirmDelete);
+        app.handle_action(Action::Cancel).unwrap();
+        assert_eq!(app.redo_stack.len(), 1, "cancel must not clear redo");
+        assert!(app.undo_stack.is_empty());
+
+        app.handle_action(Action::Delete).unwrap();
+        app.handle_action(Action::Confirm).unwrap();
+        assert_eq!(app.undo_stack.len(), 1);
+        assert!(app.redo_stack.is_empty());
+    }
+
+    #[test]
+    fn edit_file_refuses_when_dirty() {
+        let td = tempfile::tempdir().unwrap();
+        let f = td.path().join("x.zsh");
+        std::fs::write(&f, "alias x=1\n").unwrap();
+        let mut app = app_for(&td, vec![f.display().to_string()]);
+        app.profile.files[0].dirty = true;
+        let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
+        let mut term = Terminal::new(backend).unwrap();
+        app.run_edit_file(&mut term, 0).unwrap();
+        assert!(app.message.unwrap().contains("Unsaved"));
+    }
+
+    #[test]
+    fn file_move_reorders_config_patterns_not_resolved_indices() {
+        let td = tempfile::tempdir().unwrap();
+        let sub = td.path().join("zshrc.d");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a.sh"), "alias a=1\n").unwrap();
+        std::fs::write(sub.join("b.sh"), "alias b=2\n").unwrap();
+        let x = td.path().join("x.zsh");
+        let y = td.path().join("y.zsh");
+        std::fs::write(&x, "alias x=1\n").unwrap();
+        std::fs::write(&y, "alias y=1\n").unwrap();
+        let glob = format!("{}/*.sh", sub.display());
+        let xs = x.display().to_string();
+        let ys = y.display().to_string();
+
+        let mut app = app_for(&td, vec![glob.clone(), xs.clone(), ys.clone()]);
+        // files: a.sh(0) b.sh(1) x(2) y(3); move y above the glob group (onto a.sh)
+        let fi = app.profile.files.iter().position(|f| f.path == y).unwrap();
+        let target = app
+            .profile
+            .files
+            .iter()
+            .position(|f| f.path.ends_with("a.sh"))
+            .unwrap();
+        app.profile.toggle_all(false);
+        app.rebuild_list();
+        for n in &mut app.profile.tree {
+            if let TreeNode::Dir(g) = n {
+                g.expanded = true;
+            }
+        }
+        app.rebuild_list();
+        let cursor = app
+            .visible_items
+            .iter()
+            .position(|it| matches!(it, ListItem::FileHeader(i) if *i == target))
+            .unwrap();
+        app.file_move_state = Some(FileMovingState {
+            original_fi: fi,
+            insertion_cursor: cursor,
+            saved_expanded: crate::tui::state::ExpandedSnapshot {
+                files: vec![false; app.profile.files.len()],
+                dirs: vec![true],
+            },
+        });
+        app.previous_mode = Some(AppMode::Normal);
+        app.mode = AppMode::MovingFile;
+        app.execute_file_move();
+
+        let paths = &app.config.files["zsh"].paths;
+        assert_eq!(paths, &vec![ys, glob, xs]);
+        // Tree and files agree after the reload
+        assert_eq!(app.profile.files[0].path, y);
+        assert_eq!(app.profile.files.len(), 4);
     }
 
     #[test]
