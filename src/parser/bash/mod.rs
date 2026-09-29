@@ -384,7 +384,8 @@ impl Parser for BashParser {
 
             // Try alias
             match try_parse_alias(trimmed, line_number) {
-                ParseEvent::Complete(entry) => {
+                ParseEvent::Complete(mut entry) => {
+                    entry.value = line.to_string();
                     // Merge pending entry (if exists) with this structured entry
                     let (pending_entry_to_add, merged) =
                         merge_pending_with_structured(pending_entry.take(), entry, |b| {
@@ -401,8 +402,9 @@ impl Parser for BashParser {
                     entry_type,
                     name,
                     boundary,
-                    first_line,
+                    first_line: _,
                 } => {
+                    let first_line = line.to_string();
                     let (merged_first_line, start_line) =
                         if let Some(pending) = pending_entry.take() {
                             if pending.can_merge_down() {
@@ -435,7 +437,8 @@ impl Parser for BashParser {
 
             // Try export (environment variable)
             match try_parse_env(trimmed, line_number) {
-                ParseEvent::Complete(entry) => {
+                ParseEvent::Complete(mut entry) => {
+                    entry.value = line.to_string();
                     // Merge pending entry (if exists) with this structured entry
                     let (pending_entry_to_add, merged) =
                         merge_pending_with_structured(pending_entry.take(), entry, |b| {
@@ -452,8 +455,9 @@ impl Parser for BashParser {
                     entry_type,
                     name,
                     boundary,
-                    first_line,
+                    first_line: _,
                 } => {
+                    let first_line = line.to_string();
                     let (merged_first_line, start_line) =
                         if let Some(pending) = pending_entry.take() {
                             if pending.can_merge_down() {
@@ -486,7 +490,8 @@ impl Parser for BashParser {
 
             // Try source
             match try_parse_source(trimmed, line_number) {
-                ParseEvent::Complete(entry) => {
+                ParseEvent::Complete(mut entry) => {
+                    entry.value = line.to_string();
                     // Merge pending entry (if exists) with this structured entry
                     let (pending_entry_to_add, merged) =
                         merge_pending_with_structured(pending_entry.take(), entry, |b| {
@@ -660,7 +665,7 @@ impl Parser for BashParser {
         }
 
         // Warn about unclosed active block
-        if let Some(block) = active_block {
+        if let Some(mut block) = active_block {
             let msg = match block.entry_hint {
                 Some(EntryType::Function) => "Unclosed function definition at end of file",
                 Some(EntryType::Alias) => "Unclosed multi-line alias at end of file",
@@ -668,6 +673,9 @@ impl Parser for BashParser {
                 _ => "Unclosed block at end of file",
             };
             result.add_warning(crate::model::ParseWarning::new(block.start_line, msg, ""));
+            // Keep the raw text as Code so saving never deletes it
+            block.entry_hint = Some(EntryType::Code);
+            result.add_entry(self.build_entry_from_pending(block));
         }
 
         result

@@ -228,8 +228,9 @@ pub fn extract_comment(line: &str, comment_char: char) -> (String, Option<String
 /// ```
 pub fn strip_quotes(value: &str) -> String {
     let trimmed = value.trim();
-    if (trimmed.starts_with('\'') && trimmed.ends_with('\''))
-        || (trimmed.starts_with('"') && trimmed.ends_with('"'))
+    if trimmed.len() >= 2
+        && ((trimmed.starts_with('\'') && trimmed.ends_with('\''))
+            || (trimmed.starts_with('"') && trimmed.ends_with('"')))
     {
         trimmed[1..trimmed.len() - 1].to_string()
     } else {

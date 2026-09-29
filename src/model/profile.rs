@@ -1,7 +1,11 @@
 //! Multi-file profile model with three-layer (group → file → entry) tree.
 
-use crate::model::{Entry, ShellType};
+use anyhow::Context;
+
 use std::path::PathBuf;
+
+use crate::model::{Entry, ShellType};
+use crate::utils::text::TextFormat;
 
 /// Item in the flat visible list for TUI navigation.
 #[derive(Debug, Clone, PartialEq)]
@@ -22,6 +26,10 @@ pub struct ProfileFile {
     pub writable: bool,
     /// Display string from path_resolver (may contain "(varname)" suffix).
     pub display_label: String,
+    /// On-disk encoding and line endings, replayed on save.
+    pub format: TextFormat,
+    /// Set when the file could not be decoded; the file is shown read-only and never written.
+    pub load_error: Option<String>,
 }
 
 /// Top-level tree node. Groups bundle multiple files from a glob/dir/var
@@ -58,6 +66,8 @@ impl ProfileFile {
             exists,
             writable: true,
             display_label,
+            format: TextFormat::default(),
+            load_error: None,
         }
     }
 
@@ -74,7 +84,41 @@ impl ProfileFile {
             exists,
             writable: true,
             display_label,
+            format: TextFormat::default(),
+            load_error: None,
         }
+    }
+
+    /// Read and parse this file from disk. Undecodable files are kept read-only with
+    /// `load_error` set instead of aborting the whole load.
+    pub fn load_from_disk(
+        &mut self,
+        parser: &dyn crate::parser::Parser,
+        fi: usize,
+    ) -> anyhow::Result<()> {
+        let bytes = std::fs::read(&self.path)
+            .with_context(|| format!("Failed to read {}", self.path.display()))?;
+        match TextFormat::decode(&bytes) {
+            Ok((content, format)) => {
+                // An empty file has no entries (the parser yields one blank row for "")
+                self.entries = if content.is_empty() {
+                    Vec::new()
+                } else {
+                    parser.parse(&content).entries
+                };
+                for e in &mut self.entries {
+                    e.file_index = fi;
+                }
+                self.content = content;
+                self.format = format;
+                self.load_error = None;
+            }
+            Err(e) => {
+                self.writable = false;
+                self.load_error = Some(format!("{}: {}", self.path.display(), e));
+            }
+        }
+        Ok(())
     }
 
     pub fn entry_count(&self) -> usize {
@@ -343,13 +387,7 @@ pub(crate) fn append_resolved_pattern(
             let fi = files.len();
             let mut pf = ProfileFile::new(path.clone(), exists, display);
             if exists {
-                let content = std::fs::read_to_string(&path)?;
-                let result = parser.parse(&content);
-                for mut entry in result.entries {
-                    entry.file_index = fi;
-                    pf.entries.push(entry);
-                }
-                pf.content = content;
+                pf.load_from_disk(parser, fi)?;
             }
             pf.expanded = false;
             files.push(pf);
@@ -374,13 +412,7 @@ pub(crate) fn append_resolved_pattern(
                     derive_file_display_in_group(&path, &original),
                 );
                 if exists {
-                    let content = std::fs::read_to_string(&path)?;
-                    let result = parser.parse(&content);
-                    for mut entry in result.entries {
-                        entry.file_index = fi;
-                        pf.entries.push(entry);
-                    }
-                    pf.content = content;
+                    pf.load_from_disk(parser, fi)?;
                 }
                 pf.expanded = false;
                 files.push(pf);

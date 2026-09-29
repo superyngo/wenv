@@ -52,7 +52,11 @@ impl Cache {
         if let Some(parent) = self.source_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&self.source_path, toml::to_string_pretty(self)?)?;
+        crate::utils::fs::atomic_write(
+            &self.source_path,
+            toml::to_string_pretty(self)?.as_bytes(),
+            true,
+        )?;
         Ok(())
     }
 }

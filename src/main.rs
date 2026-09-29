@@ -134,5 +134,14 @@ fn main() -> Result<()> {
     // Load shell profile and launch TUI
     let mut profile = model::profile::load_shell_profile(&config, shell_type)?;
     startup_file_check(&mut profile, &mut config, shell_key)?;
-    TuiApp::new(profile, messages, config, shell_key.to_string(), snippets)?.run()
+    let load_errors: Vec<String> = profile
+        .files
+        .iter()
+        .filter_map(|f| f.load_error.clone())
+        .collect();
+    let mut app = TuiApp::new(profile, messages, config, shell_key.to_string(), snippets)?;
+    if !load_errors.is_empty() {
+        app.message = Some(format!("Skipped (read-only): {}", load_errors.join("; ")));
+    }
+    app.run()
 }

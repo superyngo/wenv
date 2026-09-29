@@ -306,7 +306,8 @@ impl Parser for PowerShellParser {
 
             // Try alias
             match try_parse_alias(trimmed, line_number) {
-                ParseEvent::Complete(entry) => {
+                ParseEvent::Complete(mut entry) => {
+                    entry.value = line.to_string();
                     let (pending_entry_to_add, merged) =
                         merge_pending_with_structured(pending_entry.take(), entry, |b| {
                             self.build_entry_from_pending(b)
@@ -325,7 +326,8 @@ impl Parser for PowerShellParser {
 
             // Try env var (handles both single-line and Here-String start)
             match try_parse_env(trimmed, line_number) {
-                ParseEvent::Complete(entry) => {
+                ParseEvent::Complete(mut entry) => {
+                    entry.value = line.to_string();
                     let (pending_entry_to_add, merged) =
                         merge_pending_with_structured(pending_entry.take(), entry, |b| {
                             self.build_entry_from_pending(b)
@@ -340,8 +342,9 @@ impl Parser for PowerShellParser {
                     entry_type,
                     name,
                     boundary,
-                    first_line,
+                    first_line: _,
                 } => {
+                    let first_line = line.to_string();
                     let (merged_first_line, start_line) =
                         if let Some(pending) = pending_entry.take() {
                             if pending.can_merge_down() {
@@ -372,7 +375,8 @@ impl Parser for PowerShellParser {
 
             // Try source
             match try_parse_source(trimmed, line_number) {
-                ParseEvent::Complete(entry) => {
+                ParseEvent::Complete(mut entry) => {
+                    entry.value = line.to_string();
                     let (pending_entry_to_add, merged) =
                         merge_pending_with_structured(pending_entry.take(), entry, |b| {
                             self.build_entry_from_pending(b)
@@ -391,7 +395,8 @@ impl Parser for PowerShellParser {
 
             // Try import-module
             match try_parse_import_module(trimmed, line_number) {
-                ParseEvent::Complete(entry) => {
+                ParseEvent::Complete(mut entry) => {
+                    entry.value = line.to_string();
                     let (pending_entry_to_add, merged) =
                         merge_pending_with_structured(pending_entry.take(), entry, |b| {
                             self.build_entry_from_pending(b)
@@ -565,7 +570,7 @@ impl Parser for PowerShellParser {
                             if pending.can_merge_down() {
                                 let merged = format!("{}\n{}", pending.raw_content(), line);
                                 (
-                                    merged.lines().map(String::from).collect::<Vec<_>>(),
+                                    merged.split('\n').map(String::from).collect::<Vec<_>>(),
                                     pending.start_line,
                                 )
                             } else {
@@ -642,7 +647,7 @@ impl Parser for PowerShellParser {
         }
 
         // Warn about unclosed active block
-        if let Some(block) = active_block {
+        if let Some(mut block) = active_block {
             let msg = match block.entry_hint {
                 Some(EntryType::Function) => "Unclosed function definition at end of file",
                 Some(EntryType::EnvVar) => {
@@ -652,6 +657,9 @@ impl Parser for PowerShellParser {
                 _ => "Unclosed block at end of file",
             };
             result.add_warning(crate::model::ParseWarning::new(block.start_line, msg, ""));
+            // Keep the raw text as Code so saving never deletes it
+            block.entry_hint = Some(EntryType::Code);
+            result.add_entry(self.build_entry_from_pending(block));
         }
 
         result

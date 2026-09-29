@@ -58,6 +58,8 @@ pub fn restore_snapshot(profile: &mut ShellProfile, snapshot: UndoSnapshot) {
             file.content = content;
             file.entries = entries;
             file.dirty = dirty;
+            file.format = old.map(|f| f.format).unwrap_or_default();
+            file.load_error = old.and_then(|f| f.load_error.clone());
             file.expanded = old.is_none_or(|f| f.expanded);
             file.writable = old.is_none_or(|f| f.writable);
             file
@@ -179,7 +181,7 @@ pub fn save_dirty_files(profile: &mut ShellProfile) -> anyhow::Result<Vec<String
             content.push('\n');
         }
 
-        std::fs::write(&file.path, &content)?;
+        crate::utils::fs::atomic_write(&file.path, &file.format.encode(&content), true)?;
         file.content = content;
         file.dirty = false;
         saved.push(file.path.display().to_string());

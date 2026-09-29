@@ -2095,19 +2095,11 @@ impl TuiApp {
         match modified {
             Ok(true) => {
                 // Re-parse the file
-                let content = std::fs::read_to_string(&path)?;
                 let parser = crate::parser::get_parser(self.profile.shell_type);
-                let result = parser.parse(&content);
-                let file = &mut self.profile.files[fi];
-                file.entries = result
-                    .entries
-                    .into_iter()
-                    .map(|mut e| {
-                        e.file_index = fi;
-                        e
-                    })
-                    .collect();
-                file.content = content;
+                if let Err(e) = self.profile.files[fi].load_from_disk(parser.as_ref(), fi) {
+                    self.message = Some(format!("Reload failed: {}", e));
+                    return Ok(());
+                }
                 self.rebuild_list();
                 self.message = Some(format!("Reloaded: {}", path.display()));
             }

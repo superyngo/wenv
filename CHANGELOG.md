@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 2026-09-29
 
+- fix(parser): unclosed function/block at EOF is kept as a `Code` entry instead of being dropped (saving no longer deletes those lines); `strip_quotes` no longer panics on a lone quote (`export FOO="`, `source '`, `$env:X = "`); alias/export/source entries keep their original indentation; PowerShell no longer uses `.lines()` (audit C1, C2, H1).
+- fix(io): rc files keep their encoding on save — UTF-8/UTF-16 BOM, CRLF and missing final newline are replayed (new `utils::text::TextFormat`); non-UTF-8 files are shown read-only with a named warning instead of aborting startup (audit H2, H4, L1, L2).
+- fix(io): rc files and `config.toml` are written via temp file + rename, follow symlinks, keep permissions and leave a `<name>.bak` (new `utils::fs::atomic_write`) (audit C4).
+- test: byte-exact round-trip table tests for both shells (`tests/roundtrip_tests.rs`) (audit T3).
+
 - docs: reorganize documentation into `docs/{reference,adr,spec,plan,debug,audit}` with folder indexes; `CONTEXT.md` is now the entry index and the glossary moved to `docs/reference/glossary.md`. Specs/plans moved out of `docs/superpowers/` and `.opencode/plans/`, given `Status:` lines, and spec filenames paired with plans. Stale `ENTRY_MODEL`/`PARSE_FORMAT_FLOW` docs archived as superseded specs; new English `ARCHITECTURE`, `ENTRY_MODEL`, `KEYMAP` references (keymap now lists `y` redo). `CLAUDE.md` slimmed to a pointer to `AGENTS.md`. Added ADR 0002 recording the v0.17 reversal of ADR 0001's config fallback chain, and `docs/plan/BACKLOG.md`.
 
 ## [v0.21.0] - 2026-07-18

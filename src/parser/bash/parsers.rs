@@ -125,8 +125,6 @@ pub fn try_parse_env(line: &str, line_num: usize) -> ParseEvent {
 
     // Try complete export
     if let Some(caps) = EXPORT_RE.captures(line) {
-        let (value_clean, _inline_comment) = extract_comment(&caps[2], '#');
-        let _value = strip_quotes(&value_clean);
         return ParseEvent::Complete(
             Entry::new(EntryType::EnvVar, caps[1].to_string(), line.to_string())
                 .with_line_number(line_num),

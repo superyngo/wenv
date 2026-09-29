@@ -104,7 +104,7 @@ impl Config {
         }
         cfg.source_path = path.clone();
         let serialized = toml::to_string_pretty(&cfg)?;
-        std::fs::write(&path, &serialized)?;
+        crate::utils::fs::atomic_write(&path, serialized.as_bytes(), false)?;
         eprintln!("✓ Created default config at: {}", path.display());
         Ok(cfg)
     }
@@ -114,7 +114,7 @@ impl Config {
             std::fs::create_dir_all(parent)?;
         }
         let serialized = toml::to_string_pretty(self)?;
-        std::fs::write(&self.source_path, &serialized)?;
+        crate::utils::fs::atomic_write(&self.source_path, serialized.as_bytes(), true)?;
         Ok(())
     }
 }
