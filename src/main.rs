@@ -3,6 +3,8 @@
 use anyhow::Result;
 use clap::Parser;
 
+use std::io::IsTerminal;
+
 use wenv::cli::actions;
 use wenv::cli::args::{Cli, SubCmd};
 use wenv::i18n;
@@ -17,10 +19,14 @@ fn startup_file_check(
     shell_key: &str,
 ) -> Result<()> {
     let mut paths_to_remove: Vec<std::path::PathBuf> = Vec::new();
+    let interactive = std::io::stdin().is_terminal();
 
     for file in &mut profile.files {
         if !file.exists {
             println!("⚠ File not found: {}", file.path.display());
+            if !interactive {
+                continue;
+            }
             let create = dialoguer::Confirm::new()
                 .with_prompt("  Create this file?")
                 .default(true)
@@ -94,16 +100,7 @@ fn main() -> Result<()> {
 
     // Early exit: open resolved wenv config in $EDITOR
     if matches!(cli.subcommand, Some(SubCmd::Config)) {
-        let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
-            if cfg!(windows) {
-                "notepad".to_string()
-            } else {
-                "vi".to_string()
-            }
-        });
-        std::process::Command::new(&editor)
-            .arg(&config.source_path)
-            .status()?;
+        wenv::tui::editor::editor_command(&config.source_path).status()?;
         return Ok(());
     }
 

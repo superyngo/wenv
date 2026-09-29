@@ -3,6 +3,8 @@
 use anyhow::Result;
 use dialoguer::Select;
 
+use std::io::IsTerminal;
+
 use crate::config::path_resolver;
 use crate::i18n::Messages;
 use crate::model::{Config, ShellType};
@@ -48,6 +50,14 @@ pub fn execute(config: &Config, shell_type: ShellType, _messages: &'static Messa
         })
         .collect();
 
+    if !std::io::stdin().is_terminal() {
+        eprintln!("Interactive selection requires a terminal. Configured files:");
+        for item in &items {
+            eprintln!("  {}", item);
+        }
+        anyhow::bail!("stdin is not a terminal");
+    }
+
     let selection = Select::new()
         .with_prompt(format!("Select file to edit ({})", shell_key))
         .items(&items)
@@ -60,13 +70,6 @@ pub fn execute(config: &Config, shell_type: ShellType, _messages: &'static Messa
         return Ok(());
     }
 
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| {
-        if cfg!(windows) {
-            "notepad".into()
-        } else {
-            "vi".into()
-        }
-    });
-    std::process::Command::new(&editor).arg(path).status()?;
+    crate::tui::editor::editor_command(path).status()?;
     Ok(())
 }

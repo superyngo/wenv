@@ -103,6 +103,14 @@ impl TuiApp {
     }
 
     pub fn run(&mut self) -> Result<()> {
+        // Restore the terminal before the panic message prints, so a panic never leaves
+        // the shell in raw mode / alternate screen.
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let _ = disable_raw_mode();
+            let _ = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
+            previous_hook(info);
+        }));
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen)?;
