@@ -1,4 +1,5 @@
 # Multi-Layer Tree, Config Fallback, and Release Bundling — Implementation Plan
+Status: Shipped (2026-05-25)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,9 +9,9 @@
 
 **Tech Stack:** Rust (edition 2021), ratatui, dialoguer, anyhow, toml, serde, regex, glob, dirs. Tests use `tempfile`. CI uses GitHub Actions with cross-rs for musl targets.
 
-**Spec:** `docs/superpowers/specs/2026-05-22-multi-layer-tree-and-config-fallback-design.md`
+**Spec:** `docs/spec/2026-05-22-multi-layer-tree-and-config-fallback.md`
 **ADR:** `docs/adr/0001-config-resolution-strategy.md`
-**Glossary:** `CONTEXT.md`
+**Glossary:** `docs/reference/glossary.md`
 
 ---
 

@@ -161,6 +161,8 @@ cargo test --test integration # Integration tests
 cargo test tui_logic_tests # TUI operations tests
 ```
 
+Developer documentation starts at [CONTEXT.md](CONTEXT.md).
+
 ## Configuration
 
 wenv keeps two distinct pieces of configuration:

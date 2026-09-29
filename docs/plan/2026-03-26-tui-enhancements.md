@@ -1,4 +1,5 @@
 # TUI Enhancements Implementation Plan
+Status: Shipped (2026-03-26)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +9,7 @@
 
 **Tech Stack:** Rust, ratatui (TUI), crossterm (terminal), dialoguer (prompts), toml (config), regex (patterns)
 
-**Spec:** `docs/superpowers/specs/2026-03-26-tui-enhancements-design.md`
+**Spec:** `docs/spec/2026-03-26-tui-enhancements.md`
 
 ---
 

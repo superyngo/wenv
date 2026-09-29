@@ -1,7 +1,7 @@
 # Snippet Template Menu Design
+Status: Shipped (2026-03-30)
 
 **Date:** 2026-03-30
-**Status:** Draft
 
 ## Overview
 

@@ -1,4 +1,5 @@
 # TUI Enhancements Batch 2 — Design Spec
+Status: Shipped (2026-03-26)
 
 ## Overview
 

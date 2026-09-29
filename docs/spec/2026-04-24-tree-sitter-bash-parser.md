@@ -1,4 +1,5 @@
 # feature/tree-sitter 開發意圖整理
+Status: Abandoned
 
 ## 意圖 (Intent)
 

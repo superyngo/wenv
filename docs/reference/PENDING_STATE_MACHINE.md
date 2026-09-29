@@ -414,7 +414,7 @@ echo "hello"
 
 | 功能 | 檔案位置 |
 |------|----------|
-| pending 狀態機主邏輯 | `src/parser/bash/mod.rs:239-443` |
-| merge_trailing() | `src/model/entry.rs:90-136` |
-| CodeBlockBuilder | `src/parser/builders/code_block.rs` |
+| pending 狀態機主邏輯 | `PendingBlock` (`src/parser/pending.rs`), `BashParser::parse` |
+| merge_trailing() | `Entry::merge_trailing` (`src/model/entry.rs`) |
+| CommentBlockBuilder | `src/parser/builders/comment.rs` |
 | 控制結構偵測 | `src/parser/bash/control.rs` |

@@ -1,4 +1,5 @@
 # Entry 資料模型與 Parser/Formatter 邏輯
+Status: Superseded by ../reference/ENTRY_MODEL.md
 
 本文件詳細說明 wenv 的 Entry 資料結構、各類型 Entry 的特性，以及 Parser 和 Formatter 的處理邏輯。
 

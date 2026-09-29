@@ -1,13 +1,13 @@
 # Multi-Layer TUI Tree, Config Fallback, and Release Bundling — Design Spec
+Status: Shipped (2026-05-25)
 
 **Date:** 2026-05-22
-**Status:** Draft (pending review)
 **Scope:** wenv v0.17 — breaking changes
 **Related:** `docs/adr/0001-config-resolution-strategy.md`
 
 ## Terminology
 
-Per `CONTEXT.md`:
+Per `docs/reference/glossary.md`:
 - **Group** — top-level TUI tree node bundling files from a single glob/dir/var pattern. Internal struct is `DirGroup` (name predates glossary); user-facing copy says "group", not "directory".
 - **File** — single shell-config file on disk. Internal struct is `ProfileFile`.
 - **Entry** — parsed item within a File. Internal struct is `Entry`.

@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-05-22
-**Context spec:** `docs/superpowers/specs/2026-05-22-multi-layer-tree-and-config-fallback-design.md`
+**Context spec:** `docs/spec/2026-05-22-multi-layer-tree-and-config-fallback.md`
 
 ## Context
 

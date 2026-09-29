@@ -1,4 +1,5 @@
 # Multi-step Undo/Redo & Config Delete Prompt Improvements
+Status: Shipped (2026-03-26)
 
 ## Problem
 

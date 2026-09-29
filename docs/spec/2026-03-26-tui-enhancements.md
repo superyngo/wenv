@@ -1,7 +1,7 @@
 # TUI Enhancements Design Spec
+Status: Shipped (2026-03-26)
 
 **Date**: 2026-03-26
-**Status**: Draft
 **Scope**: 11 features covering key rebinding, new operations (copy/remark), parser improvements, config management, startup validation, and platform fixes.
 
 ---

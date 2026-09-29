@@ -1,6 +1,7 @@
 # AGENTS.md
 
-Instructions for AI coding agents working in this repository.
+Instructions for AI coding agents working in this repository. Documentation starts at
+[CONTEXT.md](CONTEXT.md); reference facts live in `docs/reference/`, not here.
 
 ## Project
 
@@ -138,24 +139,12 @@ tests/                    # Integration tests (TUI logic, parser fixes, config)
 
 ## Key Semantics
 
-### Entry Value Field
-Stores **complete raw syntax** — never strip keywords or quotes:
-- Alias: `"alias -g ll='ls -la'"` (not just the value)
-- EnvVar: `"export PATH=\"/usr/bin\""` (not just the path)
-- Function: full definition including `name() { ... }`
-- Source: `"source ~/.profile"` (not just the path)
+Read [docs/reference/ENTRY_MODEL.md](docs/reference/ENTRY_MODEL.md) before touching parsers or
+`Entry.value`. The two rules that cause most bugs:
 
-### Newline Formats (Critical — prevents off-by-one bugs)
-| Format | Rule | Example | Used By |
-|--------|------|---------|---------|
-| **Separator** | N lines = N-1 `\n` | `"line1\nline2"` | `value`, `value_buffer` |
-| **Terminator** | N lines = N `\n` | `"line1\nline2\n"` | File contents |
-
-- Split `value` with `value.split('\n')`, **never** `.lines()` or `split_lines_preserve_trailing()`.
-- When writing separator-format content to file, append `\n` terminator.
-
-### Lenient Parsing
-Parsers skip unparseable lines with warnings and continue. This is intentional.
+- `value` stores **complete raw syntax** — never strip keywords or quotes.
+- `value` is separator format (N lines = N-1 `\n`): split with `value.split('\n')`, never
+  `.lines()`; append a `\n` terminator when writing to a file.
 
 ## Workflow
 
@@ -163,4 +152,5 @@ Parsers skip unparseable lines with warnings and continue. This is intentional.
 2. Check `git status` for new feature work — confirm sync with remote.
 3. Implement precisely what is needed — no over-engineering.
 4. Run `cargo clippy -- -D warnings && cargo fmt -- --check && cargo test` after changes.
-5. Append `Unreleased Update` to `CHANGELOG.md` and update `CLAUDE.md`/`README.md` as needed.
+5. Add a `CHANGELOG.md` entry under `## [Unreleased]` → `### YYYY-MM-DD`, and update `README.md`
+   and affected `docs/` files (see [CONTEXT.md](CONTEXT.md)).

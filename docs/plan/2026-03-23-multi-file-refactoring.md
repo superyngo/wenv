@@ -1,4 +1,5 @@
 # Multi-File Refactoring Implementation Plan
+Status: Shipped (2026-03-25)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +9,7 @@
 
 **Tech Stack:** Rust, ratatui 0.26, crossterm 0.27, clap 4, fuzzy-matcher, glob (crate), tempfile, dialoguer
 
-**Spec:** `docs/superpowers/specs/2026-03-23-multi-file-refactoring-design.md`
+**Spec:** `docs/spec/2026-03-23-multi-file-refactoring.md`
 
 ---
 

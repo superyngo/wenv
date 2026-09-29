@@ -1,4 +1,5 @@
 # Parse 與 Format 完整流程
+Status: Superseded by ../reference/PARSER_FLOW.md
 
 本文件詳細說明 wenv 的 Parser 輸入處理流程和 Formatter 輸出處理流程。
 

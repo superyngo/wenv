@@ -5,7 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [Unreleased]
+
+### 2026-09-29
+
+- docs: reorganize documentation into `docs/{reference,adr,spec,plan,debug,audit}` with folder indexes; `CONTEXT.md` is now the entry index and the glossary moved to `docs/reference/glossary.md`. Specs/plans moved out of `docs/superpowers/` and `.opencode/plans/`, given `Status:` lines, and spec filenames paired with plans. Stale `ENTRY_MODEL`/`PARSE_FORMAT_FLOW` docs archived as superseded specs; new English `ARCHITECTURE`, `ENTRY_MODEL`, `KEYMAP` references (keymap now lists `y` redo). `CLAUDE.md` slimmed to a pointer to `AGENTS.md`. Added ADR 0002 recording the v0.17 reversal of ADR 0001's config fallback chain, and `docs/plan/BACKLOG.md`.
 
 ## [v0.21.0] - 2026-07-18
 

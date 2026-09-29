@@ -1,4 +1,5 @@
 # wenv Multi-File Refactoring Design
+Status: Shipped (2026-03-25)
 
 ## Problem Statement
 
