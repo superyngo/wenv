@@ -633,7 +633,9 @@ fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     f.render_widget(Clear, popup_area);
 
     let title = match &app.mode {
-        AppMode::ConfirmDelete | AppMode::ConfirmDeleteFile => " Confirm Delete ",
+        AppMode::ConfirmDelete | AppMode::ConfirmDeleteFile => {
+            app.messages.tui_confirm_delete_title
+        }
         AppMode::ConfirmQuit => " Unsaved Changes ",
         _ => " Confirm ",
     };
@@ -794,7 +796,10 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(" Entry Detail (e:edit r:remark ↑↓:scroll Esc:close) ")
+        .title(format!(
+            "{}(e:edit r:remark ↑↓:scroll Esc:close) ",
+            app.messages.tui_entry_details_title
+        ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 

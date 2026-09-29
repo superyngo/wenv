@@ -91,6 +91,11 @@ fn startup_file_check(
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Session-only override; runs before any thread or render state exists
+    if cli.no_color {
+        std::env::set_var("NO_COLOR", "1");
+    }
+
     // Determine shell type (runtime decision, no config dependency)
     let shell_type = get_shell_type(cli.shell.map(|s| s.into()), None);
 
@@ -120,7 +125,11 @@ fn main() -> Result<()> {
         }
     };
 
-    let messages = i18n::init_messages(&config.ui.language);
+    let language = cli
+        .lang
+        .clone()
+        .unwrap_or_else(|| config.ui.language.clone());
+    let messages = i18n::init_messages(&language);
 
     // Source mode: file selection menu
     let is_source = cli.source || cli.command.as_deref() == Some(".");

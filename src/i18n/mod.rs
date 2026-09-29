@@ -140,38 +140,44 @@ const EMBEDDED_EN: &str = include_str!("../../assets/i18n/en.toml");
 /// Global messages instance
 static MESSAGES: OnceLock<Messages> = OnceLock::new();
 
-/// Load messages from external file or embedded English TOML
-fn load_messages_from_toml(lang: &str) -> Messages {
-    // If not English, try external file first
-    if lang != "en" {
-        let config_dir = crate::Config::config_dir(); // fallback: Config::config_dir retained for i18n; not used by resolve_or_create
-        let lang_file = config_dir.join("i18n").join(format!("{}.toml", lang));
+/// Languages compiled into the binary (external `i18n/<lang>.toml` files still take priority).
+const EMBEDDED_LANGUAGES: &[(&str, &str)] =
+    &[("zh-TW", include_str!("../../languages/zh-TW.toml"))];
 
-        match std::fs::read_to_string(&lang_file) {
-            Ok(content) => match toml::from_str::<MessagesToml>(&content) {
-                Ok(toml_messages) => return toml_messages.into(),
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to parse language file {}: {}",
-                        lang_file.display(),
-                        e
-                    );
+/// Build messages: embedded English overlaid per key with the requested language, so a
+/// missing key in a translation falls back to English instead of failing the whole file.
+fn load_messages_from_toml(lang: &str) -> Messages {
+    let mut base: toml::Table =
+        toml::from_str(EMBEDDED_EN).expect("Failed to parse embedded English messages");
+
+    if lang != "en" {
+        let lang_file = crate::Config::config_dir()
+            .join("i18n")
+            .join(format!("{}.toml", lang));
+        let source = std::fs::read_to_string(&lang_file).ok().or_else(|| {
+            EMBEDDED_LANGUAGES
+                .iter()
+                .find(|(name, _)| *name == lang)
+                .map(|(_, src)| src.to_string())
+        });
+        match source {
+            Some(src) => match toml::from_str::<toml::Table>(&src) {
+                Ok(table) => {
+                    for (key, value) in table {
+                        if value.is_str() && base.contains_key(&key) {
+                            base.insert(key, value);
+                        }
+                    }
                 }
+                Err(e) => eprintln!("Warning: Failed to parse language '{}': {}", lang, e),
             },
-            Err(e) => {
-                eprintln!(
-                    "Warning: Failed to read language file {}: {}",
-                    lang_file.display(),
-                    e
-                );
-            }
+            None => eprintln!("Warning: Unknown language '{}', using English", lang),
         }
     }
 
-    // Fallback to embedded English
-    let toml_messages: MessagesToml =
-        toml::from_str(EMBEDDED_EN).expect("Failed to parse embedded English messages");
-    toml_messages.into()
+    base.try_into::<MessagesToml>()
+        .expect("Embedded English messages are complete")
+        .into()
 }
 
 /// Initialize and get the global messages instance
@@ -190,5 +196,13 @@ mod tests {
     fn test_load_embedded_english() {
         let messages = super::init_messages("en");
         assert_eq!(messages.no_entries_found, "No entries found.");
+    }
+
+    #[test]
+    fn test_embedded_zh_tw_loads_and_missing_keys_fall_back() {
+        let zh = super::load_messages_from_toml("zh-TW");
+        assert_ne!(zh.tui_help_quit, "Quit");
+        let en = super::load_messages_from_toml("en");
+        assert_eq!(en.tui_help_quit, "Quit");
     }
 }

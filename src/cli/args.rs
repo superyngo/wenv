@@ -15,6 +15,14 @@ pub struct Cli {
     #[arg(short, long, value_name = "PATH", global = true)]
     pub config: Option<std::path::PathBuf>,
 
+    /// UI language for this run only (e.g. en, zh-TW); overrides config.toml
+    #[arg(long, value_name = "LANG", global = true)]
+    pub lang: Option<String>,
+
+    /// Disable colors for this run (same as setting NO_COLOR)
+    #[arg(long, global = true)]
+    pub no_color: bool,
+
     /// Open source file in $EDITOR (same as "wenv .")
     #[arg(long)]
     pub source: bool,

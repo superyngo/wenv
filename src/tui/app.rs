@@ -713,7 +713,7 @@ impl TuiApp {
                     let remaining = self.undo_stack.len();
                     self.message = Some(format!("Undone ({remaining} left)"));
                 } else {
-                    self.message = Some("Nothing to undo".into());
+                    self.message = Some(self.messages.tui_msg_nothing_to_undo.into());
                 }
             }
             Action::Redo => {
