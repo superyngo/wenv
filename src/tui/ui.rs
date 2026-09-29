@@ -222,7 +222,7 @@ pub fn draw(f: &mut Frame, app: &mut TuiApp) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
-        .split(f.size());
+        .split(f.area());
 
     draw_title(f, chunks[0], app);
     draw_list(f, chunks[1], app);
@@ -241,19 +241,19 @@ pub fn draw(f: &mut Frame, app: &mut TuiApp) {
         | AppMode::ConfirmRemoveFile
         | AppMode::ConfirmCreateFile
         | AppMode::ConfirmDeleteFile => {
-            draw_confirm_popup(f, f.size(), app);
+            draw_confirm_popup(f, f.area(), app);
         }
         AppMode::ShowingDetail => {
-            draw_detail_popup(f, f.size(), app);
+            draw_detail_popup(f, f.area(), app);
         }
         AppMode::ShowingHelp => {
-            draw_help_popup(f, f.size(), app);
+            draw_help_popup(f, f.area(), app);
         }
         AppMode::SelectingSnippet => {
-            draw_snippet_popup(f, f.size(), app);
+            draw_snippet_popup(f, f.area(), app);
         }
         AppMode::TextInput => {
-            draw_text_input_popup(f, f.size(), app);
+            draw_text_input_popup(f, f.area(), app);
         }
         _ => {}
     }
@@ -719,10 +719,10 @@ fn draw_text_input_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
         // Caret cell offset in display cells (CJK chars are double-width).
         let pre: String = chars[scroll.min(chars.len())..cursor].iter().collect();
         let cursor_x = inner.x + pre.width() as u16;
-        f.set_cursor(
+        f.set_cursor_position((
             cursor_x.min(inner.x + inner.width.saturating_sub(1)),
             inner.y,
-        );
+        ));
     }
 }
 

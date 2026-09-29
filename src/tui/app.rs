@@ -147,7 +147,7 @@ impl TuiApp {
             }
             terminal.draw(|f| {
                 // Update list_visible_height before drawing (area height minus title, status, search bar, header+separator)
-                let total_height = f.size().height as usize;
+                let total_height = f.area().height as usize;
                 // title(1) + status(1) + search?(1) + column header(1) + separator(1).
                 // Must match the real rendered rows exactly: if this undercounts,
                 // ratatui silently shifts the list offset to keep the selection
@@ -3253,7 +3253,7 @@ mod placement_tests {
         terminal
             .draw(|f| {
                 // Mirror the event_loop sizing exactly.
-                let total_height = f.size().height as usize;
+                let total_height = f.area().height as usize;
                 let chrome = if app.search.is_some() { 5 } else { 4 };
                 app.list_visible_height = total_height.saturating_sub(chrome);
                 app.clamp_scroll_offset();
@@ -3264,7 +3264,7 @@ mod placement_tests {
         assert_eq!(app.list_visible_height, 3);
         assert_eq!(app.scroll_offset, 2);
         let buf = terminal.backend().buffer();
-        let row = |y: u16| -> String { (0..80).map(|x| buf.get(x, y).symbol()).collect() };
+        let row = |y: u16| -> String { (0..80).map(|x| buf[(x, y)].symbol()).collect() };
         // First list row (below title + column header + separator) must show the
         // item at scroll_offset — entry a. If ratatui had shifted the offset,
         // this row would show the next item instead.
