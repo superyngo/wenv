@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### 2026-09-29
+## [v0.22.0] - 2026-09-29
 
 - fix(parser): unclosed function/block at EOF is kept as a `Code` entry instead of being dropped (saving no longer deletes those lines); `strip_quotes` no longer panics on a lone quote (`export FOO="`, `source '`, `$env:X = "`); alias/export/source entries keep their original indentation; PowerShell no longer uses `.lines()` (audit C1, C2, H1).
 - fix(io): rc files keep their encoding on save — UTF-8/UTF-16 BOM, CRLF and missing final newline are replayed (new `utils::text::TextFormat`); non-UTF-8 files are shown read-only with a named warning instead of aborting startup (audit H2, H4, L1, L2).
