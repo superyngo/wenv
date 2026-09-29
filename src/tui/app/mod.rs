@@ -591,6 +591,9 @@ mod add_pattern_tests {
 
     #[test]
     fn edit_file_refuses_when_dirty() {
+        // CI stdout is not a TTY, so crossterm's size() ioctl fails; provide env fallback
+        std::env::set_var("COLUMNS", "80");
+        std::env::set_var("LINES", "24");
         let td = tempfile::tempdir().unwrap();
         let f = td.path().join("x.zsh");
         std::fs::write(&f, "alias x=1\n").unwrap();
