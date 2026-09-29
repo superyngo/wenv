@@ -413,7 +413,7 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     let is_readonly = !file.writable;
 
                     let prefix = if is_selected { format!("{}● ", entry_indent) } else { format!("{}  ", entry_indent) };
-                    let name_str = format!("{:<20}", sanitize_inline(&entry.name));
+                    let name_str = pad_display(&sanitize_inline(&entry.name), 20);
                     let type_str = format!("{:<10}", entry.entry_type.to_string());
                     let line_str = format!("{:<10}", format_line_info(entry));
                     let value_str = format_value_display(&entry.value);
@@ -471,7 +471,7 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                         let char_indices = app
                             .search
                             .as_ref()
-                            .and_then(|s| s.matched_char_indices(*fi, *ei, entry.name.len()));
+                            .and_then(|s| s.matched_char_indices(*fi, *ei, entry.name.chars().count()));
                         let (name_hl, value_hl) = char_indices.unwrap_or_default();
 
                         let name_normal = Style::default().fg(Color::White);
@@ -1033,5 +1033,23 @@ mod tests {
         assert_eq!(inline_position_hint(10, 0, 10, 20), "col 11/10");
         // Overflow: caret column plus the 1-based visible char window.
         assert_eq!(inline_position_hint(9, 5, 30, 10), "col 10/30  ⟨6–15⟩");
+    }
+}
+
+/// Left-align `s` in a column of `width` terminal cells (CJK/emoji count as two).
+fn pad_display(s: &str, width: usize) -> String {
+    let w = UnicodeWidthStr::width(s);
+    format!("{}{}", s, " ".repeat(width.saturating_sub(w)))
+}
+
+#[cfg(test)]
+mod pad_tests {
+    use super::pad_display;
+
+    #[test]
+    fn test_pad_display_counts_cells_not_chars() {
+        assert_eq!(pad_display("ab", 4), "ab  ");
+        assert_eq!(pad_display("日本", 6), "日本  ");
+        assert_eq!(pad_display("toolong", 3), "toolong");
     }
 }

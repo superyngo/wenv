@@ -521,7 +521,13 @@ impl TuiApp {
                         self.pending_delete_file_fi = Some(fi);
                         self.previous_mode = Some(self.mode.clone());
                         self.mode = AppMode::ConfirmDeleteFile;
-                        self.message = Some(format!("Move file '{}' to trash? (y/n)", name));
+                        let unsaved = if self.profile.files[fi].dirty {
+                            " Unsaved edits will be lost."
+                        } else {
+                            ""
+                        };
+                        self.message =
+                            Some(format!("Move file '{}' to trash?{} (y/n)", name, unsaved));
                         return Ok(EditorRequest::None);
                     }
                     let resolved_path = &self.profile.files[fi].path;
@@ -849,7 +855,10 @@ impl TuiApp {
                                         Some(format!("Moved to trash: {}", path.display()));
                                 }
                                 Err(e) => {
-                                    self.message = Some(format!("Failed to move to trash: {}", e));
+                                    self.message = Some(format!(
+                                        "Trash unavailable, file left in place: {}",
+                                        e
+                                    ));
                                 }
                             }
                         }
@@ -1668,6 +1677,7 @@ impl TuiApp {
                 .min(self.profile.files[target_fi].entries.len());
 
             // Insert at target
+            let inserted_count = entries_to_move.len();
             for (i, mut entry) in entries_to_move.into_iter().enumerate() {
                 entry.file_index = target_fi;
                 self.profile.files[target_fi]
@@ -1699,9 +1709,20 @@ impl TuiApp {
             } else {
                 self.rebuild_list();
             }
-            self.cursor = ms
-                .insertion_cursor
-                .min(self.visible_items.len().saturating_sub(1));
+            // Land on the last inserted entry by identity: rows removed above the target
+            // by a cut shift visible indices, so `insertion_cursor` can point elsewhere.
+            let last_inserted = adjusted_pos + inserted_count.saturating_sub(1);
+            self.cursor = self
+                .visible_items
+                .iter()
+                .position(|it| {
+                    matches!(it, ListItem::Entry(fi, ei)
+                    if *fi == target_fi && *ei == last_inserted)
+                })
+                .unwrap_or_else(|| {
+                    ms.insertion_cursor
+                        .min(self.visible_items.len().saturating_sub(1))
+                });
             self.clamp_scroll_offset();
             self.message = Some(if ms.cut { "Moved" } else { "Copied" }.into());
         }
@@ -2520,6 +2541,42 @@ mod add_pattern_tests {
             vec![],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn cut_drop_downward_lands_cursor_on_moved_entry() {
+        let td = tempfile::tempdir().unwrap();
+        let f = td.path().join("x.zsh");
+        std::fs::write(&f, "alias a=1\nalias b=2\nalias c=3\n").unwrap();
+        let mut app = app_for(&td, vec![f.display().to_string()]);
+        app.profile.toggle_all(true);
+        app.rebuild_list();
+        let first = app
+            .visible_items
+            .iter()
+            .position(|it| matches!(it, ListItem::Entry(_, 0)))
+            .unwrap();
+        app.cursor = first;
+        app.handle_action(Action::Cut).unwrap();
+        // Place after the last entry
+        let last = app
+            .visible_items
+            .iter()
+            .position(|it| matches!(it, ListItem::Entry(_, 2)))
+            .unwrap();
+        app.move_state.as_mut().unwrap().insertion_cursor = last;
+        app.handle_action(Action::Confirm).unwrap();
+
+        let names: Vec<_> = app.profile.files[0]
+            .entries
+            .iter()
+            .map(|e| e.name.clone())
+            .collect();
+        assert_eq!(names, vec!["b", "c", "a"]);
+        assert!(matches!(
+            app.visible_items[app.cursor],
+            ListItem::Entry(0, 2)
+        ));
     }
 
     #[test]
