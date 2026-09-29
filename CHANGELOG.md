@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(tui): cancelling delete no longer clears redo or evicts undo (snapshot pushed on confirm); reload clears both stacks when the file set changes; editing a file externally with unsaved changes is refused (audit H3, H6).
 - fix(ui): entry-detail/confirm titles and "nothing to undo" come from the i18n catalog; search highlights use char counts (not bytes) and the NAME column pads by display width so CJK names align (audit M7).
 - feat(i18n): translations overlay English per key (a missing key no longer fails the whole file), `zh-TW` is embedded in the binary, and `--lang <code>` / `--no-color` set the language/colors for one run (audit M5, L5). 
-- feat(tui): text inputs (filter, path prompt, inline edit) gain `Ctrl+A/E`, `Ctrl+U/K/W/Y` (kill/yank), `Alt+B/F`/`Ctrl+←/→` word motion; other Ctrl/Alt chords no longer insert text (audit M6).
+- feat(tui): text inputs (filter, path prompt, inline edit) gain `Ctrl+A/E`, `Ctrl+U/K/W/Y` (kill/yank), `Alt+B/F`/`Ctrl+←/→` word motion and `Ctrl+Z` per-field undo; other Ctrl/Alt chords no longer insert text (audit M6).
 - fix(tui): after a cut-drop the cursor lands on the moved entry (audit M1); trash prompt warns about unsaved edits and failure says the file was left in place (audit M2).
 - chore(deps): upgrade `ratatui` 0.30 / `crossterm` 0.29 (clears `lru`/`paste` advisories), bump `anyhow`, drop unused `time`, `colored`, `terminal_size`, `thiserror` (clears RUSTSEC-2026-0009); `cargo audit` is now clean (audit H8, L3).
 - perf: `$VAR`/`%VAR%` regexes compiled once (audit L4).

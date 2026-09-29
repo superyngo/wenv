@@ -261,9 +261,9 @@ Coverage was not measured (no `cargo-llvm-cov`/tarpaulin installed).
 All findings were addressed the same day; commits are listed in [../plan/BACKLOG.md](../plan/BACKLOG.md)
 under Done. Notes on deviations from the recommended fixes:
 
-- **T4** (test hermeticity) is not scheduled: env vars used with `set_var` have unique names and
-  no other reader (recorded under Blocked in the backlog).
-- **M6**: kill/yank, word motion and caret shortcuts shipped; per-field undo did not.
+- **T4**: integration tests no longer call `set_var` (they read `PATH`); one unit test in
+  `add_env_var_pattern_resolves` keeps a unique-name `set_var` because it needs a temp dir path.
+- **M6**: kill/yank, word motion, caret shortcuts and per-field `Ctrl+Z` shipped.
 - **M2**: no permanent-delete fallback was added (irreversible); the prompt now warns about unsaved
   edits and a trash failure says the file was left in place.
 - **H5**: moves *inside* a glob/dir group are refused (config order cannot express them) instead of

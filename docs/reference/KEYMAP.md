@@ -24,6 +24,7 @@ Normal-mode bindings (source of truth: `map_key` family in `src/tui/keys.rs`). S
 | `Ctrl+A` / `Ctrl+E` | In any text input: caret to line start / end |
 | `Ctrl+U` / `Ctrl+K` / `Ctrl+W` / `Ctrl+Y` | In any text input: kill to start / kill to end / delete word / yank |
 | `Alt+B` / `Alt+F`, `Ctrl+←` / `Ctrl+→` | In any text input: word left / right |
+| `Ctrl+Z` | In any text input: undo the last edit in that field |
 | `Esc` | Clear selection / exit mode |
 | `w` | Save all changes |
 | `?` | Help popup (scrollable, with About section from `Cargo.toml`) |

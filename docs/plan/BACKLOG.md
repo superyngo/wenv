@@ -28,12 +28,11 @@ The single living tracker for open follow-ups. Rows move to **Done** with the cl
 | Release CI gate + least-privilege permissions (audit H7) | `7b492a2` |
 | Shared Bash/PowerShell pending-block core (audit L7) | `ba5f02b` |
 | Split `tui/app.rs`; `handle_action` is a ~190-line dispatcher (audit L6) | `a5e82a1` |
-| Every user-visible TUI string in the i18n catalog, complete zh-TW (audit M5) | this commit |
-| Popup panics on tiny terminals (found during audit verification) | this commit |
+| Every user-visible TUI string in the i18n catalog, complete zh-TW (audit M5) | `bbaa628` |
+| Popup panics on tiny terminals (found during audit verification) | `bbaa628` |
+| Per-field `Ctrl+Z` undo in text inputs (audit M6 remainder) | `1c7672a` |
+| Hermetic tests: `set_var` removed from integration tests (audit T4; one unique-name `set_var` remains in `add_env_var_pattern_resolves`, single reader) | `1c7672a` |
 
 ## Blocked / not scheduled
 
-| Item | Reason |
-|---|---|
-| Hermetic env in tests (audit T4) | `set_var` calls use unique variable names (`WENV_TEST_VAR*`) and nothing else reads them, so parallel runs cannot collide; revisit if the tests move to edition 2024 (`set_var` becomes `unsafe`). |
-| Field-level undo in text inputs (audit M6 remainder) | Kill/yank, word motion and caret editing are done; per-field undo has no user demand yet. |
+None.

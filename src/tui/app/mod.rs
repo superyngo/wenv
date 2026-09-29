@@ -45,6 +45,8 @@ pub struct TuiApp {
     /// Snapshot taken when delete is requested; pushed to `undo_stack` only on confirm.
     /// Text last removed by a kill shortcut (`Ctrl+U/K/W`), for `Ctrl+Y`.
     pub kill_ring: String,
+    /// Recent (mode, text, caret) states of the focused text input, for `Ctrl+Z`.
+    pub field_undo: Vec<(AppMode, String, usize)>,
     pub pending_undo: Option<crate::tui::state::UndoSnapshot>,
     pub move_state: Option<MoveState>,
     pub search: Option<SearchState>,
@@ -89,6 +91,7 @@ impl TuiApp {
             undo_stack: VecDeque::new(),
             redo_stack: Vec::new(),
             kill_ring: String::new(),
+            field_undo: Vec::new(),
             pending_undo: None,
             move_state: None,
             search: None,
@@ -208,8 +211,79 @@ impl TuiApp {
         Ok(())
     }
 
+    /// Focused text input as (text, caret), chosen by the current mode.
+    fn active_field(&mut self) -> Option<(&mut String, &mut usize)> {
+        match self.mode {
+            AppMode::FilterInput => self.search.as_mut().map(|s| (&mut s.query, &mut s.cursor)),
+            AppMode::TextInput => self
+                .text_input
+                .as_mut()
+                .map(|t| (&mut t.value, &mut t.cursor_pos)),
+            AppMode::InlineEdit => self
+                .inline_edit
+                .as_mut()
+                .map(|e| (&mut e.buffer, &mut e.cursor)),
+            _ => None,
+        }
+    }
+
+    /// Remember the focused field's state before a mutating edit.
+    fn push_field_undo(&mut self) {
+        let mode = self.mode.clone();
+        if self.field_undo.last().is_some_and(|(m, _, _)| *m != mode) {
+            self.field_undo.clear();
+        }
+        if let Some((text, cursor)) = self.active_field() {
+            let entry = (mode, text.clone(), *cursor);
+            self.field_undo.push(entry);
+            if self.field_undo.len() > 50 {
+                self.field_undo.remove(0);
+            }
+        }
+    }
+
+    /// `Ctrl+Z` inside a text input: restore the previous field state.
+    fn field_undo_step(&mut self) {
+        let mode = self.mode.clone();
+        let Some((m, text, cursor)) = self.field_undo.pop() else {
+            return;
+        };
+        if m != mode {
+            self.field_undo.clear();
+            return;
+        }
+        if let Some((buf, cur)) = self.active_field() {
+            *buf = text;
+            *cur = cursor;
+        }
+        if mode == AppMode::FilterInput {
+            self.update_filter();
+        }
+    }
+
     fn handle_action(&mut self, action: Action) -> Result<EditorRequest> {
         self.message = None; // Clear message on any action
+
+        if matches!(action, Action::Confirm | Action::Cancel) {
+            self.field_undo.clear();
+        }
+        if matches!(
+            action,
+            Action::SearchInput(_)
+                | Action::SearchBackspace
+                | Action::SearchDelete
+                | Action::SearchEdit(_)
+                | Action::TextInputChar(_)
+                | Action::TextInputBackspace
+                | Action::TextInputDelete
+                | Action::TextInputEdit(_)
+                | Action::InlineInput(_)
+                | Action::InlineBackspace
+                | Action::InlineDelete
+                | Action::InlineEdit(_)
+        ) {
+            self.push_field_undo();
+        }
 
         match action {
             Action::NavigateUp => self.action_navigate_up(),
@@ -236,6 +310,7 @@ impl TuiApp {
             Action::RangeSelectDown => self.action_range_select_down(),
             Action::Edit => return self.action_edit(),
             Action::EditExternal => return self.action_edit_external(),
+            Action::FieldUndo => self.field_undo_step(),
             Action::InlineEdit(op) => {
                 if let Some(e) = &mut self.inline_edit {
                     crate::tui::line_edit::apply(
@@ -758,6 +833,27 @@ mod inline_edit_tests {
         assert_ne!(app.mode, AppMode::InlineEdit);
         assert_eq!(app.profile.files[0].entries[0].value, "alias ll='ls -lah'");
         assert!(app.profile.files[0].dirty);
+    }
+
+    #[test]
+    fn field_undo_restores_previous_text_and_stops_at_start() {
+        let (_td, mut app) = app_with("alias ll='ls -la'\n");
+        app.handle_action(Action::Edit).unwrap();
+        let original = app.inline_edit.as_ref().unwrap().buffer.clone();
+        app.handle_action(Action::InlineInput('x')).unwrap();
+        app.handle_action(Action::InlineInput('y')).unwrap();
+        assert_eq!(
+            app.inline_edit.as_ref().unwrap().buffer,
+            format!("{original}xy")
+        );
+        app.handle_action(Action::FieldUndo).unwrap();
+        assert_eq!(
+            app.inline_edit.as_ref().unwrap().buffer,
+            format!("{original}x")
+        );
+        app.handle_action(Action::FieldUndo).unwrap();
+        app.handle_action(Action::FieldUndo).unwrap(); // nothing left: no-op
+        assert_eq!(app.inline_edit.as_ref().unwrap().buffer, original);
     }
 
     #[test]

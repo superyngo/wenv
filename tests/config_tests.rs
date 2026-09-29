@@ -42,10 +42,10 @@ fn test_expand_tilde() {
 
 #[test]
 fn test_expand_env_vars() {
-    std::env::set_var("WENV_TEST_VAR", "/tmp/test");
-    let expanded = path_resolver::expand_env_vars("$WENV_TEST_VAR/config");
-    assert_eq!(expanded, "/tmp/test/config");
-    std::env::remove_var("WENV_TEST_VAR");
+    // Read-only: use a variable every environment already defines (no set_var races)
+    let path = std::env::var("PATH").expect("PATH is set");
+    let expanded = path_resolver::expand_env_vars("$PATH/config");
+    assert_eq!(expanded, format!("{}/config", path));
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn test_resolve_nonexistent_path() {
 #[test]
 fn test_expand_env_vars_unknown_var_unchanged() {
     // When an env var is not set and has no special handling, it stays as-is
-    std::env::remove_var("NONEXISTENT_VAR_XYZ");
+    assert!(std::env::var_os("NONEXISTENT_VAR_XYZ").is_none());
     let result = path_resolver::expand_env_vars("$NONEXISTENT_VAR_XYZ/foo");
     // Should remain unchanged since var doesn't exist
     assert_eq!(result, "$NONEXISTENT_VAR_XYZ/foo");

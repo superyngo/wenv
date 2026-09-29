@@ -42,6 +42,7 @@ pub enum Action {
     Confirm,
     Cancel,
     SearchInput(char),
+    FieldUndo,
     SearchEdit(LineEditOp),
     TextInputEdit(LineEditOp),
     InlineEdit(LineEditOp),
@@ -205,6 +206,9 @@ fn map_filter_input_key(key: KeyEvent) -> Action {
     if let Some(a) = ctrl_home_end(key, Action::SearchHome, Action::SearchEnd) {
         return a;
     }
+    if key.code == KeyCode::Char('z') && key.modifiers == KeyModifiers::CONTROL {
+        return Action::FieldUndo;
+    }
     match line_edit_shortcut(key) {
         Some(Ok(op)) => return Action::SearchEdit(op),
         Some(Err(())) => return Action::Noop,
@@ -250,6 +254,9 @@ fn map_text_input_key(key: KeyEvent) -> Action {
     if let Some(a) = ctrl_home_end(key, Action::TextInputHome, Action::TextInputEnd) {
         return a;
     }
+    if key.code == KeyCode::Char('z') && key.modifiers == KeyModifiers::CONTROL {
+        return Action::FieldUndo;
+    }
     match line_edit_shortcut(key) {
         Some(Ok(op)) => return Action::TextInputEdit(op),
         Some(Err(())) => return Action::Noop,
@@ -272,6 +279,9 @@ fn map_text_input_key(key: KeyEvent) -> Action {
 fn map_inline_edit_key(key: KeyEvent) -> Action {
     if let Some(a) = ctrl_home_end(key, Action::InlineHome, Action::InlineEnd) {
         return a;
+    }
+    if key.code == KeyCode::Char('z') && key.modifiers == KeyModifiers::CONTROL {
+        return Action::FieldUndo;
     }
     match line_edit_shortcut(key) {
         Some(Ok(op)) => return Action::InlineEdit(op),
@@ -345,7 +355,7 @@ mod input_contract_tests {
                 Action::SearchInput(_) | Action::TextInputChar(_) | Action::InlineInput(_)
             ));
             assert!(matches!(
-                map_key(&mode, chord('z', KeyModifiers::CONTROL)),
+                map_key(&mode, chord('x', KeyModifiers::CONTROL)),
                 Action::Noop
             ));
         }
@@ -364,6 +374,14 @@ mod input_contract_tests {
         assert!(matches!(
             map_key(&AppMode::InlineEdit, chord('b', KeyModifiers::ALT)),
             Action::InlineEdit(LineEditOp::WordLeft)
+        ));
+    }
+
+    #[test]
+    fn test_ctrl_z_is_field_undo() {
+        assert!(matches!(
+            map_key(&AppMode::FilterInput, chord('z', KeyModifiers::CONTROL)),
+            Action::FieldUndo
         ));
     }
 

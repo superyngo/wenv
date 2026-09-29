@@ -99,14 +99,9 @@ fn duplicate_file_path_dropped_with_warning() {
 
 #[test]
 fn display_has_var_suffix_when_var_bearing() {
-    unsafe {
-        std::env::set_var("WENV_TEST_VAR_A", "/tmp");
-    }
-    let out = resolve_patterns(&["$WENV_TEST_VAR_A/wenv_synth.sh".to_string()]);
+    // Read-only: PATH is defined everywhere, so no set_var is needed
+    let out = resolve_patterns(&["$PATH/wenv_synth.sh".to_string()]);
     assert_eq!(out.len(), 1);
     let s = format!("{}", out[0]);
-    assert!(s.contains("($WENV_TEST_VAR_A/wenv_synth.sh)"), "got: {}", s);
-    unsafe {
-        std::env::remove_var("WENV_TEST_VAR_A");
-    }
+    assert!(s.contains("($PATH/wenv_synth.sh)"), "got: {}", s);
 }
