@@ -32,7 +32,9 @@ pub mod patterns;
 use crate::model::{Entry, EntryType, ParseResult, ShellType};
 use crate::parser::builders::{count_braces_outside_quotes, CommentBlockBuilder};
 use crate::parser::pending::{
-    entry_to_trailing_pending, merge_pending_with_structured, BoundaryType, MergeType, PendingBlock,
+    commit_structured_entry, entry_to_trailing_pending, flush_pending, handle_blank_line,
+    handle_code_fallback, handle_comment_line, merge_pending_first_line,
+    start_multiline_from_event, BoundaryType, PendingBlock,
 };
 use crate::parser::Parser;
 
@@ -251,28 +253,8 @@ impl Parser for PowerShellParser {
             // Handle empty lines (part of pending entry state machine)
             // ------------------------------------------------------------------
             if trimmed.is_empty() {
-                let blank = PendingBlock::blank_lines(line_number, line);
-
-                match &mut pending_entry {
-                    Some(pending) if pending.can_absorb_blank() => {
-                        pending.add_line(line, line_number);
-                        if matches!(
-                            pending.merge_type(),
-                            Some(MergeType::CodeWithBlanks) | Some(MergeType::Comment)
-                        ) {
-                            pending.has_absorbed_blanks = true;
-                        }
-                    }
-                    Some(_) => {
-                        // Other pending types: flush and start new blank
-                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
-                            result.add_entry(entry);
-                        }
-                        pending_entry = Some(blank);
-                    }
-                    None => {
-                        pending_entry = Some(blank);
-                    }
+                if let Some(flushed) = handle_blank_line(&mut pending_entry, line, line_number) {
+                    result.add_entry(self.build_entry_from_pending(flushed));
                 }
                 continue;
             }
@@ -281,21 +263,8 @@ impl Parser for PowerShellParser {
             // Handle comment lines (part of pending entry state machine)
             // ------------------------------------------------------------------
             if CommentBlockBuilder::is_standalone_comment(trimmed) {
-                match &mut pending_entry {
-                    Some(pending) if pending.can_absorb_comment() => {
-                        pending.add_line(line, line_number);
-                        pending.increment_comment_count();
-                    }
-                    Some(_) => {
-                        // Non-Comment pending: flush and start new comment
-                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
-                            result.add_entry(entry);
-                        }
-                        pending_entry = Some(PendingBlock::comment(line_number, line));
-                    }
-                    None => {
-                        pending_entry = Some(PendingBlock::comment(line_number, line));
-                    }
+                if let Some(flushed) = handle_comment_line(&mut pending_entry, line, line_number) {
+                    result.add_entry(self.build_entry_from_pending(flushed));
                 }
                 continue;
             }
@@ -308,14 +277,9 @@ impl Parser for PowerShellParser {
             match try_parse_alias(trimmed, line_number) {
                 ParseEvent::Complete(mut entry) => {
                     entry.value = line.to_string();
-                    let (pending_entry_to_add, merged) =
-                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
-                            self.build_entry_from_pending(b)
-                        });
-                    if let Some(pending_e) = pending_entry_to_add {
-                        result.add_entry(pending_e);
-                    }
-                    pending_entry = Some(entry_to_trailing_pending(merged));
+                    commit_structured_entry(&mut result, &mut pending_entry, entry, |b| {
+                        self.build_entry_from_pending(b)
+                    });
                     continue;
                 }
                 ParseEvent::Started { .. } => {
@@ -328,14 +292,9 @@ impl Parser for PowerShellParser {
             match try_parse_env(trimmed, line_number) {
                 ParseEvent::Complete(mut entry) => {
                     entry.value = line.to_string();
-                    let (pending_entry_to_add, merged) =
-                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
-                            self.build_entry_from_pending(b)
-                        });
-                    if let Some(pending_e) = pending_entry_to_add {
-                        result.add_entry(pending_e);
-                    }
-                    pending_entry = Some(entry_to_trailing_pending(merged));
+                    commit_structured_entry(&mut result, &mut pending_entry, entry, |b| {
+                        self.build_entry_from_pending(b)
+                    });
                     continue;
                 }
                 ParseEvent::Started {
@@ -344,30 +303,16 @@ impl Parser for PowerShellParser {
                     boundary,
                     first_line: _,
                 } => {
-                    let first_line = line.to_string();
-                    let (merged_first_line, start_line) =
-                        if let Some(pending) = pending_entry.take() {
-                            if pending.can_merge_down() {
-                                let merged = format!("{}\n{}", pending.raw_content(), first_line);
-                                (merged, pending.start_line)
-                            } else {
-                                result.add_entry(self.build_entry_from_pending(pending));
-                                (first_line.to_string(), line_number)
-                            }
-                        } else {
-                            (first_line.to_string(), line_number)
-                        };
-                    active_block = Some(PendingBlock {
-                        lines: vec![merged_first_line],
-                        start_line,
-                        end_line: line_number,
+                    active_block = Some(start_multiline_from_event(
+                        &mut result,
+                        &mut pending_entry,
+                        entry_type,
+                        name,
                         boundary,
-                        entry_hint: Some(entry_type),
-                        name: Some(name),
-                        value: None,
-                        comment_count: 0,
-                        has_absorbed_blanks: false,
-                    });
+                        line,
+                        line_number,
+                        |b| self.build_entry_from_pending(b),
+                    ));
                     continue;
                 }
                 ParseEvent::None => {}
@@ -377,14 +322,9 @@ impl Parser for PowerShellParser {
             match try_parse_source(trimmed, line_number) {
                 ParseEvent::Complete(mut entry) => {
                     entry.value = line.to_string();
-                    let (pending_entry_to_add, merged) =
-                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
-                            self.build_entry_from_pending(b)
-                        });
-                    if let Some(pending_e) = pending_entry_to_add {
-                        result.add_entry(pending_e);
-                    }
-                    pending_entry = Some(entry_to_trailing_pending(merged));
+                    commit_structured_entry(&mut result, &mut pending_entry, entry, |b| {
+                        self.build_entry_from_pending(b)
+                    });
                     continue;
                 }
                 ParseEvent::Started { .. } => {
@@ -397,14 +337,9 @@ impl Parser for PowerShellParser {
             match try_parse_import_module(trimmed, line_number) {
                 ParseEvent::Complete(mut entry) => {
                     entry.value = line.to_string();
-                    let (pending_entry_to_add, merged) =
-                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
-                            self.build_entry_from_pending(b)
-                        });
-                    if let Some(pending_e) = pending_entry_to_add {
-                        result.add_entry(pending_e);
-                    }
-                    pending_entry = Some(entry_to_trailing_pending(merged));
+                    commit_structured_entry(&mut result, &mut pending_entry, entry, |b| {
+                        self.build_entry_from_pending(b)
+                    });
                     continue;
                 }
                 ParseEvent::Started { .. } => {
@@ -423,27 +358,17 @@ impl Parser for PowerShellParser {
                     let entry = Entry::new(EntryType::Function, func_name, line.to_string())
                         .with_line_number(line_number)
                         .with_end_line(line_number);
-                    let (pending_entry_to_add, merged) =
-                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
-                            self.build_entry_from_pending(b)
-                        });
-                    if let Some(pending_e) = pending_entry_to_add {
-                        result.add_entry(pending_e);
-                    }
-                    pending_entry = Some(entry_to_trailing_pending(merged));
+                    commit_structured_entry(&mut result, &mut pending_entry, entry, |b| {
+                        self.build_entry_from_pending(b)
+                    });
                 } else {
-                    let (merged_first_line, start_line) =
-                        if let Some(pending) = pending_entry.take() {
-                            if pending.can_merge_down() {
-                                let merged = format!("{}\n{}", pending.raw_content(), line);
-                                (merged, pending.start_line)
-                            } else {
-                                result.add_entry(self.build_entry_from_pending(pending));
-                                (line.to_string(), line_number)
-                            }
-                        } else {
-                            (line.to_string(), line_number)
-                        };
+                    let (merged_first_line, start_line) = merge_pending_first_line(
+                        &mut result,
+                        &mut pending_entry,
+                        line,
+                        line_number,
+                        |b| self.build_entry_from_pending(b),
+                    );
                     active_block = Some(PendingBlock::function(
                         func_name,
                         start_line,
@@ -464,27 +389,17 @@ impl Parser for PowerShellParser {
                     let entry = Entry::new(EntryType::Code, class_name, line.to_string())
                         .with_line_number(line_number)
                         .with_end_line(line_number);
-                    let (pending_entry_to_add, merged) =
-                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
-                            self.build_entry_from_pending(b)
-                        });
-                    if let Some(pending_e) = pending_entry_to_add {
-                        result.add_entry(pending_e);
-                    }
-                    pending_entry = Some(entry_to_trailing_pending(merged));
+                    commit_structured_entry(&mut result, &mut pending_entry, entry, |b| {
+                        self.build_entry_from_pending(b)
+                    });
                 } else {
-                    let (merged_first_line, start_line) =
-                        if let Some(pending) = pending_entry.take() {
-                            if pending.can_merge_down() {
-                                let merged = format!("{}\n{}", pending.raw_content(), line);
-                                (merged, pending.start_line)
-                            } else {
-                                result.add_entry(self.build_entry_from_pending(pending));
-                                (line.to_string(), line_number)
-                            }
-                        } else {
-                            (line.to_string(), line_number)
-                        };
+                    let (merged_first_line, start_line) = merge_pending_first_line(
+                        &mut result,
+                        &mut pending_entry,
+                        line,
+                        line_number,
+                        |b| self.build_entry_from_pending(b),
+                    );
                     let mut block = PendingBlock::new(
                         start_line,
                         &merged_first_line,
@@ -507,30 +422,20 @@ impl Parser for PowerShellParser {
                 let is_single_line = brace_count == 0 && trimmed.contains('}');
 
                 if is_single_line {
-                    let entry = Entry::new(EntryType::Code, enum_name.clone(), line.to_string())
+                    let entry = Entry::new(EntryType::Code, enum_name, line.to_string())
                         .with_line_number(line_number)
                         .with_end_line(line_number);
-                    let (pending_entry_to_add, merged) =
-                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
-                            self.build_entry_from_pending(b)
-                        });
-                    if let Some(pending_e) = pending_entry_to_add {
-                        result.add_entry(pending_e);
-                    }
-                    pending_entry = Some(entry_to_trailing_pending(merged));
+                    commit_structured_entry(&mut result, &mut pending_entry, entry, |b| {
+                        self.build_entry_from_pending(b)
+                    });
                 } else {
-                    let (merged_first_line, start_line) =
-                        if let Some(pending) = pending_entry.take() {
-                            if pending.can_merge_down() {
-                                let merged = format!("{}\n{}", pending.raw_content(), line);
-                                (merged, pending.start_line)
-                            } else {
-                                result.add_entry(self.build_entry_from_pending(pending));
-                                (line.to_string(), line_number)
-                            }
-                        } else {
-                            (line.to_string(), line_number)
-                        };
+                    let (merged_first_line, start_line) = merge_pending_first_line(
+                        &mut result,
+                        &mut pending_entry,
+                        line,
+                        line_number,
+                        |b| self.build_entry_from_pending(b),
+                    );
                     let mut block = PendingBlock::new(
                         start_line,
                         &merged_first_line,
@@ -556,33 +461,23 @@ impl Parser for PowerShellParser {
                     let entry = Entry::new(EntryType::ScriptBlock, block_name, line.to_string())
                         .with_line_number(line_number)
                         .with_end_line(line_number);
-                    let (pending_entry_to_add, merged) =
-                        merge_pending_with_structured(pending_entry.take(), entry, |b| {
-                            self.build_entry_from_pending(b)
-                        });
-                    if let Some(pending_e) = pending_entry_to_add {
-                        result.add_entry(pending_e);
-                    }
-                    pending_entry = Some(entry_to_trailing_pending(merged));
+                    commit_structured_entry(&mut result, &mut pending_entry, entry, |b| {
+                        self.build_entry_from_pending(b)
+                    });
                 } else {
-                    let (merged_first_line, start_line) =
-                        if let Some(pending) = pending_entry.take() {
-                            if pending.can_merge_down() {
-                                let merged = format!("{}\n{}", pending.raw_content(), line);
-                                (
-                                    merged.split('\n').map(String::from).collect::<Vec<_>>(),
-                                    pending.start_line,
-                                )
-                            } else {
-                                result.add_entry(self.build_entry_from_pending(pending));
-                                (vec![line.to_string()], line_number)
-                            }
-                        } else {
-                            (vec![line.to_string()], line_number)
-                        };
+                    let (merged_first_line, start_line) = merge_pending_first_line(
+                        &mut result,
+                        &mut pending_entry,
+                        line,
+                        line_number,
+                        |b| self.build_entry_from_pending(b),
+                    );
 
                     active_block = Some(PendingBlock {
-                        lines: merged_first_line,
+                        lines: merged_first_line
+                            .split('\n')
+                            .map(String::from)
+                            .collect::<Vec<_>>(),
                         start_line,
                         end_line: line_number,
                         boundary: BoundaryType::BraceCounting {
@@ -602,40 +497,8 @@ impl Parser for PowerShellParser {
             // ------------------------------------------------------------------
             // Fallback: capture as non-blank Code
             // ------------------------------------------------------------------
-            match &mut pending_entry {
-                Some(pending) if pending.entry_hint == Some(EntryType::Comment) => {
-                    if pending.can_merge_down() {
-                        pending.add_line(line, line_number);
-                        pending.upgrade_to_code();
-                    } else {
-                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
-                            result.add_entry(entry);
-                        }
-                        pending_entry = Some(PendingBlock::code(line_number, line));
-                    }
-                }
-                Some(pending) if pending.entry_hint == Some(EntryType::Code) => {
-                    if pending.merge_type() == Some(MergeType::CodeWithBlanks)
-                        && !pending.has_absorbed_blanks
-                    {
-                        pending.add_line(line, line_number);
-                    } else {
-                        if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
-                            result.add_entry(entry);
-                        }
-                        pending_entry = Some(PendingBlock::code(line_number, line));
-                    }
-                }
-                Some(_) => {
-                    // Flush pending, start new pending Code
-                    if let Some(entry) = self.flush_pending_comment_code(&mut pending_entry) {
-                        result.add_entry(entry);
-                    }
-                    pending_entry = Some(PendingBlock::code(line_number, line));
-                }
-                None => {
-                    pending_entry = Some(PendingBlock::code(line_number, line));
-                }
+            if let Some(flushed) = handle_code_fallback(&mut pending_entry, line, line_number) {
+                result.add_entry(self.build_entry_from_pending(flushed));
             }
         }
 
@@ -673,6 +536,10 @@ impl Parser for PowerShellParser {
 impl PowerShellParser {
     /// Build an Entry from a completed PendingBlock.
     fn build_entry_from_pending(&self, block: PendingBlock) -> Entry {
+        if let Some(entry) = block.into_comment_or_code_entry() {
+            return entry;
+        }
+
         let entry_type = block.entry_hint.unwrap_or(EntryType::Code);
         let raw_content = block.raw_content();
 
@@ -691,30 +558,6 @@ impl PowerShellParser {
                     .with_line_number(block.start_line)
                     .with_end_line(block.end_line)
             }
-            EntryType::Comment => {
-                let name = if block.start_line == block.end_line {
-                    format!("#L{}", block.start_line)
-                } else {
-                    format!("#L{}-L{}", block.start_line, block.end_line)
-                };
-                // Store complete comment content (Raw Value Architecture)
-                Entry::new(EntryType::Comment, name, raw_content)
-                    .with_line_number(block.start_line)
-                    .with_end_line(block.end_line)
-            }
-            EntryType::Code => {
-                let name = block.name.unwrap_or_else(|| {
-                    if block.start_line == block.end_line {
-                        format!("L{}", block.start_line)
-                    } else {
-                        format!("L{}-L{}", block.start_line, block.end_line)
-                    }
-                });
-                // Store complete code content (Raw Value Architecture)
-                Entry::new(EntryType::Code, name, raw_content)
-                    .with_line_number(block.start_line)
-                    .with_end_line(block.end_line)
-            }
             EntryType::Alias | EntryType::Source => {
                 let name = block.name.unwrap_or_else(|| "unknown".to_string());
                 Entry::new(entry_type, name, raw_content)
@@ -727,6 +570,7 @@ impl PowerShellParser {
                     .with_line_number(block.start_line)
                     .with_end_line(block.end_line)
             }
+            EntryType::Comment | EntryType::Code => unreachable!(),
         }
     }
 
@@ -746,9 +590,7 @@ impl PowerShellParser {
 
     /// Flush pending Comment/Code entry.
     fn flush_pending_comment_code(&self, pending: &mut Option<PendingBlock>) -> Option<Entry> {
-        pending
-            .take()
-            .map(|block| self.build_entry_from_pending(block))
+        flush_pending(pending, |block| self.build_entry_from_pending(block))
     }
 }
 

@@ -19,6 +19,13 @@ from a template when missing. The only override is the `-c, --config <PATH>` fla
 chain, copy-up save, and `WENV_CONFIG_DIR` are removed. Bundled, read-only data lives in
 `Resources/snippets.toml`, resolved by its own search chain.
 
+## Principle deviation
+
+`wens-dev-principles cli 2` (MUST) asks for XDG / per-platform config directories. This ADR
+deliberately deviates: one predictable `~/.config/wenv/config.toml` on every platform (including
+Windows and macOS) was chosen over per-OS directories to keep docs, support and dotfile-manager
+setups uniform. The deviation is recorded here rather than fixed (audit L8, 2026-09-29).
+
 ## Alternatives considered
 
 | Alternative | Rejected because |

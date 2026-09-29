@@ -91,7 +91,11 @@ wenv config
 | `?` | Show help / About (scrollable: `↑↓`/`PgUp`/`PgDn`/`Home`/`End`) |
 | `q` | Quit (confirms if unsaved) |
 
-Set the `NO_COLOR` environment variable to run the TUI in monochrome (focus and selection degrade to reverse-video).
+Text inputs (filter, path prompt, inline edit) also accept `Ctrl+A`/`Ctrl+E` (line start/end), `Ctrl+U`/`Ctrl+K` (kill to start/end), `Ctrl+W` (delete word), `Ctrl+Y` (yank) and `Alt+B`/`Alt+F` or `Ctrl+←/→` (word motion).
+
+Set the `NO_COLOR` environment variable, or pass `--no-color`, to run the TUI in monochrome (focus and selection degrade to reverse-video). `--lang <code>` (e.g. `zh-TW`) overrides `[ui] language` for one run.
+
+Saving is safe by design: files are written to a temp file and renamed into place (symlinks are followed, permissions kept), the previous contents are kept as `<name>.bak`, and the file's encoding (UTF-8/UTF-16 BOM), line endings (LF/CRLF) and final newline are preserved. Files that are not valid text are shown read-only.
 
 ## Shell Support
 

@@ -21,7 +21,7 @@
 //! | `KeywordTracking` | Track control keywords | `if`/`fi`, `while`/`done` |
 //! | `AdjacentMerging` | Merge consecutive lines | Comments, blank lines |
 
-use crate::model::{Entry, EntryType};
+use crate::model::{Entry, EntryType, ParseResult};
 
 /// Boundary detection type - determines when a pending block is complete.
 #[derive(Debug, Clone, PartialEq)]
@@ -365,6 +365,48 @@ impl PendingBlock {
                 | Some(EntryType::Function)
         )
     }
+    /// Absorb a blank line into this block and mark it as having absorbed blanks
+    /// if it is a CodeWithBlanks or Comment block.
+    pub fn absorb_blank(&mut self, line: &str, line_number: usize) {
+        self.add_line(line, line_number);
+        if matches!(
+            self.merge_type(),
+            Some(MergeType::CodeWithBlanks) | Some(MergeType::Comment)
+        ) {
+            self.has_absorbed_blanks = true;
+        }
+    }
+
+    /// Convert this pending block into a Comment or Code Entry, if applicable.
+    ///
+    /// Returns `Some(Entry)` if this block represents a Comment or Code (or has no hint,
+    /// defaulting to Code). Returns `None` for structured types like Function, Alias, etc.
+    pub fn into_comment_or_code_entry(&self) -> Option<Entry> {
+        let entry_type = self.entry_hint.unwrap_or(EntryType::Code);
+        let name = match entry_type {
+            EntryType::Comment => {
+                if self.start_line == self.end_line {
+                    format!("#L{}", self.start_line)
+                } else {
+                    format!("#L{}-L{}", self.start_line, self.end_line)
+                }
+            }
+            EntryType::Code => self.name.clone().unwrap_or_else(|| {
+                if self.start_line == self.end_line {
+                    format!("L{}", self.start_line)
+                } else {
+                    format!("L{}-L{}", self.start_line, self.end_line)
+                }
+            }),
+            _ => return None,
+        };
+
+        Some(
+            Entry::new(entry_type, name, self.raw_content())
+                .with_line_number(self.start_line)
+                .with_end_line(self.end_line),
+        )
+    }
 }
 
 pub fn entry_to_trailing_pending(entry: Entry) -> PendingBlock {
@@ -409,6 +451,156 @@ where
         return (Some(build_entry(pending)), entry);
     }
     (None, entry)
+}
+/// Flush a pending block using the provided builder function.
+pub fn flush_pending<F>(pending: &mut Option<PendingBlock>, build_entry: F) -> Option<Entry>
+where
+    F: FnOnce(PendingBlock) -> Entry,
+{
+    pending.take().map(build_entry)
+}
+
+/// Handle an empty line in the pending entry state machine.
+///
+/// If `pending_entry` can absorb the blank line, it absorbs it and returns `None`.
+/// Otherwise, any existing pending block is returned to be flushed, and `pending_entry`
+/// is replaced with a new blank line block.
+pub fn handle_blank_line(
+    pending_entry: &mut Option<PendingBlock>,
+    line: &str,
+    line_number: usize,
+) -> Option<PendingBlock> {
+    match pending_entry {
+        Some(pending) if pending.can_absorb_blank() => {
+            pending.absorb_blank(line, line_number);
+            None
+        }
+        _ => pending_entry.replace(PendingBlock::blank_lines(line_number, line)),
+    }
+}
+
+/// Handle a standalone comment line in the pending entry state machine.
+///
+/// If `pending_entry` can absorb the comment line, it absorbs it and returns `None`.
+/// Otherwise, any existing pending block is returned to be flushed, and `pending_entry`
+/// is replaced with a new comment block.
+pub fn handle_comment_line(
+    pending_entry: &mut Option<PendingBlock>,
+    line: &str,
+    line_number: usize,
+) -> Option<PendingBlock> {
+    match pending_entry {
+        Some(pending) if pending.can_absorb_comment() => {
+            pending.add_line(line, line_number);
+            pending.increment_comment_count();
+            None
+        }
+        _ => pending_entry.replace(PendingBlock::comment(line_number, line)),
+    }
+}
+
+/// Handle a fallback non-blank code line in the pending entry state machine.
+///
+/// Merges into adjacent code or a single preceding comment line if eligible.
+/// Otherwise, flushes the existing pending entry and starts a new code block.
+pub fn handle_code_fallback(
+    pending_entry: &mut Option<PendingBlock>,
+    line: &str,
+    line_number: usize,
+) -> Option<PendingBlock> {
+    match pending_entry {
+        Some(pending)
+            if pending.entry_hint == Some(EntryType::Comment) && pending.can_merge_down() =>
+        {
+            pending.add_line(line, line_number);
+            pending.upgrade_to_code();
+            None
+        }
+        Some(pending)
+            if pending.entry_hint == Some(EntryType::Code)
+                && pending.merge_type() == Some(MergeType::CodeWithBlanks)
+                && !pending.has_absorbed_blanks =>
+        {
+            pending.add_line(line, line_number);
+            None
+        }
+        _ => pending_entry.replace(PendingBlock::code(line_number, line)),
+    }
+}
+
+/// Commit a structured entry, merging any eligible preceding pending entry
+/// and setting the merged entry as trailing pending to absorb subsequent blank lines.
+pub fn commit_structured_entry<F>(
+    result: &mut ParseResult,
+    pending_entry: &mut Option<PendingBlock>,
+    entry: Entry,
+    build_entry: F,
+) where
+    F: FnOnce(PendingBlock) -> Entry,
+{
+    let (pending_to_add, merged) =
+        merge_pending_with_structured(pending_entry.take(), entry, build_entry);
+    if let Some(pending_e) = pending_to_add {
+        result.add_entry(pending_e);
+    }
+    *pending_entry = Some(entry_to_trailing_pending(merged));
+}
+
+/// Merge a preceding pending comment line into the start of a new block, or flush it.
+///
+/// Returns `(merged_first_line, start_line)`.
+pub fn merge_pending_first_line<F>(
+    result: &mut ParseResult,
+    pending_entry: &mut Option<PendingBlock>,
+    line: &str,
+    line_number: usize,
+    build_entry: F,
+) -> (String, usize)
+where
+    F: FnOnce(PendingBlock) -> Entry,
+{
+    if let Some(pending) = pending_entry.take() {
+        if pending.can_merge_down() {
+            let merged = format!("{}\n{}", pending.raw_content(), line);
+            (merged, pending.start_line)
+        } else {
+            result.add_entry(build_entry(pending));
+            (line.to_string(), line_number)
+        }
+    } else {
+        (line.to_string(), line_number)
+    }
+}
+
+/// Start a multi-line pending block from a `ParseEvent::Started`, merging any preceding
+/// single comment line into the block's first line, or flushing the pending entry.
+#[allow(clippy::too_many_arguments)]
+pub fn start_multiline_from_event<F>(
+    result: &mut ParseResult,
+    pending_entry: &mut Option<PendingBlock>,
+    entry_type: EntryType,
+    name: String,
+    boundary: BoundaryType,
+    line: &str,
+    line_number: usize,
+    build_entry: F,
+) -> PendingBlock
+where
+    F: FnOnce(PendingBlock) -> Entry,
+{
+    let (merged_first_line, start_line) =
+        merge_pending_first_line(result, pending_entry, line, line_number, build_entry);
+    PendingBlock {
+        lines: vec![merged_first_line],
+        start_line,
+        end_line: line_number,
+        boundary,
+        entry_hint: Some(entry_type),
+        name: Some(name),
+        value: None,
+        comment_count: 0,
+        has_absorbed_blanks: false,
+    }
 }
 
 #[cfg(test)]
@@ -489,5 +681,114 @@ mod tests {
         block.upgrade_to_code();
         assert_eq!(block.entry_hint, Some(EntryType::Code));
         assert_eq!(block.merge_type(), Some(MergeType::CodeWithBlanks));
+    }
+    #[test]
+    fn test_into_comment_or_code_entry() {
+        let comment_single = PendingBlock::comment(5, "# single");
+        let entry = comment_single.into_comment_or_code_entry().unwrap();
+        assert_eq!(entry.entry_type, EntryType::Comment);
+        assert_eq!(entry.name, "#L5");
+        assert_eq!(entry.value, "# single");
+
+        let mut comment_multi = PendingBlock::comment(2, "# line 1");
+        comment_multi.add_line("# line 2", 3);
+        let entry = comment_multi.into_comment_or_code_entry().unwrap();
+        assert_eq!(entry.name, "#L2-L3");
+
+        let code_single = PendingBlock::code(10, "echo hi");
+        let entry = code_single.into_comment_or_code_entry().unwrap();
+        assert_eq!(entry.entry_type, EntryType::Code);
+        assert_eq!(entry.name, "L10");
+
+        let mut code_multi = PendingBlock::code(10, "echo 1");
+        code_multi.add_line("echo 2", 12);
+        let entry = code_multi.into_comment_or_code_entry().unwrap();
+        assert_eq!(entry.name, "L10-L12");
+
+        let mut code_named = PendingBlock::code(15, "class Foo {");
+        code_named.name = Some("Foo".to_string());
+        let entry = code_named.into_comment_or_code_entry().unwrap();
+        assert_eq!(entry.name, "Foo");
+
+        let func = PendingBlock::function("my_fn".to_string(), 1, "my_fn() {", 1);
+        assert!(func.into_comment_or_code_entry().is_none());
+    }
+
+    #[test]
+    fn test_handle_blank_and_comment_line() {
+        let mut pending = None;
+        let flushed = handle_blank_line(&mut pending, "", 1);
+        assert!(flushed.is_none());
+        assert!(pending.is_some());
+
+        // Blank absorbs blank
+        let flushed = handle_blank_line(&mut pending, "", 2);
+        assert!(flushed.is_none());
+        assert_eq!(pending.as_ref().unwrap().end_line, 2);
+
+        // Comment after blank flushes blank
+        let flushed = handle_comment_line(&mut pending, "# comment", 3);
+        assert!(flushed.is_some());
+        assert_eq!(
+            pending.as_ref().unwrap().entry_hint,
+            Some(EntryType::Comment)
+        );
+
+        // Comment absorbs comment
+        let flushed = handle_comment_line(&mut pending, "# comment 2", 4);
+        assert!(flushed.is_none());
+        assert_eq!(pending.as_ref().unwrap().comment_count, 2);
+    }
+
+    #[test]
+    fn test_handle_code_fallback_and_merge() {
+        let mut pending = Some(PendingBlock::comment(1, "# single"));
+        // Single comment merges down to code
+        let flushed = handle_code_fallback(&mut pending, "echo 1", 2);
+        assert!(flushed.is_none());
+        assert_eq!(pending.as_ref().unwrap().entry_hint, Some(EntryType::Code));
+        assert_eq!(pending.as_ref().unwrap().raw_content(), "# single\necho 1");
+
+        // Adjacent code merges into code with blanks
+        let flushed = handle_code_fallback(&mut pending, "echo 2", 3);
+        assert!(flushed.is_none());
+        assert_eq!(
+            pending.as_ref().unwrap().raw_content(),
+            "# single\necho 1\necho 2"
+        );
+
+        // Blank line seals code with blanks
+        let flushed = handle_blank_line(&mut pending, "", 4);
+        assert!(flushed.is_none());
+        assert!(pending.as_ref().unwrap().has_absorbed_blanks);
+
+        // Next code line flushes previous code
+        let flushed = handle_code_fallback(&mut pending, "echo 3", 5);
+        assert!(flushed.is_some());
+        assert_eq!(pending.as_ref().unwrap().raw_content(), "echo 3");
+    }
+
+    #[test]
+    fn test_commit_structured_and_multiline() {
+        let mut result = ParseResult::new();
+        let mut pending = Some(PendingBlock::comment(1, "# alias doc"));
+
+        let alias_entry = Entry::new(
+            EntryType::Alias,
+            "ll".to_string(),
+            "alias ll='ls -l'".to_string(),
+        )
+        .with_line_number(2)
+        .with_end_line(2);
+        commit_structured_entry(&mut result, &mut pending, alias_entry, |b| {
+            b.into_comment_or_code_entry().unwrap()
+        });
+
+        // The single comment merged down into the alias
+        assert_eq!(result.entries.len(), 0);
+        let trailing = pending.take().unwrap();
+        assert_eq!(trailing.start_line, 1);
+        assert_eq!(trailing.end_line, 2);
+        assert_eq!(trailing.raw_content(), "# alias doc\nalias ll='ls -l'");
     }
 }

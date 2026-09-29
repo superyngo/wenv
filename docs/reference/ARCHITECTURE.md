@@ -19,9 +19,9 @@ Module map and runtime behavior. Terms: [glossary.md](glossary.md). Entry data:
 - `model/` — `Entry`, `ShellType`, `ShellProfile`, `Config`, `Snippets`.
 - `tui/` — `app.rs` (state/events), `ui.rs`/`list.rs` (rendering), `keys.rs` (bindings, help),
   `operations.rs` (delete/placement/undo), `selection.rs`, `state.rs` (modes, `MoveState`,
-  `InlineEditState`), `editor.rs` (`$EDITOR`), `search.rs` (fuzzy filter).
-- `utils/` — path expansion, shell detection, string helpers.
-- `i18n/` — English embedded; external `~/.config/wenv/i18n/{lang}.toml`, chosen by `[ui] language`.
+  `InlineEditState`), `editor.rs` (`$EDITOR`, arguments honored), `search.rs` (fuzzy filter), `line_edit.rs` (kill/yank/word motion shared by all text inputs).
+- `utils/` — path expansion, shell detection, string helpers; `text.rs` (`TextFormat`: encoding/BOM/CRLF/final-newline detect + replay), `fs.rs` (`atomic_write`: temp+rename, symlink-aware, `.bak`).
+- `i18n/` — English and `zh-TW` embedded (missing keys fall back to English per key); external `~/.config/wenv/i18n/{lang}.toml`, chosen by `[ui] language`.
 
 ## Editing
 
