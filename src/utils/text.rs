@@ -103,7 +103,9 @@ fn decode_utf16(bytes: &[u8], order: Utf16Order) -> Result<String> {
         return Err(anyhow!("file is not valid UTF-16"));
     }
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| match order {
             Utf16Order::Little => u16::from_le_bytes([c[0], c[1]]),
             Utf16Order::Big => u16::from_be_bytes([c[0], c[1]]),

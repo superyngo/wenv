@@ -174,12 +174,10 @@ impl Parser for PowerShellParser {
                             });
                         }
                     }
-                    BoundaryType::BlockComment => {
-                        if is_block_comment_end(trimmed) {
-                            let completed = active_block.take().unwrap();
-                            let entry = self.build_entry_from_pending(completed);
-                            pending_entry = Some(entry_to_trailing_pending(entry));
-                        }
+                    BoundaryType::BlockComment if is_block_comment_end(trimmed) => {
+                        let completed = active_block.take().unwrap();
+                        let entry = self.build_entry_from_pending(completed);
+                        pending_entry = Some(entry_to_trailing_pending(entry));
                     }
                     _ => {}
                 }
