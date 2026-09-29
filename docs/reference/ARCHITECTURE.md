@@ -17,7 +17,7 @@ Module map and runtime behavior. Terms: [glossary.md](glossary.md). Entry data:
 - `formatter/` — `Formatter` trait; shell-specific file reconstruction.
 - `config/` — path resolution (`path_resolver.rs`), PowerShell `cache.rs`, `templates.rs`.
 - `model/` — `Entry`, `ShellType`, `ShellProfile`, `Config`, `Snippets`.
-- `tui/` — `app.rs` (state/events), `ui.rs`/`list.rs` (rendering), `keys.rs` (bindings, help),
+- `tui/` — `app/` (`mod.rs` state + `handle_action` dispatcher; `confirm`, `navigation`, `placement`, `text_input`, `external`, `profile_io`), `ui.rs`/`list.rs` (rendering), `keys.rs` (bindings, help),
   `operations.rs` (delete/placement/undo), `selection.rs`, `state.rs` (modes, `MoveState`,
   `InlineEditState`), `editor.rs` (`$EDITOR`, arguments honored), `search.rs` (fuzzy filter), `line_edit.rs` (kill/yank/word motion shared by all text inputs).
 - `utils/` — path expansion, shell detection, string helpers; `text.rs` (`TextFormat`: encoding/BOM/CRLF/final-newline detect + replay), `fs.rs` (`atomic_write`: temp+rename, symlink-aware, `.bak`).
