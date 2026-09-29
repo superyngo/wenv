@@ -112,56 +112,6 @@ pub fn delete_entries(
     deleted
 }
 
-/// Cut entries: delete and return them in order.
-pub fn cut_entries(
-    profile: &mut ShellProfile,
-    items: &[ListItem],
-    indices: &[usize],
-) -> Vec<Entry> {
-    delete_entries(profile, items, indices)
-}
-
-/// Paste entries at cursor position.
-pub fn paste_entries(profile: &mut ShellProfile, items: &[ListItem], at: usize, entries: &[Entry]) {
-    if entries.is_empty() {
-        return;
-    }
-
-    // Determine target file and insert position
-    let (fi, insert_pos) = match items.get(at) {
-        Some(ListItem::Entry(fi, ei)) => (*fi, ei + 1),
-        Some(ListItem::FileHeader(fi)) => (*fi, 0),
-        Some(ListItem::DirHeader(ti)) => {
-            // Insert into first file of the dir group
-            if let Some(crate::model::profile::TreeNode::Dir(g)) = profile.tree.get(*ti) {
-                if let Some(&first_fi) = g.file_indices.first() {
-                    (first_fi, 0)
-                } else {
-                    let fi = profile.files.len().saturating_sub(1);
-                    (fi, profile.files[fi].entries.len())
-                }
-            } else {
-                let fi = profile.files.len().saturating_sub(1);
-                (fi, profile.files[fi].entries.len())
-            }
-        }
-        None => {
-            // Past end — insert at end of last file
-            let fi = profile.files.len().saturating_sub(1);
-            (fi, profile.files[fi].entries.len())
-        }
-    };
-
-    // Insert entries, updating file_index
-    for (i, entry) in entries.iter().enumerate() {
-        let mut e = entry.clone();
-        e.file_index = fi;
-        profile.files[fi].entries.insert(insert_pos + i, e);
-    }
-    profile.files[fi].dirty = true;
-    profile.files[fi].recalculate_line_numbers();
-}
-
 /// Save all dirty files. Reconstructs content from entry values.
 /// Entry.value is in separator format (N lines = N-1 \n).
 /// File content needs terminator format (each entry value terminated by \n).

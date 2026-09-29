@@ -308,9 +308,8 @@ fn derive_file_display_in_group(path: &std::path::Path, original: &str) -> Strin
         }
     };
 
-    let re_unix = regex::Regex::new(r"\$[A-Za-z_][A-Za-z0-9_]*").unwrap();
-    let re_win = regex::Regex::new(r"%[A-Za-z_][A-Za-z0-9_]*%").unwrap();
-    let var_bearing = re_unix.is_match(original) || re_win.is_match(original);
+    use crate::config::path_resolver::{VAR_UNIX_RE, VAR_WIN_RE};
+    let var_bearing = VAR_UNIX_RE.is_match(original) || VAR_WIN_RE.is_match(original);
     if !var_bearing {
         return tilde;
     }

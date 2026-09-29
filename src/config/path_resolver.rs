@@ -30,12 +30,18 @@ pub fn expand_tilde(path: &str) -> String {
     path.to_string()
 }
 
+/// `$VAR` placeholder (compiled once).
+pub(crate) static VAR_UNIX_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"\$([A-Za-z_][A-Za-z0-9_]*)").unwrap());
+/// `%VAR%` placeholder (compiled once).
+pub(crate) static VAR_WIN_RE: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"%([A-Za-z_][A-Za-z0-9_]*)%").unwrap());
+
 pub fn expand_env_vars(path: &str) -> String {
     let mut result = path.to_string();
 
     // Unix-style $VAR expansion
-    let re_unix = regex::Regex::new(r"\$([A-Za-z_][A-Za-z0-9_]*)").unwrap();
-    for cap in re_unix.captures_iter(path) {
+    for cap in VAR_UNIX_RE.captures_iter(path) {
         let var_name = &cap[1];
         if let Ok(val) = std::env::var(var_name) {
             result = result.replace(&cap[0], &val);
@@ -47,9 +53,8 @@ pub fn expand_env_vars(path: &str) -> String {
     }
 
     // Windows-style %VAR% expansion
-    let re_win = regex::Regex::new(r"%([A-Za-z_][A-Za-z0-9_]*)%").unwrap();
     let snapshot = result.clone();
-    for cap in re_win.captures_iter(&snapshot) {
+    for cap in VAR_WIN_RE.captures_iter(&snapshot) {
         let var_name = &cap[1];
         if let Ok(val) = std::env::var(var_name) {
             result = result.replace(&cap[0], &val);
@@ -92,9 +97,7 @@ fn decode_utf8_strip_bom(bytes: &[u8]) -> String {
 
 /// Returns true if the path string still contains unresolved `$VAR` or `%VAR%` placeholders.
 pub(crate) fn has_unresolved_vars(path: &str) -> bool {
-    let re_unix = regex::Regex::new(r"\$[A-Za-z_][A-Za-z0-9_]*").unwrap();
-    let re_win = regex::Regex::new(r"%[A-Za-z_][A-Za-z0-9_]*%").unwrap();
-    re_unix.is_match(path) || re_win.is_match(path)
+    VAR_UNIX_RE.is_match(path) || VAR_WIN_RE.is_match(path)
 }
 
 use std::fmt;
@@ -128,9 +131,7 @@ impl fmt::Display for ResolvedPattern {
 }
 
 fn contains_var(pat: &str) -> bool {
-    let re_unix = regex::Regex::new(r"\$[A-Za-z_][A-Za-z0-9_]*").unwrap();
-    let re_win = regex::Regex::new(r"%[A-Za-z_][A-Za-z0-9_]*%").unwrap();
-    re_unix.is_match(pat) || re_win.is_match(pat)
+    VAR_UNIX_RE.is_match(pat) || VAR_WIN_RE.is_match(pat)
 }
 
 pub fn tilde_collapse(expanded: &str) -> String {

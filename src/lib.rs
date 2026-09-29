@@ -7,10 +7,8 @@
 //! - Parse and list aliases, functions, environment variables, and source files
 //! - Check for duplicate definitions
 //! - Add, remove, and edit entries
-//! - Import from files and URLs
-//! - Export entries
 //! - Format configuration files
-//! - Automatic backups
+//! - Atomic saves that keep encoding, line endings and a `.bak` copy
 
 pub mod cli;
 pub mod config;
