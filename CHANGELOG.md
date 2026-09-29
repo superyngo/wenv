@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - fix(cli): `$EDITOR` values with arguments (`code --wait`) work; non-TTY runs of `wenv .` and the missing-file prompt no longer fail with raw I/O errors (audit M3, M4).
 - fix(tui): file move reorders `config.toml` by pattern (not by resolved-file index) and rebuilds the tree; moves inside a glob/dir group are refused with a message (audit H5).
 - fix(tui): cancelling delete no longer clears redo or evicts undo (snapshot pushed on confirm); reload clears both stacks when the file set changes; editing a file externally with unsaved changes is refused (audit H3, H6).
+- fix(ui): entry-detail/confirm titles and "nothing to undo" come from the i18n catalog; search highlights use char counts (not bytes) and the NAME column pads by display width so CJK names align (audit M7).
+- feat(i18n): translations overlay English per key (a missing key no longer fails the whole file), `zh-TW` is embedded in the binary, and `--lang <code>` / `--no-color` set the language/colors for one run (audit M5, L5). Remaining hard-coded English UI strings are tracked in `docs/plan/BACKLOG.md`.
+- feat(tui): text inputs (filter, path prompt, inline edit) gain `Ctrl+A/E`, `Ctrl+U/K/W/Y` (kill/yank), `Alt+B/F`/`Ctrl+←/→` word motion; other Ctrl/Alt chords no longer insert text (audit M6).
+- fix(tui): after a cut-drop the cursor lands on the moved entry (audit M1); trash prompt warns about unsaved edits and failure says the file was left in place (audit M2).
+- chore(deps): upgrade `ratatui` 0.30 / `crossterm` 0.29 (clears `lru`/`paste` advisories), bump `anyhow`, drop unused `time`, `colored`, `terminal_size`, `thiserror` (clears RUSTSEC-2026-0009); `cargo audit` is now clean (audit H8, L3).
+- perf: `$VAR`/`%VAR%` regexes compiled once (audit L4).
+- refactor: removed dead `cut_entries`/`paste_entries`, `utils::path::{read_file, write_file, check_file_readable, normalize_path, expand_tilde}` and their tests; corrected crate docs (audit T2, L8).
+- test: replaced the never-compiled `tests/integration/` with `tests/cli.rs` smoke tests (audit T1).
+- ci: release workflow gets a `check` job (tag = `Cargo.toml` = `CHANGELOG.md` version, fmt, clippy, tests) required before builds, read-only default token with `contents: write` only on the release job, and a pinned `cross` (audit H7).
 - test: byte-exact round-trip table tests for both shells (`tests/roundtrip_tests.rs`) (audit T3).
 
 - docs: reorganize documentation into `docs/{reference,adr,spec,plan,debug,audit}` with folder indexes; `CONTEXT.md` is now the entry index and the glossary moved to `docs/reference/glossary.md`. Specs/plans moved out of `docs/superpowers/` and `.opencode/plans/`, given `Status:` lines, and spec filenames paired with plans. Stale `ENTRY_MODEL`/`PARSE_FORMAT_FLOW` docs archived as superseded specs; new English `ARCHITECTURE`, `ENTRY_MODEL`, `KEYMAP` references (keymap now lists `y` redo). `CLAUDE.md` slimmed to a pointer to `AGENTS.md`. Added ADR 0002 recording the v0.17 reversal of ADR 0001's config fallback chain, and `docs/plan/BACKLOG.md`.
