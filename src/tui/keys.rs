@@ -1,5 +1,6 @@
 //! Key event to action mapping
 
+use crate::tui::line_edit::LineEditOp;
 use crate::tui::state::AppMode;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -41,6 +42,9 @@ pub enum Action {
     Confirm,
     Cancel,
     SearchInput(char),
+    SearchEdit(LineEditOp),
+    TextInputEdit(LineEditOp),
+    InlineEdit(LineEditOp),
     SearchBackspace,
     TextInputChar(char),
     TextInputBackspace,
@@ -153,9 +157,59 @@ fn map_placing_key(key: KeyEvent) -> Action {
     }
 }
 
+/// Emacs-style caret shortcuts shared by all text inputs. Returns `None` when the key is
+/// not a shortcut; Ctrl/Alt chords that are not shortcuts must never insert text.
+fn line_edit_shortcut(key: KeyEvent) -> Option<Result<LineEditOp, ()>> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    if ctrl && alt {
+        return None; // AltGr on Windows reports Ctrl+Alt: that is text, not a shortcut
+    }
+    match key.code {
+        KeyCode::Left if ctrl || alt => Some(Ok(LineEditOp::WordLeft)),
+        KeyCode::Right if ctrl || alt => Some(Ok(LineEditOp::WordRight)),
+        KeyCode::Char(c) if ctrl => Some(match c.to_ascii_lowercase() {
+            'u' => Ok(LineEditOp::KillToStart),
+            'k' => Ok(LineEditOp::KillToEnd),
+            'w' => Ok(LineEditOp::DeleteWordBack),
+            'y' => Ok(LineEditOp::Yank),
+            _ => Err(()),
+        }),
+        KeyCode::Char(c) if alt => Some(match c.to_ascii_lowercase() {
+            'b' => Ok(LineEditOp::WordLeft),
+            'f' => Ok(LineEditOp::WordRight),
+            _ => Err(()),
+        }),
+        _ => None,
+    }
+}
+
+fn ctrl_home_end(key: KeyEvent, home: Action, end: Action) -> Option<Action> {
+    if let KeyCode::Char(c) = key.code {
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::ALT)
+        {
+            return match c.to_ascii_lowercase() {
+                'a' => Some(home),
+                'e' => Some(end),
+                _ => None,
+            };
+        }
+    }
+    None
+}
+
 fn map_filter_input_key(key: KeyEvent) -> Action {
     // Filter input is a text field: typing plus the baseline editing contract
     // (←/→/Home/End/Backspace/Del), Enter to confirm, Esc to cancel.
+    if let Some(a) = ctrl_home_end(key, Action::SearchHome, Action::SearchEnd) {
+        return a;
+    }
+    match line_edit_shortcut(key) {
+        Some(Ok(op)) => return Action::SearchEdit(op),
+        Some(Err(())) => return Action::Noop,
+        None => {}
+    }
     match key.code {
         KeyCode::Esc => Action::Cancel,
         KeyCode::Enter => Action::Confirm,
@@ -193,6 +247,14 @@ fn map_detail_key(key: KeyEvent) -> Action {
 }
 
 fn map_text_input_key(key: KeyEvent) -> Action {
+    if let Some(a) = ctrl_home_end(key, Action::TextInputHome, Action::TextInputEnd) {
+        return a;
+    }
+    match line_edit_shortcut(key) {
+        Some(Ok(op)) => return Action::TextInputEdit(op),
+        Some(Err(())) => return Action::Noop,
+        None => {}
+    }
     match key.code {
         KeyCode::Esc => Action::Cancel,
         KeyCode::Enter => Action::Confirm,
@@ -208,6 +270,14 @@ fn map_text_input_key(key: KeyEvent) -> Action {
 }
 
 fn map_inline_edit_key(key: KeyEvent) -> Action {
+    if let Some(a) = ctrl_home_end(key, Action::InlineHome, Action::InlineEnd) {
+        return a;
+    }
+    match line_edit_shortcut(key) {
+        Some(Ok(op)) => return Action::InlineEdit(op),
+        Some(Err(())) => return Action::Noop,
+        None => {}
+    }
     match key.code {
         KeyCode::Esc => Action::Cancel,
         KeyCode::Enter => Action::Confirm,
@@ -252,5 +322,61 @@ fn map_popup_key(key: KeyEvent) -> Action {
         KeyCode::Enter | KeyCode::Char('y') => Action::Confirm,
         KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('q') => Action::Cancel,
         _ => Action::Noop,
+    }
+}
+
+#[cfg(test)]
+mod input_contract_tests {
+    use super::*;
+
+    fn chord(c: char, m: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), m)
+    }
+
+    #[test]
+    fn test_ctrl_chords_never_insert_text_in_inputs() {
+        for mode in [
+            AppMode::FilterInput,
+            AppMode::TextInput,
+            AppMode::InlineEdit,
+        ] {
+            assert!(!matches!(
+                map_key(&mode, chord('a', KeyModifiers::CONTROL)),
+                Action::SearchInput(_) | Action::TextInputChar(_) | Action::InlineInput(_)
+            ));
+            assert!(matches!(
+                map_key(&mode, chord('z', KeyModifiers::CONTROL)),
+                Action::Noop
+            ));
+        }
+    }
+
+    #[test]
+    fn test_emacs_shortcuts_map_to_edit_ops() {
+        assert!(matches!(
+            map_key(&AppMode::FilterInput, chord('a', KeyModifiers::CONTROL)),
+            Action::SearchHome
+        ));
+        assert!(matches!(
+            map_key(&AppMode::TextInput, chord('k', KeyModifiers::CONTROL)),
+            Action::TextInputEdit(LineEditOp::KillToEnd)
+        ));
+        assert!(matches!(
+            map_key(&AppMode::InlineEdit, chord('b', KeyModifiers::ALT)),
+            Action::InlineEdit(LineEditOp::WordLeft)
+        ));
+    }
+
+    #[test]
+    fn test_altgr_and_plain_chars_still_insert() {
+        let altgr = KeyModifiers::CONTROL | KeyModifiers::ALT;
+        assert!(matches!(
+            map_key(&AppMode::FilterInput, chord('@', altgr)),
+            Action::SearchInput('@')
+        ));
+        assert!(matches!(
+            map_key(&AppMode::FilterInput, chord('A', KeyModifiers::SHIFT)),
+            Action::SearchInput('A')
+        ));
     }
 }

@@ -3,6 +3,7 @@
 pub mod app;
 pub mod editor;
 pub mod keys;
+pub mod line_edit;
 pub mod list;
 pub mod operations;
 pub mod search;

@@ -40,6 +40,8 @@ pub struct TuiApp {
     pub undo_stack: VecDeque<crate::tui::state::UndoSnapshot>,
     pub redo_stack: Vec<crate::tui::state::UndoSnapshot>,
     /// Snapshot taken when delete is requested; pushed to `undo_stack` only on confirm.
+    /// Text last removed by a kill shortcut (`Ctrl+U/K/W`), for `Ctrl+Y`.
+    pub kill_ring: String,
     pub pending_undo: Option<crate::tui::state::UndoSnapshot>,
     pub move_state: Option<MoveState>,
     pub search: Option<SearchState>,
@@ -83,6 +85,7 @@ impl TuiApp {
             selection: SelectionState::new(),
             undo_stack: VecDeque::new(),
             redo_stack: Vec::new(),
+            kill_ring: String::new(),
             pending_undo: None,
             move_state: None,
             search: None,
@@ -410,6 +413,37 @@ impl TuiApp {
                         }
                     }
                 }
+            }
+            Action::InlineEdit(op) => {
+                if let Some(ref mut e) = self.inline_edit {
+                    crate::tui::line_edit::apply(
+                        op,
+                        &mut e.buffer,
+                        &mut e.cursor,
+                        &mut self.kill_ring,
+                    );
+                }
+            }
+            Action::TextInputEdit(op) => {
+                if let Some(ref mut t) = self.text_input {
+                    crate::tui::line_edit::apply(
+                        op,
+                        &mut t.value,
+                        &mut t.cursor_pos,
+                        &mut self.kill_ring,
+                    );
+                }
+            }
+            Action::SearchEdit(op) => {
+                if let Some(ref mut search) = self.search {
+                    crate::tui::line_edit::apply(
+                        op,
+                        &mut search.query,
+                        &mut search.cursor,
+                        &mut self.kill_ring,
+                    );
+                }
+                self.update_filter();
             }
             Action::InlineInput(c) => self.inline_input_char(c),
             Action::InlineBackspace => self.inline_backspace(),
