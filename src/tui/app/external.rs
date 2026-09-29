@@ -35,12 +35,11 @@ impl TuiApp {
     ) -> Result<()> {
         let path = self.profile.files[fi].path.clone();
         if !self.profile.files[fi].exists {
-            self.message = Some(format!("File does not exist: {}", path.display()));
+            self.message = Some(self.messages.fmt("msg_file_not_exist", &[&path.display()]));
             return Ok(());
         }
         if self.profile.files[fi].dirty {
-            self.message =
-                Some("Unsaved changes: save (w) before editing the file externally".into());
+            self.message = Some(self.messages.get("msg_unsaved_external_edit").into());
             return Ok(());
         }
 
@@ -53,17 +52,17 @@ impl TuiApp {
                 // Re-parse the file
                 let parser = crate::parser::get_parser(self.profile.shell_type);
                 if let Err(e) = self.profile.files[fi].load_from_disk(parser.as_ref(), fi) {
-                    self.message = Some(format!("Reload failed: {}", e));
+                    self.message = Some(self.messages.fmt("msg_reload_failed", &[&e]));
                     return Ok(());
                 }
                 self.rebuild_list();
-                self.message = Some(format!("Reloaded: {}", path.display()));
+                self.message = Some(self.messages.fmt("msg_reloaded", &[&path.display()]));
             }
             Ok(false) => {
-                self.message = Some("No changes detected".into());
+                self.message = Some(self.messages.get("msg_no_changes_detected").into());
             }
             Err(e) => {
-                self.message = Some(format!("Editor error: {}", e));
+                self.message = Some(self.messages.fmt("msg_editor_error", &[&e]));
             }
         }
         Ok(())
@@ -95,10 +94,10 @@ impl TuiApp {
                 self.apply_edited_value(fi, ei, &value, &new_content);
             }
             Ok(None) => {
-                self.message = Some("No changes".into());
+                self.message = Some(self.messages.get("msg_no_changes").into());
             }
             Err(e) => {
-                self.message = Some(format!("Editor error: {}", e));
+                self.message = Some(self.messages.fmt("msg_editor_error", &[&e]));
             }
         }
         Ok(())
@@ -115,7 +114,7 @@ impl TuiApp {
         new_content: &str,
     ) {
         if new_content == old_value {
-            self.message = Some("No changes".into());
+            self.message = Some(self.messages.get("msg_no_changes").into());
             return;
         }
         let snapshot = crate::tui::operations::take_snapshot(&self.profile);
@@ -137,7 +136,7 @@ impl TuiApp {
             self.profile.files[fi].dirty = true;
             self.profile.files[fi].recalculate_line_numbers();
             self.rebuild_list();
-            self.message = Some("Entry deleted (empty content)".into());
+            self.message = Some(self.messages.get("msg_entry_deleted_empty").into());
         } else {
             let count = crate::tui::operations::replace_entry_with_parsed(
                 &mut self.profile.files[fi],
@@ -147,9 +146,10 @@ impl TuiApp {
             );
             self.rebuild_list();
             self.message = Some(if count == 1 {
-                "Entry updated".into()
+                self.messages.get("msg_entry_updated").into()
             } else {
-                format!("Entry replaced with {} entries", count)
+                self.messages
+                    .fmt("msg_entry_replaced_with_count", &[&count])
             });
         }
     }
@@ -211,17 +211,17 @@ impl TuiApp {
                         self.profile.files[fi].expanded = true;
                         self.profile.files[fi].recalculate_line_numbers();
                         self.rebuild_list();
-                        self.message = Some(format!("Added {} entries", count));
+                        self.message = Some(self.messages.fmt("msg_added_entries", &[&count]));
                     }
                 } else {
-                    self.message = Some("Empty content, nothing added".into());
+                    self.message = Some(self.messages.get("msg_empty_nothing_added").into());
                 }
             }
             Ok(None) => {
-                self.message = Some("Cancelled".into());
+                self.message = Some(self.messages.get("msg_cancelled").into());
             }
             Err(e) => {
-                self.message = Some(format!("Editor error: {}", e));
+                self.message = Some(self.messages.fmt("msg_editor_error", &[&e]));
             }
         }
         Ok(())

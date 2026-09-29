@@ -297,28 +297,28 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
     let header_line = Line::from(vec![
         Span::raw("  "), // indent to match entry prefix
         Span::styled(
-            format!("{:<20}", "NAME"),
+            pad_display(app.messages.get("header_name"), 20),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
         Span::styled(
-            format!("{:<10}", "TYPE"),
+            pad_display(app.messages.get("header_type"), 10),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
         Span::styled(
-            format!("{:<10}", "LINE"),
+            pad_display(app.messages.get("header_line"), 10),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
         Span::styled(
-            "VALUE",
+            app.messages.get("header_value"),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -365,12 +365,14 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                     let icon = if file.expanded { "▼" } else { "▶" };
                     let dirty = if file.dirty { " ●" } else { "" };
                     let readonly = if !file.writable { " 🔒" } else { "" };
+                    let entries_badge =
+                        app.messages.fmt("list_entries_count", &[&file.entry_count()]);
                     let text = format!(
-                        "{}📜 {} {} [{} entries]{}{}",
+                        "{}📜 {} {} {}{}{}",
                         indent,
                         icon,
                         file.display_name(),
-                        file.entry_count(),
+                        entries_badge,
                         dirty,
                         readonly
                     );
@@ -553,7 +555,9 @@ fn draw_list(f: &mut Frame, area: Rect, app: &TuiApp) {
                         return ratatui::widgets::ListItem::new("").style(Style::default());
                     };
                     let icon = if group.expanded { "▼" } else { "▶" };
-                    let text = format!("📁 {} {} [{} files]", icon, group.display_label, group.file_indices.len());
+                    let files_badge =
+                        app.messages.fmt("list_files_count", &[&group.file_indices.len()]);
+                    let text = format!("📁 {} {} {}", icon, group.display_label, files_badge);
                     let style = if is_cursor {
                         Style::default().fg(Color::Black).bg(Color::Cyan)
                     } else {
@@ -583,34 +587,29 @@ fn draw_status(f: &mut Frame, area: Rect, app: &TuiApp) {
         let width = inline_value_width(area.width, app);
         let len = e.buffer.chars().count();
         let pos = inline_position_hint(e.cursor, e.scroll, len, width);
-        format!(" editing — Enter:save  Esc:cancel  ←/→/Home/End:move  Bksp/Del:erase  {pos}")
+        app.messages.fmt("status_inline_editing", &[&pos])
     } else if app.mode == AppMode::Moving {
         // Persistent placement hint (the per-keypress message gets cleared on nav).
-        let verb = if app.move_state.as_ref().is_some_and(|ms| ms.cut) {
-            "Move"
+        let is_cut = app.move_state.as_ref().is_some_and(|ms| ms.cut);
+        if is_cut {
+            app.messages.get("status_moving").to_string()
         } else {
-            "Copy"
-        };
-        format!(" {verb}: ↑↓ position · v/Enter drop · c/x copy/move · Esc cancel")
+            app.messages.get("status_copying").to_string()
+        }
     } else if app.mode == AppMode::MovingFile {
-        " Move file: ↑↓ position · Enter drop · Esc cancel".to_string()
-    } else if let Some(ref msg) = app.message {
+        app.messages.get("status_moving_file").to_string()
+    } else if let Some(msg) = &app.message {
         msg.clone()
     } else {
         let total = app.profile.total_entries();
         let files = app.profile.files.len();
         if app.selection.selected_count() > 0 {
-            format!(
-                " {} selected | {} files, {} entries | q:quit ?:help s:select",
-                app.selection.selected_count(),
-                files,
-                total
+            app.messages.fmt(
+                "status_selected",
+                &[&app.selection.selected_count(), &files, &total],
             )
         } else {
-            format!(
-                " {} files, {} entries | q:quit ?:help 0/9:collapse/expand",
-                files, total
-            )
+            app.messages.fmt("status_normal", &[&files, &total])
         }
     };
     let text = Paragraph::new(status).style(Style::default().bg(Color::DarkGray).fg(Color::White));
@@ -618,7 +617,8 @@ fn draw_status(f: &mut Frame, area: Rect, app: &TuiApp) {
 }
 
 fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
-    let msg = app.message.as_deref().unwrap_or("Confirm? (y/n)");
+    let default_prompt = app.messages.get("popup_confirm_prompt");
+    let msg = app.message.as_deref().unwrap_or(default_prompt);
 
     let lines: Vec<&str> = msg.split('\n').collect();
     // Display width (cells), not byte length — CJK text is double-width.
@@ -634,10 +634,10 @@ fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
 
     let title = match &app.mode {
         AppMode::ConfirmDelete | AppMode::ConfirmDeleteFile => {
-            app.messages.tui_confirm_delete_title
+            app.messages.get("tui_confirm_delete_title")
         }
-        AppMode::ConfirmQuit => " Unsaved Changes ",
-        _ => " Confirm ",
+        AppMode::ConfirmQuit => app.messages.get("popup_title_unsaved_changes"),
+        _ => app.messages.get("popup_title_confirm"),
     };
 
     let block = Block::default()
@@ -653,13 +653,13 @@ fn draw_confirm_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
 }
 
 fn draw_search_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
-    if let Some(ref search) = app.search {
+    if let Some(search) = &app.search {
         let match_count = search.matches.len();
         if app.mode == AppMode::FilterInput {
             // Editable field: block caret at the caret position (not always at
             // the end), with the query window scrolled to keep it visible.
             let prefix = " / ";
-            let suffix = format!("  [{} matches]", match_count);
+            let suffix = app.messages.fmt("search_matches", &[&match_count]);
             let field_width = (area.width as usize)
                 .saturating_sub(prefix.width() + suffix.width())
                 .max(1);
@@ -678,10 +678,9 @@ fn draw_search_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
             f.render_widget(Paragraph::new(Line::from(spans)).style(style), area);
         } else {
             // FilterActive: show filter badge with Esc hint
-            let text = format!(
-                " [FILTER: {}  |  {} matches]  Esc to clear",
-                search.query, match_count
-            );
+            let text = app
+                .messages
+                .fmt("search_filter_active", &[&search.query, &match_count]);
             let style = Style::default().bg(Color::Black).fg(Color::Cyan);
             f.render_widget(Paragraph::new(text).style(style), area);
         }
@@ -689,7 +688,7 @@ fn draw_search_bar(f: &mut Frame, area: Rect, app: &TuiApp) {
 }
 
 fn draw_text_input_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
-    if let Some(ref input) = app.text_input {
+    if let Some(input) = &app.text_input {
         let popup_width = (area.width.saturating_sub(8)).clamp(20, 80).min(area.width);
         let popup_height = 3u16.min(area.height); // 1 input row + top/bottom border
         let x = (area.width.saturating_sub(popup_width)) / 2;
@@ -738,28 +737,40 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
     // Build content lines
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(vec![
-        Span::styled("File: ", Style::default().fg(Color::Yellow)),
+        Span::styled(
+            app.messages.get("detail_file"),
+            Style::default().fg(Color::Yellow),
+        ),
         Span::raw(file.display_name()),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("Type: ", Style::default().fg(Color::Yellow)),
+        Span::styled(
+            app.messages.get("detail_type"),
+            Style::default().fg(Color::Yellow),
+        ),
         Span::raw(entry.entry_type.to_string()),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("Name: ", Style::default().fg(Color::Yellow)),
+        Span::styled(
+            app.messages.get("detail_name"),
+            Style::default().fg(Color::Yellow),
+        ),
         Span::raw(&entry.name),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("Lines: ", Style::default().fg(Color::Yellow)),
+        Span::styled(
+            app.messages.get("detail_lines"),
+            Style::default().fg(Color::Yellow),
+        ),
         Span::raw(match (entry.line_number, entry.end_line) {
             (Some(start), Some(end)) => format!("{}-{}", start, end),
             (Some(start), None) => format!("{}", start),
-            _ => "unknown".to_string(),
+            _ => app.messages.get("detail_lines_unknown").to_string(),
         }),
     ]));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Value:",
+        app.messages.get("detail_value"),
         Style::default().fg(Color::Yellow),
     )));
 
@@ -796,9 +807,9 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(format!(
-            "{}(e:edit r:remark ↑↓:scroll Esc:close) ",
-            app.messages.tui_entry_details_title
+        .title(app.messages.fmt(
+            "detail_title_hint",
+            &[&app.messages.get("tui_entry_details_title")],
         ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
@@ -813,85 +824,90 @@ fn draw_detail_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
 fn draw_help_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
     let lines = vec![
         Line::from(Span::styled(
-            "Navigation",
+            app.messages.get("help_section_nav"),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("  ↑/k ↓/j    Navigate up/down"),
-        Line::from("  PgUp/PgDn  Jump half page"),
-        Line::from("  Home/End    Jump to first/last"),
-        Line::from("  Enter/Space Toggle file / View entry detail"),
-        Line::from("  0/9         Collapse/Expand all files"),
+        Line::from(app.messages.get("help_nav_up_down")),
+        Line::from(app.messages.get("help_nav_page")),
+        Line::from(app.messages.get("help_nav_home_end")),
+        Line::from(app.messages.get("help_nav_toggle")),
+        Line::from(app.messages.get("help_nav_collapse_expand")),
         Line::from(""),
         Line::from(Span::styled(
-            "Selection",
+            app.messages.get("help_section_selection"),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("  s           Toggle select entry"),
-        Line::from("  Shift+↑/↓  Range select"),
+        Line::from(app.messages.get("help_sel_toggle")),
+        Line::from(app.messages.get("help_sel_range")),
         Line::from(""),
         Line::from(Span::styled(
-            "Editing",
+            app.messages.get("help_section_editing"),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("  e           Edit (single-line entry inline; else $EDITOR)"),
-        Line::from("  E           Edit entry in $EDITOR (force external)"),
-        Line::from("  a           Insert entry (snippet menu, then $EDITOR)"),
-        Line::from("  n           New file path (add to config)"),
-        Line::from("  d           Delete entry / Remove file"),
-        Line::from("  c           Copy: place (blue source → green target), v/Enter drop"),
-        Line::from("  x           Cut: place then move on drop (v/Enter)"),
-        Line::from("              (while placing: c/x switch copy↔move)"),
-        Line::from("  m           Move file (reorder, on a file header)"),
-        Line::from("  z           Undo (multi-step)"),
-        Line::from("  y           Redo"),
-        Line::from("  r           Toggle remark"),
+        Line::from(app.messages.get("help_edit_inline")),
+        Line::from(app.messages.get("help_edit_external")),
+        Line::from(app.messages.get("help_edit_add")),
+        Line::from(app.messages.get("help_edit_new_file")),
+        Line::from(app.messages.get("help_edit_delete")),
+        Line::from(app.messages.get("help_edit_copy")),
+        Line::from(app.messages.get("help_edit_cut")),
+        Line::from(app.messages.get("help_edit_cut_hint")),
+        Line::from(app.messages.get("help_edit_move_file")),
+        Line::from(app.messages.get("help_edit_undo")),
+        Line::from(app.messages.get("help_edit_redo")),
+        Line::from(app.messages.get("help_edit_remark")),
         Line::from(""),
         Line::from(Span::styled(
-            "Other",
+            app.messages.get("help_section_other"),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("  /           Filter entries (fuzzy match)"),
-        Line::from("  w/Ctrl+s    Save all changes"),
-        Line::from("  q           Quit"),
-        Line::from("  ?           Show this help"),
+        Line::from(app.messages.get("help_other_filter")),
+        Line::from(app.messages.get("help_other_save")),
+        Line::from(app.messages.get("help_other_quit")),
+        Line::from(app.messages.get("help_other_help")),
         Line::from(""),
         Line::from(Span::styled(
-            "About",
+            app.messages.get("help_section_about"),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )),
         // Single-sourced from Cargo.toml at build time.
-        Line::from(format!(
-            "  wenv v{} — {}",
-            env!("CARGO_PKG_VERSION"),
-            env!("CARGO_PKG_DESCRIPTION")
+        Line::from(app.messages.fmt(
+            "help_about_version",
+            &[&env!("CARGO_PKG_VERSION"), &env!("CARGO_PKG_DESCRIPTION")],
         )),
-        Line::from(format!("  Author: {}", env!("CARGO_PKG_AUTHORS"))),
-        Line::from(format!("  License: {}", env!("CARGO_PKG_LICENSE"))),
+        Line::from(
+            app.messages
+                .fmt("help_about_author", &[&env!("CARGO_PKG_AUTHORS")]),
+        ),
+        Line::from(
+            app.messages
+                .fmt("help_about_license", &[&env!("CARGO_PKG_LICENSE")]),
+        ),
         Line::from(format!("  {}", env!("CARGO_PKG_REPOSITORY"))),
         Line::from(""),
         Line::from(Span::styled(
-            "Privacy",
+            app.messages.get("help_section_privacy"),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from("  wenv is fully offline \u{2014} no network, no telemetry."),
+        Line::from(app.messages.get("help_privacy_offline")),
     ];
 
     // Size to content, max 80% of the screen; scroll when it doesn't fit
     // (mirrors the detail popup; they share scroll state and page size).
-    let max_width = (area.width * 4 / 5).clamp(1, area.width);
-    let max_height = (area.height * 4 / 5).clamp(3, area.height);
+    let max_width = (area.width * 4 / 5).max(1).min(area.width);
+    let max_height = (area.height * 4 / 5).max(3).min(area.height);
     let popup_width = 62u16.min(max_width);
     let inner_width = popup_width.saturating_sub(2).max(1);
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
@@ -899,7 +915,7 @@ fn draw_help_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
 
     let needs_scroll = visual_line_count + 2 > max_height as usize;
     let inner_height = if needs_scroll {
-        max_height - 2
+        max_height.saturating_sub(2)
     } else {
         visual_line_count as u16
     };
@@ -916,7 +932,7 @@ fn draw_help_popup(f: &mut Frame, area: Rect, app: &mut TuiApp) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(" Help / About (↑↓ PgUp/PgDn scroll · Esc close) ")
+        .title(app.messages.get("help_popup_title"))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
@@ -933,7 +949,7 @@ fn draw_snippet_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
         return;
     }
 
-    let hint_line = " \u{2191}\u{2193} navigate  Enter select  Esc";
+    let hint_line = app.messages.get("snippet_hint");
     let mut lines: Vec<Line> = Vec::new();
 
     let name_width = snippets.iter().map(|s| s.name.width()).max().unwrap_or(0);
@@ -987,7 +1003,7 @@ fn draw_snippet_popup(f: &mut Frame, area: Rect, app: &TuiApp) {
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(" New Entry ")
+        .title(app.messages.get("snippet_title"))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 

@@ -11,7 +11,6 @@ The single living tracker for open follow-ups. Rows move to **Done** with the cl
 | Rewrite `PENDING_STATE_MACHINE.md` in English against current code | `docs/reference/PENDING_STATE_MACHINE.md` §2 and §5 cite `CodeBlockBuilder`, which no longer exists (`src/parser/builders/` has `CommentBlockBuilder`, `QuotedValueBuilder`) | 2026-09-29 | Low | M | Every symbol named in the doc exists in `src/` |
 | Verify `PARSER_FLOW.md` against current parsers | `docs/reference/PARSER_FLOW.md`, `PendingBlock`, `BoundaryType` | — | Low | S | Claims checked; doc covers PowerShell as well as Bash |
 | Add missing `LICENSE` file | `README.md` links `LICENSE`; `Cargo.toml` declares `license = "MIT"`; no file in repo | 2026-09-29 | Medium | S | `LICENSE` (MIT) exists at repo root; README link resolves |
-| Route the remaining hard-coded English TUI strings through `i18n::Messages` (audit M5 remainder) | Only 5 catalog keys are wired (`tui_confirm_delete_title`, `tui_entry_details_title`, `tui_msg_nothing_to_undo`, …); help popup, status messages, prompts are literals in `src/tui/` | 2026-09-29 | Medium | L | Every user-visible string in `src/tui/` comes from the catalog; `zh-TW` covers all keys |
 
 ## Done
 
@@ -27,7 +26,10 @@ The single living tracker for open follow-ups. Rows move to **Done** with the cl
 | `cargo audit` clean: ratatui 0.30, dropped unused deps, anyhow bump (audit H8, L3) | `4f834f1` |
 | Regex statics, dead helpers/tests removed, CLI smoke tests, crate docs (audit L4, L8, T1, T2) | `ce377c0` |
 | Release CI gate + least-privilege permissions (audit H7) | `7b492a2` |
-| Shared Bash/PowerShell pending-block core (audit L7) | see `git log` "share pending/blank/comment/code" |
+| Shared Bash/PowerShell pending-block core (audit L7) | `ba5f02b` |
+| Split `tui/app.rs`; `handle_action` is a ~190-line dispatcher (audit L6) | `a5e82a1` |
+| Every user-visible TUI string in the i18n catalog, complete zh-TW (audit M5) | this commit |
+| Popup panics on tiny terminals (found during audit verification) | this commit |
 
 ## Blocked / not scheduled
 

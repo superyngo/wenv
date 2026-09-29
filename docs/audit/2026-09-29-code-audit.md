@@ -1,6 +1,6 @@
 # Code audit — architecture, quality, security, performance, testing
 
-Status: In progress
+Status: Resolved (2026-09-29)
 
 Standard-depth audit of the whole tree at commit `6aad69b` (v0.21.0 + docs reorg). Line numbers
 are as of that commit; symbols are the durable reference. Open items are tracked as rows in
@@ -255,6 +255,22 @@ Coverage was not measured (no `cargo-llvm-cov`/tarpaulin installed).
   all removed. `utils::path::{read_file, write_file, check_file_readable, normalize_path}` have
   no callers. ADR 0002 deviates from `wens-dev-principles cli 2` (MUST: XDG / per-platform dirs)
   but does not cite it, as `wens-dev-principles docs 15` requires. Effort S.
+
+## Resolution (2026-09-29)
+
+All findings were addressed the same day; commits are listed in [../plan/BACKLOG.md](../plan/BACKLOG.md)
+under Done. Notes on deviations from the recommended fixes:
+
+- **T4** (test hermeticity) is not scheduled: env vars used with `set_var` have unique names and
+  no other reader (recorded under Blocked in the backlog).
+- **M6**: kill/yank, word motion and caret shortcuts shipped; per-field undo did not.
+- **M2**: no permanent-delete fallback was added (irreversible); the prompt now warns about unsaved
+  edits and a trash failure says the file was left in place.
+- **H5**: moves *inside* a glob/dir group are refused (config order cannot express them) instead of
+  silently doing nothing.
+- **Found while verifying**: Help/Detail popups panicked on terminals under 3 rows / 0 columns
+  (`clamp(min > max)`); fixed and regression-tested. `cargo audit` is clean after the ratatui 0.30
+  upgrade.
 
 ## Rejected claims
 

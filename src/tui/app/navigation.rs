@@ -21,7 +21,7 @@ impl TuiApp {
             }
             ListItem::DirHeader(ti) => {
                 // Toggle group expand/collapse
-                if let Some(crate::model::profile::TreeNode::Dir(ref mut g)) =
+                if let Some(crate::model::profile::TreeNode::Dir(g)) =
                     self.profile.tree.get_mut(*ti)
                 {
                     // Toggle only the group; contained files keep their own
@@ -109,7 +109,7 @@ impl TuiApp {
 
     pub(super) fn action_navigate_up(&mut self) {
         if self.mode == AppMode::MovingFile {
-            if let Some(ref mut fms) = self.file_move_state {
+            if let Some(fms) = &mut self.file_move_state {
                 if fms.insertion_cursor > 0 {
                     fms.insertion_cursor -= 1;
                 }
@@ -126,7 +126,7 @@ impl TuiApp {
 
     pub(super) fn action_navigate_down(&mut self) {
         if self.mode == AppMode::MovingFile {
-            if let Some(ref mut fms) = self.file_move_state {
+            if let Some(fms) = &mut self.file_move_state {
                 let max_idx = self.visible_items.len().saturating_sub(1);
                 if fms.insertion_cursor < max_idx {
                     fms.insertion_cursor += 1;
@@ -145,11 +145,11 @@ impl TuiApp {
     pub(super) fn action_page_up(&mut self) {
         let half = (self.list_visible_height / 2).max(1);
         if self.mode == AppMode::MovingFile {
-            if let Some(ref mut fms) = self.file_move_state {
+            if let Some(fms) = &mut self.file_move_state {
                 fms.insertion_cursor = fms.insertion_cursor.saturating_sub(half);
             }
         } else if self.mode == AppMode::Moving {
-            if let Some(ref mut ms) = self.move_state {
+            if let Some(ms) = &mut self.move_state {
                 let target = ms.insertion_cursor.saturating_sub(half);
                 ms.insertion_cursor = target;
             }
@@ -166,11 +166,11 @@ impl TuiApp {
         let half = (self.list_visible_height / 2).max(1);
         let max_idx = self.visible_items.len().saturating_sub(1);
         if self.mode == AppMode::MovingFile {
-            if let Some(ref mut fms) = self.file_move_state {
+            if let Some(fms) = &mut self.file_move_state {
                 fms.insertion_cursor = (fms.insertion_cursor + half).min(max_idx);
             }
         } else if self.mode == AppMode::Moving {
-            if let Some(ref mut ms) = self.move_state {
+            if let Some(ms) = &mut self.move_state {
                 ms.insertion_cursor = (ms.insertion_cursor + half).min(max_idx);
             }
             self.snap_move_cursor_to_non_blocked();
@@ -184,7 +184,7 @@ impl TuiApp {
 
     pub(super) fn action_home(&mut self) {
         if self.mode == AppMode::Moving {
-            if let Some(ref mut ms) = self.move_state {
+            if let Some(ms) = &mut self.move_state {
                 ms.insertion_cursor = 0;
             }
             self.snap_move_cursor_to_non_blocked();
@@ -199,7 +199,7 @@ impl TuiApp {
     pub(super) fn action_end(&mut self) {
         if self.mode == AppMode::Moving {
             let max_idx = self.visible_items.len().saturating_sub(1);
-            if let Some(ref mut ms) = self.move_state {
+            if let Some(ms) = &mut self.move_state {
                 ms.insertion_cursor = max_idx;
             }
             self.snap_move_cursor_to_non_blocked();
@@ -222,8 +222,7 @@ impl TuiApp {
                 ListItem::DirHeader(ti) => {
                     // Toggle group expand/collapse
                     if self.profile.tree.get(*ti).is_some() {
-                        if let crate::model::profile::TreeNode::Dir(ref mut g) =
-                            &mut self.profile.tree[*ti]
+                        if let crate::model::profile::TreeNode::Dir(g) = &mut self.profile.tree[*ti]
                         {
                             // Toggle only the group. Contained files keep
                             // their own expanded state, so opening a group
@@ -301,7 +300,7 @@ impl TuiApp {
             .iter()
             .any(|&fi| !self.profile.files[fi].writable)
         {
-            self.message = Some("File is read-only".into());
+            self.message = Some(self.messages.get("msg_file_read_only").into());
             return Ok(());
         }
 
@@ -352,7 +351,7 @@ impl TuiApp {
                     new_entry_pairs.push((fi, ei + j));
                 }
             }
-            self.message = Some("Uncommented".into());
+            self.message = Some(self.messages.get("msg_uncommented").into());
 
             self.rebuild_list();
             self.selection.clear();
@@ -383,7 +382,7 @@ impl TuiApp {
             for &fi in &affected_files {
                 self.profile.files[fi].recalculate_line_numbers();
             }
-            self.message = Some("Commented".into());
+            self.message = Some(self.messages.get("msg_commented").into());
 
             self.rebuild_list();
             self.selection.clear();
@@ -407,7 +406,7 @@ impl TuiApp {
                 let fi = *fi;
                 let ei = *ei;
                 if !self.profile.files[fi].writable {
-                    self.message = Some("File is read-only".into());
+                    self.message = Some(self.messages.get("msg_file_read_only").into());
                     return Ok(EditorRequest::None);
                 }
                 self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
@@ -422,7 +421,7 @@ impl TuiApp {
                 ListItem::Entry(fi, ei) => {
                     let (fi, ei) = (*fi, *ei);
                     if !self.profile.files[fi].writable {
-                        self.message = Some("File is read-only".into());
+                        self.message = Some(self.messages.get("msg_file_read_only").into());
                         return Ok(EditorRequest::None);
                     }
                     // Single-line entries edit in-place; multi-line (merged
@@ -446,7 +445,7 @@ impl TuiApp {
                 ListItem::DirHeader(_) => return Ok(EditorRequest::None),
                 ListItem::Entry(fi, ei) => {
                     if !self.profile.files[*fi].writable {
-                        self.message = Some("File is read-only".into());
+                        self.message = Some(self.messages.get("msg_file_read_only").into());
                         return Ok(EditorRequest::None);
                     }
                     return Ok(EditorRequest::EditEntry(*fi, *ei));

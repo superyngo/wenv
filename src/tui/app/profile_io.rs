@@ -62,9 +62,9 @@ impl TuiApp {
 
         self.rebuild_list();
         self.message = Some(match new_indices.len() {
-            0 => "Pattern added (0 files matched)".into(),
-            1 => "File added to config".into(),
-            n => format!("Pattern added ({} files)", n),
+            0 => self.messages.get("msg_pattern_added_zero").into(),
+            1 => self.messages.get("msg_file_added_to_config").into(),
+            n => self.messages.fmt("msg_pattern_added_files", &[&n]),
         });
         Ok(())
     }
@@ -128,7 +128,7 @@ impl TuiApp {
         if old_path_set != new_path_set {
             self.undo_stack.clear();
             self.redo_stack.clear();
-            self.message = Some("Undo cleared (file set changed)".into());
+            self.message = Some(self.messages.get("msg_undo_cleared_file_set").into());
         }
 
         self.profile = new_profile;
@@ -147,9 +147,9 @@ impl TuiApp {
             self.selection.clear();
             self.rebuild_list();
             let remaining = self.undo_stack.len();
-            self.message = Some(format!("Undone ({remaining} left)"));
+            self.message = Some(self.messages.fmt("msg_undone_left", &[&remaining]));
         } else {
-            self.message = Some(self.messages.tui_msg_nothing_to_undo.into());
+            self.message = Some(self.messages.get("tui_msg_nothing_to_undo").into());
         }
     }
 
@@ -164,22 +164,22 @@ impl TuiApp {
             self.selection.clear();
             self.rebuild_list();
             let remaining = self.redo_stack.len();
-            self.message = Some(format!("Redone ({remaining} left)"));
+            self.message = Some(self.messages.fmt("msg_redone_left", &[&remaining]));
         } else {
-            self.message = Some("Nothing to redo".into());
+            self.message = Some(self.messages.get("msg_nothing_to_redo").into());
         }
     }
 
     pub(super) fn action_save(&mut self) {
         match crate::tui::operations::save_dirty_files(&mut self.profile) {
             Ok(saved) if !saved.is_empty() => {
-                self.message = Some(format!("Saved: {}", saved.join(", ")));
+                self.message = Some(self.messages.fmt("msg_saved_files", &[&saved.join(", ")]));
             }
             Ok(_) => {
-                self.message = Some("No unsaved changes".into());
+                self.message = Some(self.messages.get("msg_no_unsaved_changes").into());
             }
             Err(e) => {
-                self.message = Some(format!("Save error: {}", e));
+                self.message = Some(self.messages.fmt("msg_save_error", &[&e]));
             }
         }
     }
@@ -193,10 +193,10 @@ impl TuiApp {
                 self.pending_remove_group_pattern = Some(pattern.clone());
                 self.previous_mode = Some(self.mode.clone());
                 self.mode = crate::tui::state::AppMode::ConfirmRemoveGroup;
-                self.message = Some(format!(
-                    "Remove group '{}' from config? ({} files will be hidden) (y/n)",
-                    pattern, file_count
-                ));
+                self.message = Some(
+                    self.messages
+                        .fmt("msg_remove_group_prompt", &[&pattern, &file_count]),
+                );
             }
         } else if let Some(ListItem::FileHeader(fi)) = self.visible_items.get(self.cursor) {
             let fi = *fi;
@@ -214,11 +214,14 @@ impl TuiApp {
                 self.previous_mode = Some(self.mode.clone());
                 self.mode = crate::tui::state::AppMode::ConfirmDeleteFile;
                 let unsaved = if self.profile.files[fi].dirty {
-                    " Unsaved edits will be lost."
+                    self.messages.get("msg_unsaved_edits_lost")
                 } else {
                     ""
                 };
-                self.message = Some(format!("Move file '{}' to trash?{} (y/n)", name, unsaved));
+                self.message = Some(
+                    self.messages
+                        .fmt("msg_move_file_trash_prompt", &[&name, &unsaved]),
+                );
                 return Ok(());
             }
             let resolved_path = &self.profile.files[fi].path;
@@ -241,26 +244,25 @@ impl TuiApp {
             self.mode = crate::tui::state::AppMode::ConfirmRemoveFile;
 
             if affected_files.len() <= 1 {
-                self.message = Some(format!(
-                    "Remove '{}' from config? (y/n)\n(file won't be deleted)",
-                    raw_pattern
-                ));
+                self.message = Some(
+                    self.messages
+                        .fmt("msg_remove_file_single_prompt", &[&raw_pattern]),
+                );
             } else {
                 let other_files: Vec<String> = affected_files
                     .iter()
                     .filter(|p| p.as_path() != resolved_path)
                     .map(|p| format!("  {}", p.display()))
                     .collect();
-                self.message = Some(format!(
-                    "Remove '{}' from config? (y/n)\nAlso removes:\n{}\n(files won't be deleted)",
-                    raw_pattern,
-                    other_files.join("\n")
+                self.message = Some(self.messages.fmt(
+                    "msg_remove_file_multi_prompt",
+                    &[&raw_pattern, &other_files.join("\n")],
                 ));
             }
         } else {
             // Original entry deletion logic
             if !self.is_current_file_writable() {
-                self.message = Some("File is read-only".into());
+                self.message = Some(self.messages.get("msg_file_read_only").into());
                 return Ok(());
             }
             let targets = self.get_operation_targets();
@@ -269,7 +271,7 @@ impl TuiApp {
                 self.previous_mode = Some(self.mode.clone());
                 self.mode = crate::tui::state::AppMode::ConfirmDelete;
                 let count = targets.len();
-                self.message = Some(format!("Delete {} entries? (y/n)", count));
+                self.message = Some(self.messages.fmt("msg_delete_entries_prompt", &[&count]));
             }
         }
         Ok(())

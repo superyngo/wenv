@@ -201,7 +201,9 @@ impl TuiApp {
                 let pattern = g.source_pattern.clone();
                 let dir = self.group_base_dir(g);
                 self.text_input = Some(crate::tui::state::TextInputState {
-                    prompt: format!("New file name in {}", dir.display()),
+                    prompt: self
+                        .messages
+                        .fmt("prompt_new_file_in_dir", &[&dir.display()]),
                     value: String::new(),
                     cursor_pos: 0,
                     purpose: crate::tui::state::InputPurpose::NewFileInDir { dir, pattern },
@@ -212,7 +214,7 @@ impl TuiApp {
             return Ok(EditorRequest::None);
         }
         if !self.is_current_file_writable() {
-            self.message = Some("File is read-only".into());
+            self.message = Some(self.messages.get("msg_file_read_only").into());
             return Ok(EditorRequest::None);
         }
         if self.snippets.is_empty() {
@@ -267,7 +269,7 @@ impl TuiApp {
 
     pub(super) fn action_add_file(&mut self) {
         self.text_input = Some(crate::tui::state::TextInputState {
-            prompt: "Add file, group, glob, or $VAR to config".into(),
+            prompt: self.messages.get("prompt_add_file_path").into(),
             value: String::new(),
             cursor_pos: 0,
             purpose: crate::tui::state::InputPurpose::AddFilePath,

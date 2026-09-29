@@ -309,10 +309,10 @@ impl TuiApp {
                         .iter()
                         .map(|f| f.display_name())
                         .collect();
-                    self.message = Some(format!(
-                        "Unsaved changes in: {}. Quit? (y/n)",
-                        dirty.join(", ")
-                    ));
+                    self.message = Some(
+                        self.messages
+                            .fmt("msg_unsaved_changes_quit", &[&dirty.join(", ")]),
+                    );
                 } else {
                     self.should_quit = true;
                 }
@@ -1144,5 +1144,26 @@ mod placement_tests {
         assert!(row(3).contains("alias a='1'"), "row 3 was: {}", row(3));
         // Last list row (just above the status bar) shows the cursor item.
         assert!(row(5).contains("alias b='2'"), "row 5 was: {}", row(5));
+    }
+
+    /// Regression: popups must not panic on tiny terminals (`clamp(min, max)` with
+    /// `min > max` aborted the whole TUI on 1-row terminals).
+    #[test]
+    fn popups_survive_tiny_terminals() {
+        use ratatui::backend::TestBackend;
+        for (w, h) in [(0u16, 0u16), (1, 1), (3, 2), (10, 3), (20, 5)] {
+            for mode in [
+                AppMode::ShowingHelp,
+                AppMode::ShowingDetail,
+                AppMode::ConfirmQuit,
+            ] {
+                let (_td, mut app) = app_group();
+                app.mode = mode;
+                let mut terminal = ratatui::Terminal::new(TestBackend::new(w, h)).unwrap();
+                terminal
+                    .draw(|f| crate::tui::ui::draw(f, &mut app))
+                    .unwrap();
+            }
+        }
     }
 }

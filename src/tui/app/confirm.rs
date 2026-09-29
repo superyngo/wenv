@@ -51,7 +51,7 @@ impl TuiApp {
                 } else {
                     self.rebuild_list();
                 }
-                self.message = Some("Deleted".into());
+                self.message = Some(self.messages.get("msg_deleted").into());
             }
             AppMode::ConfirmQuit => {
                 self.should_quit = true;
@@ -71,12 +71,12 @@ impl TuiApp {
 
                     if let Some(files_config) = self.config.files.get_mut(&shell_key) {
                         // Remove the matching pattern from config
-                        if let Some(ref pat) = raw_pattern {
+                        if let Some(pat) = &raw_pattern {
                             files_config.paths.retain(|p| p != pat);
                         }
 
                         if let Err(e) = self.config.save() {
-                            self.message = Some(format!("Config save error: {}", e));
+                            self.message = Some(self.messages.fmt("msg_config_save_error", &[&e]));
                         } else {
                             // Rebuild the profile from the updated config. This keeps
                             // `profile.files` and `profile.tree` in sync (a manual
@@ -88,10 +88,13 @@ impl TuiApp {
                             let removed_count = before.saturating_sub(self.profile.files.len());
 
                             if removed_count > 1 {
-                                self.message =
-                                    Some(format!("Removed {} files from config", removed_count));
+                                self.message = Some(
+                                    self.messages
+                                        .fmt("msg_removed_files_from_config", &[&removed_count]),
+                                );
                             } else {
-                                self.message = Some("Removed from config".into());
+                                self.message =
+                                    Some(self.messages.get("msg_removed_from_config").into());
                             }
                         }
                     }
@@ -106,11 +109,14 @@ impl TuiApp {
                         files_config.paths.retain(|p| p != &pattern);
                     }
                     if let Err(e) = self.config.save() {
-                        self.message = Some(format!("Config save error: {}", e));
+                        self.message = Some(self.messages.fmt("msg_config_save_error", &[&e]));
                     } else {
                         self.selection.clear();
                         self.reload_profile()?;
-                        self.message = Some(format!("Group '{}' removed from config", pattern));
+                        self.message = Some(
+                            self.messages
+                                .fmt("msg_group_removed_from_config", &[&pattern]),
+                        );
                     }
                 }
                 self.mode = AppMode::Normal;
@@ -120,7 +126,7 @@ impl TuiApp {
                 if let Some((raw_path, path)) = self.pending_create_path.take() {
                     if let Some(parent) = path.parent() {
                         if let Err(e) = std::fs::create_dir_all(parent) {
-                            self.message = Some(format!("Failed to create directory: {}", e));
+                            self.message = Some(self.messages.fmt("msg_failed_create_dir", &[&e]));
                             self.mode = AppMode::Normal;
                             return Ok(EditorRequest::None);
                         }
@@ -130,7 +136,7 @@ impl TuiApp {
                             self.add_pattern_to_config_and_profile(raw_path)?;
                         }
                         Err(e) => {
-                            self.message = Some(format!("Failed to create: {}", e));
+                            self.message = Some(self.messages.fmt("msg_failed_create", &[&e]));
                         }
                     }
                 }
@@ -143,11 +149,11 @@ impl TuiApp {
                         Ok(()) => {
                             self.selection.clear();
                             self.reload_profile()?;
-                            self.message = Some(format!("Moved to trash: {}", path.display()));
+                            self.message =
+                                Some(self.messages.fmt("msg_moved_to_trash", &[&path.display()]));
                         }
                         Err(e) => {
-                            self.message =
-                                Some(format!("Trash unavailable, file left in place: {}", e));
+                            self.message = Some(self.messages.fmt("msg_trash_unavailable", &[&e]));
                         }
                     }
                 }
@@ -174,7 +180,8 @@ impl TuiApp {
                                 .get(&self.shell_key)
                                 .is_some_and(|fc| fc.paths.iter().any(|p| p == &raw_path))
                             {
-                                self.message = Some("Pattern already in config".into());
+                                self.message =
+                                    Some(self.messages.get("msg_pattern_already_in_config").into());
                                 self.mode = AppMode::Normal;
                                 return Ok(EditorRequest::None);
                             }
@@ -191,7 +198,8 @@ impl TuiApp {
                             if !is_glob && !path.exists() {
                                 self.pending_create_path = Some((raw_path, path));
                                 self.mode = AppMode::ConfirmCreateFile;
-                                self.message = Some("File doesn't exist. Create? (y/n)".into());
+                                self.message =
+                                    Some(self.messages.get("msg_file_not_exist_create").into());
                             } else {
                                 self.add_pattern_to_config_and_profile(raw_path)?;
                                 self.mode = AppMode::Normal;
@@ -205,18 +213,20 @@ impl TuiApp {
                             }
                             let path = dir.join(name);
                             if path.exists() {
-                                self.message = Some("File already exists".into());
+                                self.message =
+                                    Some(self.messages.get("msg_file_already_exists").into());
                                 return Ok(EditorRequest::None);
                             }
                             if let Some(parent) = path.parent() {
                                 if let Err(e) = std::fs::create_dir_all(parent) {
                                     self.message =
-                                        Some(format!("Failed to create directory: {}", e));
+                                        Some(self.messages.fmt("msg_failed_create_dir", &[&e]));
                                     return Ok(EditorRequest::None);
                                 }
                             }
                             if let Err(e) = std::fs::File::create(&path) {
-                                self.message = Some(format!("Failed to create file: {}", e));
+                                self.message =
+                                    Some(self.messages.fmt("msg_failed_create_file", &[&e]));
                                 return Ok(EditorRequest::None);
                             }
                             // Warn if the new name won't match the group's glob
@@ -237,14 +247,13 @@ impl TuiApp {
                             if let Some(fi) = new_fi {
                                 self.profile.files[fi].expanded = true;
                                 if warn_unmatched {
-                                    self.message = Some(
-                                        "Created (won't rejoin group on reload — name doesn't match pattern)"
-                                            .into(),
-                                    );
+                                    self.message =
+                                        Some(self.messages.get("msg_created_unmatched").into());
                                 }
                                 return Ok(EditorRequest::EditFile(fi));
                             }
-                            self.message = Some(format!("Created: {}", path.display()));
+                            self.message =
+                                Some(self.messages.fmt("msg_created", &[&path.display()]));
                         }
                     }
                 }
@@ -301,16 +310,16 @@ impl TuiApp {
                 }
                 if from_sel {
                     // First Esc: keep selection, user can Esc again to clear
-                    self.message = Some("Cancelled (Esc again to clear selection)".into());
+                    self.message = Some(self.messages.get("msg_cancelled_esc_selection").into());
                 } else {
                     self.selection.clear();
-                    self.message = Some("Cancelled".into());
+                    self.message = Some(self.messages.get("msg_cancelled").into());
                 }
             }
             AppMode::ConfirmDelete => {
                 self.pending_undo = None;
                 self.mode = self.previous_mode.take().unwrap_or(AppMode::Normal);
-                self.message = Some("Cancelled".into());
+                self.message = Some(self.messages.get("msg_cancelled").into());
             }
             AppMode::ConfirmQuit => {
                 self.mode = AppMode::Normal;
@@ -323,7 +332,7 @@ impl TuiApp {
                 // In Normal mode, Esc clears multi-selection if any
                 if !self.selection.is_empty() {
                     self.selection.clear();
-                    self.message = Some("Selection cleared".into());
+                    self.message = Some(self.messages.get("msg_selection_cleared").into());
                 }
             }
             AppMode::TextInput => {
@@ -340,7 +349,7 @@ impl TuiApp {
                 self.pending_create_path = None;
                 self.pending_delete_file_fi = None;
                 self.mode = AppMode::Normal;
-                self.message = Some("Cancelled".into());
+                self.message = Some(self.messages.get("msg_cancelled").into());
             }
             AppMode::SelectingSnippet => {
                 let return_mode = self.previous_mode.take().unwrap_or(AppMode::Normal);

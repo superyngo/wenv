@@ -128,7 +128,14 @@ impl TuiApp {
                         .min(self.visible_items.len().saturating_sub(1))
                 });
             self.clamp_scroll_offset();
-            self.message = Some(if ms.cut { "Moved" } else { "Copied" }.into());
+            self.message = Some(
+                if ms.cut {
+                    self.messages.get("msg_moved")
+                } else {
+                    self.messages.get("msg_copied")
+                }
+                .into(),
+            );
         }
     }
 
@@ -138,7 +145,7 @@ impl TuiApp {
     pub(super) fn begin_placement(&mut self, cut: bool) {
         // Cut removes from the source file, so it must be writable. Copy doesn't.
         if cut && !self.is_current_file_writable() {
-            self.message = Some("File is read-only".into());
+            self.message = Some(self.messages.get("msg_file_read_only").into());
             return;
         }
         let targets = self.get_operation_targets();
@@ -150,7 +157,7 @@ impl TuiApp {
             })
             .collect();
         if source_items.is_empty() {
-            self.message = Some("Select an entry to copy/move".into());
+            self.message = Some(self.messages.get("msg_select_entry_to_copy_move").into());
             return;
         }
         let has_selection = !self.selection.is_empty();
@@ -174,11 +181,14 @@ impl TuiApp {
         });
         self.previous_mode = Some(self.mode.clone());
         self.mode = AppMode::Moving;
-        self.message = Some(if cut {
-            "Move: ↑↓ position · v/Enter drop · Esc cancel".into()
-        } else {
-            "Copy: ↑↓ position · v/Enter drop · Esc cancel".into()
-        });
+        self.message = Some(
+            if cut {
+                self.messages.get("msg_move_hint")
+            } else {
+                self.messages.get("msg_copy_hint")
+            }
+            .into(),
+        );
     }
 
     /// Switch the active placement between copy (`cut=false`) and cut (`cut=true`)
@@ -222,7 +232,7 @@ impl TuiApp {
                 } else {
                     self.rebuild_list();
                 }
-                self.message = Some("No change".into());
+                self.message = Some(self.messages.get("msg_no_change").into());
                 return;
             }
 
@@ -243,10 +253,10 @@ impl TuiApp {
             );
             let abort_msg = match (&src_pat, &tgt_pat) {
                 (Some((sp, _)), Some((tp, _))) if sp == tp => {
-                    Some("Files inside a group follow the group's order")
+                    Some(self.messages.get("msg_files_in_group_order"))
                 }
                 (Some(_), Some(_)) => None,
-                _ => Some("File is not in the config; cannot reorder"),
+                _ => Some(self.messages.get("msg_file_not_in_config_reorder")),
             };
             if let Some(msg) = abort_msg {
                 self.restore_expanded(&fms.saved_expanded);
@@ -268,7 +278,7 @@ impl TuiApp {
                 }
             }
             if let Err(e) = self.config.save() {
-                self.message = Some(format!("Failed to save config: {}", e));
+                self.message = Some(self.messages.fmt("msg_failed_save_config", &[&e]));
             }
             // Expanded states were saved by index; carry them across the reload by identity
             let file_exp: Vec<(std::path::PathBuf, bool)> = self
@@ -298,7 +308,7 @@ impl TuiApp {
                 .collect();
             self.exit_file_move_mode();
             if let Err(e) = self.reload_profile() {
-                self.message = Some(format!("Reload failed: {}", e));
+                self.message = Some(self.messages.fmt("msg_reload_failed", &[&e]));
                 return;
             }
             for f in &mut self.profile.files {
@@ -328,7 +338,7 @@ impl TuiApp {
                 .unwrap_or(0);
             self.cursor = cursor_pos;
             self.clamp_scroll_offset();
-            self.message = Some("File moved".into());
+            self.message = Some(self.messages.get("msg_file_moved").into());
         }
     }
 
@@ -372,7 +382,7 @@ impl TuiApp {
                 .unwrap_or(0);
             self.cursor = cursor_pos;
             self.clamp_scroll_offset();
-            self.message = Some("File move cancelled".into());
+            self.message = Some(self.messages.get("msg_file_move_cancelled").into());
         }
     }
 
@@ -435,7 +445,7 @@ impl TuiApp {
                 }
                 pos -= 1;
             }
-            self.message = Some("No writable file to move to".into());
+            self.message = Some(self.messages.get("msg_no_writable_file_move").into());
         }
     }
 
@@ -458,7 +468,7 @@ impl TuiApp {
                 }
                 pos += 1;
             }
-            self.message = Some("No writable file to move to".into());
+            self.message = Some(self.messages.get("msg_no_writable_file_move").into());
         }
     }
 
@@ -489,7 +499,7 @@ impl TuiApp {
                 }
                 bwd -= 1;
             }
-            self.message = Some("No writable file to move to".into());
+            self.message = Some(self.messages.get("msg_no_writable_file_move").into());
         }
     }
 
@@ -500,7 +510,7 @@ impl TuiApp {
             self.visible_items.get(self.cursor),
             Some(ListItem::DirHeader(_))
         ) {
-            self.message = Some("Move is not supported on groups".into());
+            self.message = Some(self.messages.get("msg_move_not_supported_groups").into());
             return;
         }
         // Check if cursor is on a FileHeader → enter file move mode
@@ -510,13 +520,11 @@ impl TuiApp {
                 matches!(n, crate::model::profile::TreeNode::Dir(g) if g.file_indices.contains(&fi))
             });
             if is_inside_group {
-                self.message = Some(
-                    "Files inside a group are sorted alphabetically; move is not supported".into(),
-                );
+                self.message = Some(self.messages.get("msg_files_in_group_alphabetical").into());
                 return;
             }
             if self.profile.files.len() < 2 {
-                self.message = Some("Only one file, nothing to move".into());
+                self.message = Some(self.messages.get("msg_only_one_file_move").into());
                 return;
             }
             let saved_expanded_files: Vec<bool> =
@@ -551,11 +559,11 @@ impl TuiApp {
             });
             self.previous_mode = Some(self.mode.clone());
             self.mode = AppMode::MovingFile;
-            self.message = Some("File move: ↑↓ to position, Enter to drop, Esc to cancel".into());
+            self.message = Some(self.messages.get("msg_file_move_hint").into());
             return;
         }
 
         // On an entry: `m` no longer moves entries — point at c/x.
-        self.message = Some("Use c to copy or x to move entries".into());
+        self.message = Some(self.messages.get("msg_use_c_or_x_hint").into());
     }
 }
