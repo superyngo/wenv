@@ -6,6 +6,8 @@ Design documents, frozen once approved. Paired plans share the filename in `../p
 
 None.
 
+## Landed
+
 | File | Summary | Status |
 |---|---|---|
 | [2026-01-20-entry-model-parser-formatter.md](2026-01-20-entry-model-parser-formatter.md) | Original Entry model and parser/formatter logic (zh-TW) | Superseded by ../reference/ENTRY_MODEL.md |

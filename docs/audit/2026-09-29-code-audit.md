@@ -1,5 +1,4 @@
 # Code audit — architecture, quality, security, performance, testing
-
 Status: Resolved (2026-09-29)
 
 Standard-depth audit of the whole tree at commit `6aad69b` (v0.21.0 + docs reorg). Line numbers

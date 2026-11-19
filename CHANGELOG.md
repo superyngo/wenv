@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-11-19
+
+- docs: align with repo-docs rules — `Profile: dev` in `CONTEXT.md`; `Status:` moved to line 2 in `plan/BACKLOG.md` and `audit/2026-09-29-code-audit.md`; `plan/README.md` lists `BACKLOG.md` under `## In progress` as `In progress` (was `Living`) with the template backlog line; folder indexes get a `## Landed` heading above the table.
+
 ## [v0.22.0] - 2026-09-29
 
 - test(ci): `edit_file_refuses_when_dirty` no longer builds a `CrosstermBackend<Stdout>` terminal (crossterm's `size()` fails on CI's non-TTY stdout); `run_edit_file`/`suspend_tui`/`resume_tui` are now generic over `ratatui::backend::Backend` and the test uses `TestBackend`.

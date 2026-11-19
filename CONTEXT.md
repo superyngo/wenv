@@ -2,6 +2,8 @@
 
 Documentation entry point for wenv. Start with the [glossary](docs/reference/glossary.md).
 
+Profile: dev
+
 | Folder | Holds | Canonical? | Lifecycle |
 |---|---|---|---|
 | [docs/reference/](docs/reference/README.md) | Current behavior: glossary, architecture, entry model, keymap, parser | Yes | Living |

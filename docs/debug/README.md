@@ -6,5 +6,7 @@ Investigations of defects, frozen once resolved. Files: `YYYY-MM-DD-kebab-title.
 
 None.
 
+## Landed
+
 | File | Summary | Status |
 |---|---|---|

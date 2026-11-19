@@ -1,5 +1,4 @@
 # Backlog
-
 Status: In progress
 
 The single living tracker for open follow-ups. Rows move to **Done** with the closing commit; never deleted.
