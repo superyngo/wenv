@@ -5,8 +5,7 @@ Instructions for AI coding agents working in this repository. Documentation star
 
 ## Project
 
-**wenv** — A cross-platform Rust CLI/TUI for managing shell config files (.bashrc, .zshrc, PowerShell profiles).
-Rust 2021 edition. Clap for CLI, ratatui/crossterm for TUI, anyhow for errors.
+**wenv** — Rust CLI/TUI for shell config files. Stack and module map: [docs/reference/ARCHITECTURE.md](docs/reference/ARCHITECTURE.md).
 
 ## Build / Lint / Test Commands
 
@@ -121,30 +120,10 @@ cargo test --lib test_pending_block      # Lib tests only
 cargo test --test profile_tests          # Specific integration file
 ```
 
-## Architecture
+## Parsers and `Entry.value`
 
-```
-src/
-  main.rs, lib.rs         # Entry points (lib re-exports public API)
-  cli/                    # Clap argument parsing and CLI actions
-  config/                 # TOML config load/save, path resolution
-  formatter/              # Formatter trait + Bash/PowerShell impls
-  i18n/                   # Internationalization (embedded EN, external files)
-  model/                  # Data types: Entry, ShellType, ShellProfile, Config
-  parser/                 # Parser trait + Bash/PowerShell impls, pending blocks
-  tui/                    # Full TUI: app state, rendering, keys, operations
-  utils/                  # Path expansion, shell detection, string helpers
-tests/                    # Integration tests (TUI logic, parser fixes, config)
-```
-
-## Key Semantics
-
-Read [docs/reference/ENTRY_MODEL.md](docs/reference/ENTRY_MODEL.md) before touching parsers or
-`Entry.value`. The two rules that cause most bugs:
-
-- `value` stores **complete raw syntax** — never strip keywords or quotes.
-- `value` is separator format (N lines = N-1 `\n`): split with `value.split('\n')`, never
-  `.lines()`; append a `\n` terminator when writing to a file.
+Read [docs/reference/ENTRY_MODEL.md](docs/reference/ENTRY_MODEL.md) (raw-syntax and newline rules)
+before touching parsers or `Entry.value`.
 
 ## Workflow
 

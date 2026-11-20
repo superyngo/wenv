@@ -66,32 +66,7 @@ wenv config
 
 ### TUI Key Bindings
 
-| Key | Action |
-|-----|--------|
-| `j`/`k`, `↑`/`↓` | Navigate entries |
-| `Enter`/`Space` | Toggle expand/collapse file |
-| `s` | Toggle selection |
-| `Shift+↑`/`↓` | Extend selection range |
-| `e` | Edit entry — single-line entries edit inline; multi-line entries open $EDITOR |
-| `E` | Edit entry in $EDITOR (force external) |
-| `a` | Insert entry — snippet template menu, then $EDITOR. On a **directory-group header**: prompt for a new file name → create the file in the group's directory → open it in $EDITOR |
-| `n` | New file path — add to config (plain file, `~`, `$VAR`/`%VAR%`, glob (`*`/`?`), or directory) |
-| `d` / `Delete` | Delete entries / Remove file from config / Remove group. On a file **inside a directory group**: move the real file to the system trash (confirmed) |
-| `c` | Copy — place sources (blue), navigate green target, `v`/`Enter` drops a clone |
-| `x` | Cut — place sources (blue), `v`/`Enter` drops and removes them (move) |
-| `m` | Move file (reorder) — on a file header; entries move via `x` |
-| `r` | Toggle remark (comment/uncomment) |
-| `0` | Collapse all files |
-| `9` | Expand all files |
-| `z` | Undo last operation |
-| `y` | Redo last operation |
-| `/` | Open filter input (fuzzy match; caret editing with `←/→/Home/End/Backspace/Del`) |
-| `Esc` | Clear selection/exit modes |
-| `w` | Save all changes |
-| `?` | Show help / About (scrollable: `↑↓`/`PgUp`/`PgDn`/`Home`/`End`) |
-| `q` | Quit (confirms if unsaved) |
-
-Text inputs (filter, path prompt, inline edit) also accept `Ctrl+A`/`Ctrl+E` (line start/end), `Ctrl+U`/`Ctrl+K` (kill to start/end), `Ctrl+W` (delete word), `Ctrl+Y` (yank) and `Alt+B`/`Alt+F` or `Ctrl+←/→` (word motion), `Ctrl+Z` (undo within the field).
+Common keys: `j`/`k` navigate Entries, `Enter` expands a File or Group, `e` edits an Entry, `a` inserts an Entry, `n` adds a Pattern, `d` deletes, `c`/`x` copy/cut (Placement), `z`/`y` undo/redo, `/` filter, `w` save, `?` help, `q` quit. Full list, including text-input shortcuts: [docs/reference/KEYMAP.md](docs/reference/KEYMAP.md). Terms: [glossary](docs/reference/glossary.md).
 
 Set the `NO_COLOR` environment variable, or pass `--no-color`, to run the TUI in monochrome (focus and selection degrade to reverse-video). `--lang <code>` (e.g. `zh-TW`) overrides `[ui] language` for one run.
 

@@ -13,6 +13,9 @@ Module map and runtime behavior. Terms: [glossary.md](glossary.md). Entry data:
 
 ## Modules
 
+Stack: Rust 2021; clap (CLI), ratatui/crossterm (TUI), anyhow (errors). Entry points `src/main.rs`,
+`src/lib.rs` (re-exports the public API); integration tests in `tests/`.
+
 - `parser/` — `Parser` trait; `BashParser`, `PwshParser`; shared `PendingBlock` in `pending.rs`.
 - `formatter/` — `Formatter` trait; shell-specific file reconstruction.
 - `config/` — path resolution (`path_resolver.rs`), PowerShell `cache.rs`, `templates.rs`.

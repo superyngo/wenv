@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 2026-11-20
+
+- docs: repo-docs wave B — `plan/BACKLOG.md` reshaped to the living-backlog template (IDs, Pending verification / Awaiting external / Watching; B1 widened to stale `//!` docs; B4 audit-probe and B5 `rust_out` decisions added); `AGENTS.md` architecture tree and `value` rules replaced by links to `ARCHITECTURE.md`/`ENTRY_MODEL.md` (stack moved to `ARCHITECTURE.md`); README key-binding table replaced by a glossary-term summary linking `KEYMAP.md`; `.gitignore` narrows `docs/tmp/` to `docs/tmp/*-scratch/`.
+
 ### 2026-11-19
 
 - docs: align with repo-docs rules — `Profile: dev` in `CONTEXT.md`; `Status:` moved to line 2 in `plan/BACKLOG.md` and `audit/2026-09-29-code-audit.md`; `plan/README.md` lists `BACKLOG.md` under `## In progress` as `In progress` (was `Living`) with the template backlog line; folder indexes get a `## Landed` heading above the table.
