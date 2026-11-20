@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 2026-11-20
 
 - docs: repo-docs wave B — `plan/BACKLOG.md` reshaped to the living-backlog template (IDs, Pending verification / Awaiting external / Watching; B1 widened to stale `//!` docs; B4 audit-probe and B5 `rust_out` decisions added); `AGENTS.md` architecture tree and `value` rules replaced by links to `ARCHITECTURE.md`/`ENTRY_MODEL.md` (stack moved to `ARCHITECTURE.md`); README key-binding table replaced by a glossary-term summary linking `KEYMAP.md`; `.gitignore` narrows `docs/tmp/` to `docs/tmp/*-scratch/`.
+- docs: `docs/tmp/` sweep — trashed `claude-scratch/audit-probe/target` (692MB gitignored Cargo build output, no documentary value); archived 75 loose pipeline-log files (spec-review/plan-verify/implement/spec-compliance/code-review rounds for the 2026-05-22 multi-layer-tree-and-config-fallback-design spec) to `docs/tmp/archive/2026-11.tar.gz` and trashed the originals.
 
 ### 2026-11-19
 
